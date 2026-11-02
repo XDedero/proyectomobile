@@ -129,7 +129,7 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(self.login('lector', 'clave-lector', client).status_code, 200)
         self.assertEqual(client.get(reverse('plans')).json()['plans'][0]['id'], plan['id'])
         detail = client.get(plan['detail_url']).json()
-        self.assertEqual(detail['motors'][0]['excel']['name'], 'mantenimiento.xlsx')
+        self.assertEqual(detail['motors'][0]['sheet_name'], 'Motor')
         preview = client.get(motor['excel']['preview_url'])
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.json()['rows'][0][0], 'Potencia (kW)')
@@ -147,9 +147,10 @@ class AuthenticationPermissionTests(TestCase):
         response = self.client.post(plan['motors'][0]['assign_url'], {'file': xlsx_file('nuevo.xlsx')})
         self.assertEqual(response.status_code, 200)
         document = Motor.objects.get(pk=motor_id).workbook
-        self.assertNotEqual(document.pk, previous_document)
+        self.assertEqual(document.pk, previous_document)
         self.assertTrue(WorkbookDocument.objects.filter(pk=previous_document).exists())
         before = bytes(document.content)
+        revision = document.revision
         save_url = response.json()['motor']['excel']['save_url']
         denied = self.client.post(save_url, {
             'revision': document.revision,
@@ -159,7 +160,7 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(denied.status_code, 403)
         document.refresh_from_db()
         self.assertEqual(bytes(document.content), before)
-        self.assertEqual(document.revision, 1)
+        self.assertEqual(document.revision, revision)
 
     def test_staff_flag_alone_does_not_allow_excel_changes(self):
         self.reader.is_staff = True
@@ -329,14 +330,14 @@ class AuthenticationPermissionTests(TestCase):
         motor = self.assign_excel(plan)
         document = WorkbookDocument.objects.get(pk=motor['excel']['id'])
         registered = self.client.post(reverse('register_motor'), {
-            'workbook_id': document.pk, 'revision': document.revision, 'name': 'Motor reutilizable',
+            'workbook_id': document.pk, 'revision': document.revision, 'sheet': motor['sheet_name'], 'name': 'Motor reutilizable',
         }, content_type='application/json')
         self.assertEqual(registered.status_code, 201, registered.content[:400])
         record = registered.json()['motor']
         document.refresh_from_db()
         original = bytes(document.content)
         source_path = Path(Plan.objects.get(pk=plan['id']).source.path)
-        attachment_path = Path(Motor.objects.get(pk=motor['id']).excel.path)
+        self.assertFalse(Motor.objects.get(pk=motor['id']).excel)
         self.client.force_login(self.reader)
         self.assertIn(record['id'], [item['id'] for item in self.client.get(reverse('saved_motors')).json()['motors']])
         self.assertEqual(self.client.post(plan['delete_url']).status_code, 403)
@@ -344,7 +345,6 @@ class AuthenticationPermissionTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(self.client.post(plan['delete_url']).status_code, 200)
         self.assertFalse(source_path.exists())
-        self.assertFalse(attachment_path.exists())
         self.assertFalse(Motor.objects.filter(pk=motor['id']).exists())
         document.refresh_from_db()
         self.assertEqual(bytes(document.content), original)
@@ -354,22 +354,29 @@ class AuthenticationPermissionTests(TestCase):
         }, content_type='application/json')
         self.assertEqual(response.status_code, 200)
         self.assertNotEqual(response.json()['motor']['excel']['id'], document.pk)
-        download = self.client.get(response.json()['motor']['excel']['url'])
-        self.assertEqual(b''.join(download.streaming_content), original)
-        download.close()
+        preview = self.client.get(response.json()['motor']['excel']['preview_url']).json()
+        self.assertEqual(preview['rows'][1][0], 15)
+        self.assertTrue(WorkbookDocument.objects.filter(pk=record['workbook']['id']).exists())
 
     def test_legacy_cad_attachment_upgrades_without_changing_original_bytes(self):
         plan = self.import_plan(self.reader)
         motor = self.assign_excel(plan)
         saved = Motor.objects.get(pk=motor['id'])
-        original = bytes(saved.workbook.content)
+        legacy = xlsx_file()
+        original = legacy.read()
+        legacy.seek(0)
+        saved.excel.save(legacy.name, legacy, save=False)
+        saved.excel_name = legacy.name
+        saved.save(update_fields=['excel', 'excel_name'])
         saved.workbook.delete()
         response = self.client.get(reverse('motor_workbook_metadata', args=[saved.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()['can_edit'])
         saved.refresh_from_db()
         self.assertIsNotNone(saved.workbook_id)
-        self.assertEqual(bytes(saved.workbook.content), original)
+        with saved.excel.open('rb') as source:
+            self.assertEqual(source.read(), original)
+        self.assertEqual(self.client.get(reverse('motor_excel_preview', args=[saved.pk])).json()['rows'][1][0], 15)
 
     def test_preview_is_bounded_and_reports_invalid_sheets(self):
         from io import BytesIO
@@ -386,7 +393,7 @@ class AuthenticationPermissionTests(TestCase):
         plan = self.import_plan()
         response = self.client.post(plan['motors'][0]['assign_url'], {'file': SimpleUploadedFile('grande.xlsx', stream.getvalue())})
         url = response.json()['motor']['excel']['preview_url']
-        preview = self.client.get(url).json()
+        preview = self.client.get(url, {'sheet': 'Grande'}).json()
         self.assertEqual(len(preview['rows']), 100)
         self.assertEqual(len(preview['rows'][0]), 20)
         self.assertTrue(preview['truncated'])

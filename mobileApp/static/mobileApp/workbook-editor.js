@@ -187,7 +187,10 @@
             this.saveMotorButton = this.button('Guardar motor', 'workbookEditorSaveMotor', () => window.motorLibrary?.registerCurrent(this));
             this.reloadButton = this.button('Recargar', 'workbookEditorReload', () => this.reload());
             this.reloadButton.title = 'Volver a cargar la versión guardada';
-            toolbar.append(this.sheetSelect, this.saveButton, this.saveMotorButton, this.rowButton, this.colButton, this.downloadButton, this.csvButton, this.reloadButton);
+            this.listingsButton = this.button('Listados', 'workbookEditorListings', async () => {
+                if (await this.requestClose()) window.planExcel?.listings();
+            });
+            toolbar.append(this.sheetSelect, this.saveButton, this.saveMotorButton, this.listingsButton, this.rowButton, this.colButton, this.downloadButton, this.csvButton, this.reloadButton);
             this.motorRegistrationNotice = this.node('p', 'wbe-motor-registration');
             this.motorRegistrationNotice.id = 'workbookEditorMotorRegistration';
             this.motorRegistrationNotice.hidden = true;
@@ -284,6 +287,7 @@
         get canEdit() { return this.metadata?.can_edit === true; }
 
         applyPermissions() {
+            this.listingsButton.hidden = this.context !== 'listing' || !this.metadata?.plan_mode;
             this.removeMarkerButton.hidden = !this.removeMarker;
             for (const button of [this.saveButton, this.rowButton, this.colButton]) button.hidden = !this.canEdit;
             if (['motor-import', 'saved-motor'].includes(this.context)) this.saveButton.hidden = true;
@@ -292,7 +296,7 @@
             this.saveMotorButton.disabled = Boolean(registration?.registered) || this.busy || this.staleRevision;
             this.motorRegistrationNotice.hidden = !registration?.is_motor || this.context === 'listing';
             this.motorRegistrationNotice.textContent = registration?.registered
-                ? (this.context === 'saved-motor' ? `Motor guardado: ${registration.name}. Al asignarlo a un botón se crea una copia independiente.` : `Motor guardado: ${registration.name}. Esta copia tiene datos independientes y no se registra de nuevo.`)
+                ? (this.context === 'saved-motor' ? `Motor guardado: ${registration.name}. Puede incorporarlo al Excel de un plano.` : `Motor guardado: ${registration.name}. Los botones vinculados a esta hoja comparten sus datos.`)
                 : 'Ficha independiente. Rellene sus datos y use Guardar motor para registrarla con un nombre.';
             this.formula.readOnly = !this.canEdit || Boolean(this.staleRevision);
             this.formula.placeholder = this.canEdit ? 'Seleccione una celda para editar su valor' : 'Valor de la celda seleccionada';
@@ -961,7 +965,7 @@
             try {
                 const result = await this.request(this.metadata.save_url || `/api/pdf/workbooks/${this.metadata.id}/save/`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ revision: this.metadata.revision, edits }),
+                    body: JSON.stringify({ revision: this.metadata.revision, edits, sheet: this.sheet, context: this.context }),
                 });
                 if (epoch !== this.epoch || !this.visible) return false;
                 this.metadata = result;
@@ -995,7 +999,7 @@
             if (this.pending.size && !(await this.save())) return;
             const sheet = this.currentSheet();
             const isRow = type === 'insert_row';
-            const motorListing = this.context === 'listing' && this.sheet === 'Listado';
+            const motorListing = this.context === 'listing';
             const index = (isRow ? sheet.rows : this.context === 'listing' ? sheet.layout?.content_bounds?.max_col || sheet.columns : sheet.columns) + 1;
             if (index > (isRow ? MAX_ROWS : MAX_COLUMNS)) { this.setStatus('La hoja ya tiene el máximo de filas o columnas de Excel.', 'error'); return; }
             const epoch = this.epoch;
@@ -1014,7 +1018,7 @@
                 }
                 const result = await this.request(this.metadata.save_url || `/api/pdf/workbooks/${this.metadata.id}/save/`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ revision: this.metadata.revision, edits, operations: [operation] }),
+                    body: JSON.stringify({ revision: this.metadata.revision, edits, operations: [operation], sheet: this.sheet, context: this.context }),
                 });
                 if (epoch !== this.epoch || !this.visible) return;
                 this.metadata = result;

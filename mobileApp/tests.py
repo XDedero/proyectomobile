@@ -9,7 +9,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
+from io import BytesIO
 
 from .dxf_service import find_motors
 from .models import Motor, Plan
@@ -168,7 +169,8 @@ class PlanWorkflowTests(TestCase):
         self.assertEqual(plan['name'], plan_name)
         response = self.client.post(plan['motors'][0]['assign_url'], {'file': xlsx_file(excel_name)})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['motor']['excel']['name'], excel_name)
+        self.assertEqual(response.json()['motor']['sheet_name'], 'Motor')
+        self.assertLessEqual(len(response.json()['motor']['excel']['name']), 255)
 
     def test_plan_without_motors_can_still_be_viewed(self):
         doc = ezdxf.new()
@@ -205,12 +207,17 @@ class PlanWorkflowTests(TestCase):
         motor = response.json()['motor']
         self.assertEqual(motor['excel']['sheets'], ['Motor'])
         detail = self.client.get(plan['detail_url']).json()
-        self.assertEqual(detail['motors'][0]['excel']['name'], 'mantenimiento.xlsx')
+        self.assertEqual(detail['motors'][0]['sheet_name'], 'Motor')
         self.assertIsNotNone(detail['motors'][1]['excel'])
-        self.assertNotEqual(detail['motors'][1]['excel']['id'], motor['excel']['id'])
-        self.assertEqual(detail['motors'][1]['excel']['sheets'], ['1'])
+        self.assertEqual(detail['motors'][1]['excel']['id'], motor['excel']['id'])
+        self.assertNotEqual(detail['motors'][1]['sheet_name'], motor['sheet_name'])
         download = self.client.get(motor['excel']['url'])
-        self.assertEqual(b''.join(download.streaming_content), original_bytes)
+        exported = load_workbook(BytesIO(b''.join(download.streaming_content)))
+        try:
+            self.assertEqual(exported[motor['sheet_name']]['A2'].value, 15)
+            self.assertIsNone(exported[detail['motors'][1]['sheet_name']]['C18'].value)
+        finally:
+            exported.close()
         download.close()
         self.assertIsNone(Motor.objects.get(pk=second['id']).excel_name or None)
         self.assertEqual(self.client.get(reverse('plans')).json()['plans'][0]['id'], plan['id'])
@@ -226,16 +233,17 @@ class PlanWorkflowTests(TestCase):
                 self.assertEqual(response.status_code, 400)
         self.assertEqual(Motor.objects.get(pk=motor['id']).excel.name, previous)
 
-    def test_replacing_excel_removes_previous_file_after_commit(self):
+    def test_reimporting_identical_motor_data_reuses_the_workbook_and_sheet(self):
         plan = self.import_plan()
         motor = plan['motors'][0]
-        self.client.post(motor['assign_url'], {'file': xlsx_file()})
-        previous = Motor.objects.get(pk=motor['id']).excel.path
+        first = self.client.post(motor['assign_url'], {'file': xlsx_file()}).json()['motor']
+        previous = Motor.objects.get(pk=motor['id']).workbook_id
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(motor['assign_url'], {'file': xlsx_file('nuevo.xlsx')})
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Path(previous).exists())
-        self.assertEqual(response.json()['motor']['excel']['name'], 'nuevo.xlsx')
+        self.assertEqual(response.json()['motor']['excel']['id'], previous)
+        self.assertEqual(response.json()['motor']['sheet_name'], first['sheet_name'])
+        self.assertFalse(Motor.objects.get(pk=motor['id']).excel)
 
     def test_anonymous_browser_cannot_access_plans_or_motor_files(self):
         plan = self.import_plan()

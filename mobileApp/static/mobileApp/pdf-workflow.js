@@ -49,7 +49,10 @@
             window.dispatchEvent(new CustomEvent('workbook-saved', { detail: workbook }));
             if (!plan) return;
             for (const marker of plan.markers) {
-                if (marker.workbook?.id === workbook.id) marker.workbook = workbook;
+                if (marker.workbook?.id === workbook.id) {
+                    const metadataUrl = marker.workbook.metadata_url;
+                    marker.workbook = { ...workbook, preferred_sheet: marker.sheet_name, metadata_url: metadataUrl, context: 'motor' };
+                }
             }
             updateMarkers();
         },
@@ -142,7 +145,7 @@
         } : null);
         if (!marker) return;
         byId('pdfSelectedMarkerName').textContent = markerName(marker);
-        byId('pdfSelectedWorkbookName').textContent = marker.workbook?.name || 'Botón vacío: seleccione un Excel de la biblioteca o de su dispositivo.';
+        byId('pdfSelectedWorkbookName').textContent = marker.sheet_name || 'Elija una hoja del Excel del plano.';
         byId('btnPdfOpenWorkbook').hidden = !marker.workbook;
     }
 
@@ -173,6 +176,7 @@
     async function configureMarker() {
         const marker = selectedMarker();
         if (!marker) return;
+        if (window.planExcel) { await window.planExcel.assign('pdf', plan, marker); return; }
         focusBeforeDialog = document.activeElement;
         dialogMarkerId = marker.id;
         byId('pdfMarkerLabel').value = marker.label;
@@ -240,9 +244,10 @@
             selectedId = marker.id;
             updateMarkers();
             setMode('explore');
-            status('Botón creado con su ficha de motor vacía e independiente.');
+            status(marker.workbook ? 'Botón creado con ficha vacía.' : 'Botón creado. Elija su hoja.');
             window.projectWorkspace?.dirty();
-            await openWorkbook(marker.workbook);
+            if (marker.workbook) await openWorkbook(marker.workbook);
+            else await configureMarker();
         } catch (error) { showError(error); }
         finally { setBusy(false); }
     }
@@ -410,6 +415,7 @@
     });
     window.pdfWorkflow = {
         reset,
+        select(id) { return selectMarker(id, false); },
         removeDeleted(id) { if (plan?.id === id) reset(); },
         permissionsChanged: updatePermissions,
         canLeave() { return editor.requestClose(); },

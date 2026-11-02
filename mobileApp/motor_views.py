@@ -50,6 +50,10 @@ def saved_motors(request):
 @api_permissions()
 def register_motor(request):
     from .views import validate_excel
+    from .plan_workbook import selected_motor_document, known_sheet, sheet_identity
+    from .xlsx_package import sheet_names
+    shared = None
+    selected_name = None
     try:
         upload = request.FILES.get('file')
         if upload is not None:
@@ -64,10 +68,14 @@ def register_motor(request):
             revision = positive_integer(data.get('revision'), 'Versión de la ficha')
             if revision != document.revision:
                 raise RegistrationConflict('La ficha cambió. Recárguela antes de registrar el motor.')
+            if document.plan_mode:
+                shared, selected_name = document, data.get('sheet')
+                document = selected_motor_document(shared, selected_name)
         if not document.is_motor:
             raise ValidationError('Seleccione una ficha de motor; el listado pertenece al plano.')
         fingerprint, filled = inspect_motor(document.content)
-        existing = known_motor(document, fingerprint=fingerprint)
+        first_sheet = sheet_names(document.content)[0]
+        existing = known_motor(document, fingerprint=fingerprint) or known_sheet(document.content, first_sheet)
         if existing:
             return JsonResponse({'error': f'Esta ficha ya pertenece al motor guardado «{existing.name}».', 'existing': saved_motor_data(existing)}, status=409)
         name, key = motor_name(data.get('name'))
@@ -80,14 +88,30 @@ def register_motor(request):
         filename = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '-', name) + '.xlsx'
         with transaction.atomic():
             snapshot = WorkbookDocument.objects.create(name=filename, content=content, is_motor=True, origin_uuid=identifier, updated_by=request.user)
-            record = SavedMotor.objects.create(uuid=identifier, name=name, name_key=key, fingerprint=fingerprint, workbook=snapshot, created_by=request.user)
-            if document.pk:
+            record = SavedMotor.objects.create(uuid=identifier, name=name, name_key=key, fingerprint=fingerprint,
+                data_fingerprint=sheet_identity(document.content, first_sheet)[0], workbook=snapshot, created_by=request.user)
+            if shared:
+                from .xlsx_package import read_sheet_origins, write_sheet_origins
+                origins = read_sheet_origins(shared.content)
+                origins[selected_name] = identifier
+                combined = write_sheet_origins(shared.content, origins)
+                changed = WorkbookDocument.objects.filter(pk=shared.pk, revision=revision).update(content=combined, revision=revision+1, updated_by=request.user, updated_at=timezone.now())
+                if not changed:
+                    raise RegistrationConflict('El libro cambió. Recárguelo antes de registrar el motor.')
+                shared.plan_sheets.filter(name=selected_name).update(origin_uuid=identifier)
+            elif document.pk:
                 changed = WorkbookDocument.objects.filter(pk=document.pk, revision=revision).update(content=content, origin_uuid=identifier, revision=revision+1, updated_by=request.user, updated_at=timezone.now())
                 if not changed:
                     raise RegistrationConflict('La ficha cambió. Recárguela antes de registrar el motor.')
-        if document.pk:
+        if shared:
+            shared.refresh_from_db()
+            result = workbook_data(shared, user=request.user, sheet_name=selected_name, context='motor')
+        elif document.pk:
             document.refresh_from_db()
-        return JsonResponse({'motor': saved_motor_data(record), 'workbook': workbook_data(document, user=request.user) if document.pk else None}, status=201)
+            result = workbook_data(document, user=request.user)
+        else:
+            result = None
+        return JsonResponse({'motor': saved_motor_data(record), 'workbook': result}, status=201)
     except RegistrationConflict as exc:
         return error_response(exc, status=409)
     except IntegrityError:

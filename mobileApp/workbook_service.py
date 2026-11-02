@@ -216,7 +216,8 @@ def sheet_metadata(sheet, workbook):
         'charts': [], 'zoom_scale': (sheet.sheet_view.zoomScale or 100) / 100,
     }
     bordered = [cell for cell in sheet._cells.values() if any(getattr(cell.border, side) and getattr(cell.border, side).style for side in ('left', 'right', 'top', 'bottom'))]
-    form = bool(re.fullmatch(r'(?:(?:motor|ficha)[ _-]*)?\d+', sheet.title.strip(), re.I) and len(merges) >= 5 and len(bordered) >= 20)
+    standard_form = 'FICHA' in str(sheet['B6'].value or '').upper() and str(sheet['B18'].value or '').strip().casefold() == 'marca'
+    form = bool((standard_form or re.fullmatch(r'(?:(?:motor|ficha)[ _-]*)?\d+', sheet.title.strip(), re.I)) and len(merges) >= 5 and len(bordered) >= 20)
     meaningful = bordered if form else [cell for cell in sheet._cells.values() if cell.value is not None or cell.fill.patternType == 'solid']
     if meaningful:
         layout['content_bounds'] = {

@@ -108,10 +108,10 @@
         const number = (value) => value.toLocaleString('es-CL', { maximumFractionDigits: 6 });
         document.getElementById('selectedMotorCoordinates').textContent = `X: ${number(motor.x)} · Y: ${number(motor.y)} · Z: ${number(motor.z)} (unidades del dibujo)`;
         document.getElementById('selectedMotorHint').textContent = motor.excel
-            ? (permissions().can_change_excel ? 'Puede abrir y editar la ficha, descargarla o asignar otro Excel.' : 'Puede consultar la ficha y asignar otro Excel. El contenido se abre en modo de lectura.')
-            : 'Asigne un archivo .xlsx del dispositivo o de la biblioteca.';
+            ? 'Hoja del Excel del plano. Puede vincularla también a otros botones.'
+            : 'Elija una hoja, una ficha vacía o un motor guardado.';
         if (motor.excel) {
-            excelFileName.textContent = motor.excel.name;
+            excelFileName.textContent = motor.sheet_name || motor.excel.name;
             excelFileName.href = motor.excel.url;
             document.getElementById('excelSheets').textContent = `Hojas: ${motor.excel.sheets.join(', ')}`;
         } else excelFileName.removeAttribute('href');
@@ -122,7 +122,6 @@
         if (!motor) return;
         resetPreview();
         appState.selectedMotorId = id;
-        loadLibrary().catch((error) => showError(error.message));
         viewer.select(id);
         if (center) viewer.focusMotor(id);
         for (const button of motorList.querySelectorAll('button')) button.setAttribute('aria-pressed', String(Number(button.dataset.motorId) === id));
@@ -149,7 +148,7 @@
             button.type = 'button';
             button.dataset.motorId = motor.id;
             button.setAttribute('aria-pressed', String(motor.id === appState.selectedMotorId));
-            button.textContent = `${index + 1}. ${motor.name} · ${motor.excel ? motor.excel.name : 'Sin Excel'}`;
+            button.textContent = `${index + 1}. ${motor.name} · ${motor.sheet_name || 'Sin hoja asignada'}`;
             button.addEventListener('click', () => selectMotor(motor.id, true));
             motorList.append(button);
         }
@@ -218,6 +217,7 @@
         if (!appState.currentPlan) { showError('Importe un plano DXF antes de asignar un Excel.'); return; }
         const motor = selectedMotor();
         if (!motor) { showError('Toque un motor en el plano o selecciónelo en la lista antes de asignar su Excel.'); return; }
+        if (window.planExcel) { window.planExcel.assign('dxf', appState.currentPlan, motor); return; }
         pendingAssignment = { planId: appState.currentPlan.id, motorId: motor.id, url: motor.assign_url };
         excelFileInput.value = '';
         excelFileInput.click();
@@ -286,13 +286,6 @@
         document.getElementById('btnDeleteCadMarker').hidden = !permissions().can_delete_cad_marker;
     }
 
-    async function loadLibrary() {
-        const select = document.getElementById('cadWorkbookLibrary');
-        const { motors } = await request('/api/motor-library/');
-        select.replaceChildren(new Option('Seleccione un motor guardado', ''));
-        for (const motor of motors) select.append(new Option(motor.name, String(motor.id)));
-    }
-
     viewer.onPlace = async (svg_x, svg_y) => {
         const plan = appState.currentPlan;
         if (!plan || busy || !placing || !permissions().can_assign) return;
@@ -355,24 +348,6 @@
             updateMotorCard();
         }
     }
-    document.getElementById('btnCadAssignLibrary').addEventListener('click', async () => {
-        const motor = selectedMotor();
-        const workbook_id = Number(document.getElementById('cadWorkbookLibrary').value);
-        if (!motor || busy) return;
-        if (!workbook_id) { showError('Seleccione un Excel guardado.'); return; }
-        const currentRevision = revision;
-        setBusy(true);
-        try {
-            const data = await request(motor.assign_url, null, { saved_motor_id: workbook_id });
-            if (currentRevision !== revision) return;
-            Object.assign(motor, data.motor);
-            updatePlanCardUI();
-            viewer.select(motor.id);
-            status.textContent = 'Excel guardado asignado al botón.';
-            window.projectWorkspace?.dirty();
-        } catch (error) { showError(error.message); }
-        finally { setBusy(false); }
-    });
     document.getElementById('btnRenameCadPlan').addEventListener('click', async () => {
         const plan = appState.currentPlan;
         if (!plan || busy) return;
@@ -416,7 +391,9 @@
         for (const motor of appState.currentPlan?.motors || []) {
             if (motor.excel?.id === event.detail.id) {
                 const book = event.detail;
-                Object.assign(motor.excel, book, { sheets: book.sheets.map((sheet) => sheet.name), url: book.download_url });
+                const metadataUrl = motor.excel.metadata_url;
+                Object.assign(motor.excel, book, { sheets: [motor.sheet_name], preferred_sheet: motor.sheet_name,
+                    metadata_url: metadataUrl, url: book.download_url, context: 'motor' });
             }
         }
         updateMotorCard();
@@ -437,6 +414,7 @@
 
     document.getElementById('btnPreviewExcel').addEventListener('click', () => showPreview());
     window.planWorkflow = { close, listSaved, restore, permissionsChanged, activate: activateProject,
+        select: selectMotor,
         removeDeleted(id) {
             let remembered;
             try { remembered = localStorage.getItem(activeKey()); } catch (_) {}

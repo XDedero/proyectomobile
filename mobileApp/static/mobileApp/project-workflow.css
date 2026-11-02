@@ -1,5 +1,11 @@
 .project-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .project-actions .btn { min-height: 38px; font-size: .75rem; }
+.excel-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.excel-choice-actions > button { flex: 1; min-width: 110px; min-height: 44px; font-size: .83rem; }
+.excel-listing-rows { display: grid; gap: 8px; }
+.excel-listing-row { display: flex; gap: 8px; }
+.excel-listing-row > button { min-width: 44px; min-height: 44px; }
+.excel-listing-row > button:first-child { min-width: 0; overflow-wrap: anywhere; }
 .plan-primary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding: 10px; margin-bottom: 3px; border: 1px solid #dbe4ef; border-radius: 12px; background: #f8fafc; }
 .plan-primary-actions .btn { font-size: .8rem; }
 .plan-primary-actions > .btn-outline-danger { margin-left: auto; }

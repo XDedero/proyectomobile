@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 import math
 from pathlib import Path
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -36,7 +37,7 @@ def json_body(request):
     return data
 
 
-def workbook_data(document, *, sheets=True, user=None):
+def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=None):
     snapshot = bool(user is not None and SavedMotor.objects.filter(workbook_id=document.pk).exists())
     result = {
         'id': document.pk, 'name': document.name, 'revision': document.revision,
@@ -46,20 +47,40 @@ def workbook_data(document, *, sheets=True, user=None):
         'download_url': reverse('workbook_download', args=[document.pk]),
         'csv_url': reverse('workbook_csv', args=[document.pk]),
         'can_edit': bool(user is not None and not snapshot and capabilities(user)['can_change_excel']),
-        'is_motor': document.is_motor,
+        'is_motor': bool(document.is_motor or (document.plan_mode and sheet_name and context != 'listing')),
     }
     if sheets:
         result['sheets'] = document_sheets(document.content)
+        if document.plan_mode and context == 'listing':
+            names = set(document.plan_sheets.filter(is_listing=True).values_list('name', flat=True))
+            result['sheets'] = [sheet for sheet in result['sheets'] if sheet['name'] in names]
+        elif document.plan_mode and sheet_name:
+            result['sheets'] = [sheet for sheet in result['sheets'] if sheet['name'] == sheet_name]
+    if sheet_name:
+        result['preferred_sheet'] = sheet_name
+        result['metadata_url'] += '?' + urlencode({'sheet': sheet_name, 'context': context or 'motor'})
+    result['plan_mode'] = document.plan_mode
+    if context:
+        result['context'] = context
     if user is not None:
         from .motor_service import registration_data
-        result['motor_registration'] = registration_data(document, inspect=True)
+        if document.plan_mode and sheet_name and context != 'listing':
+            from .plan_workbook import selected_motor_document, known_sheet
+            result['motor_registration'] = registration_data(selected_motor_document(document, sheet_name), inspect=True)
+            if not result['motor_registration'].get('registered') and result['motor_registration'].get('has_data'):
+                record = known_sheet(document.content, sheet_name)
+                if record:
+                    result['motor_registration'].update(registered=True, saved_motor_id=record.pk, name=record.name, can_register=False)
+        else:
+            result['motor_registration'] = registration_data(document, inspect=True)
     return result
 
 
 def marker_data(marker):
     return {
         'id': marker.pk, 'page': marker.page, 'x': marker.x, 'y': marker.y, 'label': marker.label,
-        'workbook': workbook_data(marker.workbook, sheets=False) if marker.workbook_id else None,
+        'sheet_name': marker.sheet_name,
+        'workbook': workbook_data(marker.workbook, sheets=False, sheet_name=marker.sheet_name) if marker.workbook_id and (marker.sheet_name or not marker.workbook.plan_mode) else None,
         'update_url': reverse('update_marker', args=[marker.pk]),
         'delete_url': reverse('delete_marker', args=[marker.pk]),
         'assign_url': reverse('assign_marker_workbook', args=[marker.pk]),
@@ -67,6 +88,8 @@ def marker_data(marker):
 
 
 def pdf_data(plan, *, detail=True):
+    from .plan_workbook import ensure_workbook
+    ensure_workbook(plan)
     result = {
         'id': plan.pk, 'name': plan.name, 'size': plan.size, 'date': plan.imported_at.isoformat(),
         'pages': plan.pages, 'page_count': len(plan.pages),
@@ -176,11 +199,10 @@ def create_marker(request, plan_id):
         data = validated_marker(plan, json_body(request))
     except ValidationError as exc:
         return error_response(exc)
-    from .motor_service import blank_motor
     with transaction.atomic():
         marker = PdfMarker.objects.create(plan=plan, **data)
-        marker.workbook = blank_motor(request.user, f'Motor {marker.pk}.xlsx')
-        marker.save(update_fields=['workbook'])
+        from .plan_workbook import initialize_marker
+        initialize_marker(marker, request.user)
     return JsonResponse({'marker': marker_data(marker)}, status=201)
 
 
@@ -199,8 +221,8 @@ def update_marker(request, marker_id):
     try:
         values = validated_marker(marker.plan, data, partial=True)
         if 'workbook_id' in data:
-            from .motor_service import copy_motor, blank_motor
-            values['workbook'] = blank_motor(request.user, f'Motor {marker.pk}.xlsx') if data['workbook_id'] is None else copy_motor(get_object_or_404(WorkbookDocument, pk=positive_integer(data['workbook_id'], 'Excel')), request.user)
+            from .plan_workbook import assign_marker
+            assign_marker(marker, request.user, {'blank': True} if data['workbook_id'] is None else {'workbook_id': data['workbook_id']})
     except ValidationError as exc:
         return error_response(exc)
     for key, value in values.items():
@@ -224,7 +246,7 @@ def delete_marker(request, marker_id):
 @api_permissions()
 def list_workbooks(request):
     return JsonResponse({
-        'workbooks': [workbook_data(document, sheets=False) for document in WorkbookDocument.objects.filter(is_motor=False).defer('content').order_by('-updated_at')],
+        'workbooks': [workbook_data(document, sheets=False) for document in WorkbookDocument.objects.filter(is_motor=False, plan_mode='').defer('content').order_by('-updated_at')],
         'motors': [
             {'source_motor_id': motor.pk, 'name': motor.excel_name, 'sheets': motor.excel_sheets}
             for motor in Motor.objects.exclude(excel='').filter(workbook__isnull=True).order_by('id')
@@ -254,47 +276,25 @@ def upload_workbook(request):
 @require_POST
 @api_permissions()
 def assign_marker_workbook(request, marker_id):
-    marker = get_object_or_404(PdfMarker.objects.select_related('workbook'), pk=marker_id)
+    from .plan_workbook import assign_marker, WorkbookConflict, workspace_data
+    marker = get_object_or_404(PdfMarker.objects.select_related('plan'), pk=marker_id)
     try:
-        from .motor_service import copy_motor, mark_motor
         upload = request.FILES.get('file')
-        if upload is not None:
-            document = uploaded_document(upload, request.user)
-            mark_motor(document)
-        else:
-            data = json_body(request)
-            if 'saved_motor_id' in data:
-                saved = get_object_or_404(SavedMotor, pk=positive_integer(data['saved_motor_id'], 'Motor guardado'))
-                document = copy_motor(saved.workbook, request.user)
-                if not marker.label:
-                    marker.label = saved.name
-            elif 'workbook_id' in data:
-                document = copy_motor(get_object_or_404(WorkbookDocument, pk=positive_integer(data['workbook_id'], 'Excel')), request.user)
-            elif 'source_motor_id' in data:
-                motor = get_object_or_404(Motor, pk=positive_integer(data['source_motor_id'], 'Motor'))
-                if motor.workbook_id:
-                    document = copy_motor(motor.workbook, request.user)
-                elif not motor.excel:
-                    return error_response('El motor seleccionado no tiene un Excel guardado.')
-                else:
-                    with motor.excel.open('rb') as source:
-                        upload = SimpleUploadedFile(motor.excel_name or 'motor.xlsx', source.read())
-                    document = uploaded_document(upload, request.user)
-                    mark_motor(document)
-            else:
-                return error_response('Seleccione un Excel de la biblioteca o del dispositivo.')
+        data = json_body(request) if upload is None else {}
+        assign_marker(marker, request.user, data, upload)
+        return JsonResponse({'marker': marker_data(marker), **workspace_data(marker.plan, request.user)})
     except ValidationError as exc:
-        return error_response(exc)
-    marker.workbook = document
-    marker.save(update_fields=['workbook', 'label'])
-    return JsonResponse({'marker': marker_data(marker)})
+        return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
 
 
 @require_GET
 @api_permissions()
 def workbook_metadata(request, workbook_id):
     document = get_object_or_404(WorkbookDocument, pk=workbook_id)
-    return JsonResponse(workbook_data(document, user=request.user))
+    try:
+        return JsonResponse(workbook_data(document, user=request.user, sheet_name=request.GET.get('sheet'), context=request.GET.get('context')))
+    except ValidationError as exc:
+        return error_response(exc)
 
 
 @require_GET
@@ -332,8 +332,10 @@ def workbook_save(request, workbook_id):
         if document.revision != revision:
             return error_response('Otro usuario modificó este Excel. Recargue el libro antes de guardar.', status=409)
         content, sheets = edited_document(document.content, data.get('edits', []), data.get('operations', []))
-        if len(content) > settings.PLAN_UPLOAD_MAX_BYTES:
-            return error_response('El Excel modificado supera el tamaño máximo de 20 MB.')
+        from .plan_workbook import MAX_WORKBOOK_BYTES
+        limit = MAX_WORKBOOK_BYTES if document.plan_mode else settings.PLAN_UPLOAD_MAX_BYTES
+        if len(content) > limit:
+            return error_response('El Excel modificado supera el tamaño máximo permitido.')
         with transaction.atomic():
             changed = WorkbookDocument.objects.filter(pk=workbook_id, revision=revision).update(
                 content=content, revision=revision + 1, updated_by=request.user, updated_at=timezone.now(),
@@ -341,8 +343,7 @@ def workbook_save(request, workbook_id):
             if not changed:
                 return error_response('Otro usuario modificó este Excel. Recargue el libro antes de guardar.', status=409)
         document.refresh_from_db()
-        result = workbook_data(document, sheets=False, user=request.user)
-        result['sheets'] = sheets
+        result = workbook_data(document, user=request.user, sheet_name=data.get('sheet'), context=data.get('context'))
         return JsonResponse(result)
     except ValidationError as exc:
         return error_response(exc)

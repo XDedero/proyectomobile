@@ -17,7 +17,7 @@ from django.db import transaction
 from pypdf import PdfReader
 
 from .dxf_service import import_dxf, MAX_MOTORS
-from .models import Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument
+from .models import Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet
 
 MAX_PROJECT_BYTES = 100 * 1024 * 1024
 MAX_PROJECT_UNPACKED = 250 * 1024 * 1024
@@ -30,54 +30,38 @@ def plan_model(kind):
 
 
 def export_project(kind, plan):
-    documents, keys = [], {}
-
-    def document_key(document, legacy=None):
-        if document is None and not legacy:
-            return None
-        if document is not None:
-            content, name = bytes(document.content), document.name
-            origin = str(document.origin_uuid) if document.origin_uuid else None
-        else:
-            with legacy.excel.open('rb') as source:
-                content = source.read()
-            name, origin = legacy.excel_name, None
-        # Store identical blank forms only once in the file. Import still
-        # creates a separate editable document for every motor occurrence.
-        identity = (hashlib.sha256(content).hexdigest(), origin)
-        if identity not in keys:
-            key = f'w{len(keys) + 1}'
-            keys[identity] = key
-            documents.append({'key': key, 'name': name, 'path': f'workbooks/{key}.xlsx', 'content': content, 'origin_uuid': origin})
-        return keys[identity]
-
+    from .plan_workbook import ensure_workbook
+    document = ensure_workbook(plan)
+    rows = list(document.plan_sheets.all())
     if kind == 'pdf':
         markers = [{'page': item.page, 'x': item.x, 'y': item.y, 'label': item.label,
-                    'workbook': document_key(item.workbook), 'workbook_name': item.workbook.name if item.workbook_id else None} for item in plan.markers.select_related('workbook')]
+                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name}
+                   for item in plan.markers.all()]
     else:
         markers = [{'entity_key': item.entity_key, 'name': item.name, 'x': item.x, 'y': item.y, 'z': item.z,
-                    'workbook': document_key(item.workbook, item if item.excel else None), 'workbook_name': item.workbook.name if item.workbook_id else item.excel_name}
-                   for item in plan.motors.select_related('workbook')]
+                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name}
+                   for item in plan.motors.all()]
     manifest = {
-        'format': 'motor-plan-project', 'version': 2, 'kind': kind, 'name': plan.name,
-        'source': f'plan/source.{kind}', 'markers': markers,
-        'listing': document_key(plan.listing),
-        'listing_name': plan.listing.name if plan.listing_id else None,
-        'workbooks': [{key: value for key, value in document.items() if key != 'content'} for document in documents],
+        'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
+        'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
+        'workbook_mode': document.plan_mode,
+        'listing': 'w1' if any(row.is_listing for row in rows) else None,
+        'listing_name': document.name,
+        'sheets': [{'name': row.name, 'is_listing': row.is_listing, 'is_primary': row.is_primary, 'is_protected': row.is_protected,
+                    'listing_order': row.listing_order, 'origin_uuid': str(row.origin_uuid) if row.origin_uuid else None} for row in rows],
+        'workbooks': [{'key': 'w1', 'name': document.name, 'path': 'workbooks/w1.xlsx', 'origin_uuid': None}],
     }
     manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode('utf-8')
-    if len(documents) > MAX_MOTORS + 1 or len(markers) > MAX_MOTORS or len(manifest_bytes) > 8 * 1024 * 1024:
-        raise ValidationError('El proyecto supera el límite de botones o archivos transportables.')
+    content = bytes(document.content)
+    with plan.source.open('rb') as stream:
+        source = stream.read()
+    if len(markers) > MAX_MOTORS or len(manifest_bytes) > 8 * 1024 * 1024 or len(source) + len(content) + len(manifest_bytes) > MAX_PROJECT_UNPACKED:
+        raise ValidationError('El proyecto supera el tamaño transportable permitido.')
     output = BytesIO()
     with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
         archive.writestr('manifest.json', manifest_bytes)
-        with plan.source.open('rb') as source:
-            source_content = source.read()
-        if len(source_content) > settings.PLAN_UPLOAD_MAX_BYTES or len(manifest_bytes) + len(source_content) + sum(len(document['content']) for document in documents) > MAX_PROJECT_UNPACKED:
-            raise ValidationError('El contenido del proyecto supera el tamaño transportable permitido.')
-        archive.writestr(manifest['source'], source_content)
-        for document in documents:
-            archive.writestr(document['path'], document['content'])
+        archive.writestr(manifest['source'], source)
+        archive.writestr('workbooks/w1.xlsx', content)
     result = output.getvalue()
     if len(result) > MAX_PROJECT_BYTES:
         raise ValidationError('El proyecto supera el tamaño máximo de 100 MB.')
@@ -108,6 +92,59 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value) and abs(value) <= 1e15
 
 
+@transaction.atomic
+def import_shared_project(plan, kind, source, svg, markers, books, manifest, user):
+    key = manifest.get('workbook')
+    if not isinstance(key, str) or key not in books or len(books) != 1:
+        raise ValidationError('El proyecto debe contener un único Excel del plano.')
+    info = books[key]
+    specs = manifest.get('sheets')
+    if not isinstance(specs, list) or not specs or len(specs) != len(info['sheets']):
+        raise ValidationError('Las hojas del proyecto no coinciden con su Excel.')
+    names = set()
+    for row in specs:
+        if not isinstance(row, dict) or not isinstance(row.get('name'), str) or row['name'] in names or row['name'] not in info['sheets']:
+            raise ValidationError('Una hoja del proyecto no existe o está repetida.')
+        names.add(row['name'])
+        if type(row.get('is_listing')) is not bool or type(row.get('is_primary')) is not bool or (row['is_primary'] and not row['is_listing']):
+            raise ValidationError('El tipo de una hoja del proyecto no es válido.')
+        if type(row.get('is_protected', row['is_primary'])) is not bool:
+            raise ValidationError('La protección del listado no es válida.')
+        if type(row.get('listing_order')) is not int or not 0 <= row['listing_order'] <= 5001:
+            raise ValidationError('El orden de los listados no es válido.')
+        if row.get('origin_uuid') is not None:
+            try:
+                if not isinstance(row['origin_uuid'], str):
+                    raise ValueError
+                UUID(row['origin_uuid'])
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValidationError('El origen de una hoja del motor no es válido.') from exc
+    if sum(row['is_primary'] for row in specs) > 1 or manifest.get('workbook_mode') not in ('template', 'imported'):
+        raise ValidationError('La configuración del Excel del plano no es válida.')
+    motor_names = {row['name'] for row in specs if not row['is_listing']}
+    for item in markers:
+        sheet = item.get('sheet')
+        if not isinstance(sheet, str) or (sheet and (sheet not in motor_names or item.get('workbook') != key)) or (not sheet and item.get('workbook') is not None):
+            raise ValidationError('Un botón apunta a una hoja de motor inexistente.')
+    document = WorkbookDocument.objects.create(name=info['name'], content=info['content'], plan_mode=manifest['workbook_mode'], updated_by=user)
+    PlanWorkbookSheet.objects.bulk_create([PlanWorkbookSheet(workbook=document, name=row['name'],
+        is_listing=row['is_listing'], is_primary=row['is_primary'], listing_order=row['listing_order'],
+        is_protected=row.get('is_protected', row['is_primary']), origin_uuid=row.get('origin_uuid'), created_by=user) for row in specs])
+    plan.workbook = plan.listing = document
+    plan.source.save(f'plan.{kind}', SimpleUploadedFile(f'plan.{kind}', source), save=False)
+    plan.save()
+    if kind == 'pdf':
+        PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'],
+            label=item.get('label', ''), workbook=document, sheet_name=item['sheet']) for item in markers])
+    else:
+        a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
+        Motor.objects.bulk_create([Motor(plan=plan, entity_key=item['entity_key'], name=item['name'],
+            x=item['x'], y=item['y'], z=item['z'], svg_x=a*item['x']+c*item['y']+e,
+            svg_y=b*item['x']+d*item['y']+f, svg_bounds=[a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f, 0, 0],
+            workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else []) for item in markers])
+    return kind, plan
+
+
 def import_project(upload, user):
     from .views import validate_excel
     if not upload.size or upload.size > MAX_PROJECT_BYTES or Path(upload.name).suffix.lower() != '.planproj':
@@ -123,7 +160,7 @@ def import_project(upload, user):
             if archive.getinfo('manifest.json').file_size > 8 * 1024 * 1024:
                 raise ValidationError('El índice del proyecto es demasiado grande.')
             manifest = json.loads(archive.read('manifest.json'))
-            if not isinstance(manifest, dict) or manifest.get('format') != 'motor-plan-project' or type(manifest.get('version')) is not int or manifest['version'] not in (1, 2):
+            if not isinstance(manifest, dict) or manifest.get('format') != 'motor-plan-project' or type(manifest.get('version')) is not int or manifest['version'] not in (1, 2, 3):
                 raise ValidationError('El archivo no es un proyecto compatible de esta aplicación.')
             kind = manifest.get('kind')
             model = plan_model(kind)
@@ -151,10 +188,10 @@ def import_project(upload, user):
                 path, filename = spec.get('path'), spec.get('name')
                 if path != f"workbooks/{spec['key']}.xlsx" or not isinstance(filename, str) or not filename.lower().endswith('.xlsx') or len(filename) > 255:
                     raise ValidationError('El archivo Excel del proyecto no es válido.')
-                if archive.getinfo(path).file_size > settings.PLAN_UPLOAD_MAX_BYTES:
+                if archive.getinfo(path).file_size > (MAX_PROJECT_BYTES if manifest['version'] == 3 else settings.PLAN_UPLOAD_MAX_BYTES):
                     raise ValidationError('Un Excel del proyecto supera 20 MB.')
                 content = archive.read(path)
-                sheets = validate_excel(SimpleUploadedFile(filename, content))
+                sheets = validate_excel(SimpleUploadedFile(filename, content), max_bytes=MAX_PROJECT_BYTES if manifest['version'] == 3 else None)
                 origin = UUID(str(spec['origin_uuid'])) if spec.get('origin_uuid') else None
                 books[spec['key']] = {'name': filename, 'content': content, 'sheets': sheets, 'origin': origin}
                 allowed.add(path)
@@ -188,6 +225,13 @@ def import_project(upload, user):
         plan.pages = pages
     else:
         plan.svg = svg
+    if manifest['version'] == 3:
+        try:
+            return import_shared_project(plan, kind, source, svg, markers, books, manifest, user)
+        except Exception:
+            if plan.source:
+                plan.source.delete(save=False)
+            raise
     try:
         with transaction.atomic():
             from .motor_service import resolve_origin, stamp_origin, read_origin, template_bytes

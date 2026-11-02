@@ -13,7 +13,7 @@ from django.urls import reverse
 from openpyxl import load_workbook
 
 from .models import Motor, PdfMarker, PdfPlan, SavedMotor, WorkbookDocument
-from .motor_service import inspect_motor, read_origin, template_bytes
+from .motor_service import inspect_motor, read_origin, template_bytes, single_sheet
 from .test_pdf import pdf_upload
 from .tests import dxf_file
 from .workbook_service import edited_document
@@ -47,15 +47,16 @@ class SavedMotorTests(TestCase):
 
     def fill(self, workbook, serial='SN-001'):
         metadata = self.client.get(workbook['metadata_url']).json()
-        response = self.post(metadata['save_url'], {'revision': metadata['revision'], 'edits': [
-            {'sheet': '1', 'row': 18, 'col': 3, 'value': 'WEG'},
-            {'sheet': '1', 'row': 20, 'col': 3, 'value': serial},
+        sheet = metadata.get('preferred_sheet') or metadata['sheets'][0]['name']
+        response = self.post(metadata['save_url'], {'revision': metadata['revision'], 'sheet': sheet, 'context': 'motor', 'edits': [
+            {'sheet': sheet, 'row': 18, 'col': 3, 'value': 'WEG'},
+            {'sheet': sheet, 'row': 20, 'col': 3, 'value': serial},
         ]})
         self.assertEqual(response.status_code, 200, response.content[:400])
         return response.json()
 
     def register(self, workbook, name='Motor de prueba'):
-        response = self.post(reverse('register_motor'), {'workbook_id': workbook['id'], 'revision': workbook['revision'], 'name': name})
+        response = self.post(reverse('register_motor'), {'workbook_id': workbook['id'], 'revision': workbook['revision'], 'sheet': workbook.get('preferred_sheet'), 'name': name})
         self.assertEqual(response.status_code, 201, response.content[:400])
         return response.json()
 
@@ -70,19 +71,21 @@ class SavedMotorTests(TestCase):
         document = WorkbookDocument.objects.get(pk=document_id)
         workbook = load_workbook(BytesIO(bytes(document.content)))
         try:
-            return workbook['1'][address].value
+            name = document.plan_sheets.filter(is_listing=False).values_list('name', flat=True).first() if document.plan_mode else workbook.sheetnames[0]
+            return workbook[name][address].value
         finally:
             workbook.close()
 
-    def test_pdf_buttons_get_empty_standard_forms_with_independent_documents(self):
+    def test_pdf_buttons_get_independent_empty_sheets_in_the_same_document(self):
         plan, first = self.marker()
         _, second = self.marker(plan)
-        self.assertNotEqual(first['workbook']['id'], second['workbook']['id'])
+        self.assertEqual(first['workbook']['id'], second['workbook']['id'])
+        self.assertNotEqual(first['sheet_name'], second['sheet_name'])
         first_bytes = self.file(first['workbook']['download_url'])
         self.assertEqual(first_bytes, self.file(second['workbook']['download_url']))
         self.assertFalse(inspect_motor(first_bytes)[1])
         metadata = self.client.get(first['workbook']['metadata_url']).json()
-        self.assertEqual([sheet['name'] for sheet in metadata['sheets']], ['1'])
+        self.assertEqual([sheet['name'] for sheet in metadata['sheets']], [first['sheet_name']])
         self.assertEqual(len(metadata['sheets'][0]['layout']['charts']), 2)
         self.assertEqual(len(metadata['sheets'][0]['layout']['images']), 1)
         self.assertEqual(metadata['sheets'][0]['layout']['presentation'], 'form')
@@ -92,25 +95,26 @@ class SavedMotorTests(TestCase):
     def test_detected_and_manually_added_dxf_motors_have_independent_empty_forms(self):
         plan = self.client.post(reverse('plan_import'), {'file': dxf_file()}).json()
         ids = [motor['excel']['id'] for motor in plan['motors']]
-        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual(len(set(ids)), 1)
         reference = plan['motors'][0]
         manual = self.post(plan['markers_url'], {'name': 'Motor nuevo', 'svg_x': reference['svg_x'], 'svg_y': reference['svg_y']}).json()['motor']
-        self.assertNotIn(manual['excel']['id'], ids)
-        self.assertEqual(self.file(manual['excel']['download_url']), template_bytes())
+        self.assertIn(manual['excel']['id'], ids)
+        self.assertNotIn(manual['sheet_name'], [motor['sheet_name'] for motor in plan['motors']])
+        self.assertFalse(inspect_motor(single_sheet(self.file(manual['excel']['download_url']), manual['sheet_name']))[1])
 
     def test_empty_forms_and_missing_names_cannot_be_registered(self):
         _, marker = self.marker()
         book = marker['workbook']
-        self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': 1, 'name': 'Vacío'}).status_code, 400)
+        self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': book['revision'], 'sheet': marker['sheet_name'], 'name': 'Vacío'}).status_code, 400)
         filled = self.fill(book)
         for name in ('', ' ', None, 'x'*121):
-            self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': filled['revision'], 'name': name}).status_code, 400)
+            self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': filled['revision'], 'sheet': marker['sheet_name'], 'name': name}).status_code, 400)
         self.assertEqual(SavedMotor.objects.count(), 0)
 
     def test_named_motor_keeps_filled_original_snapshot_and_provenance(self):
         _, marker = self.marker()
         filled = self.fill(marker['workbook'])
-        before = self.file(filled['download_url'])
+        before = single_sheet(self.file(filled['download_url']), filled['preferred_sheet'])
         registered = self.register(filled, 'Motor Bomba 01')
         snapshot = registered['motor']['workbook']
         self.assertNotEqual(snapshot['id'], filled['id'])
@@ -135,7 +139,7 @@ class SavedMotorTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.cell(snapshot['id']), 'WEG')
 
-    def test_two_buttons_reusing_saved_motor_can_edit_and_export_without_changing_each_other(self):
+    def test_two_buttons_reusing_saved_motor_share_changes_but_keep_catalog_original(self):
         plan, original = self.marker()
         saved = self.register(self.fill(original['workbook']))['motor']
         _, first = self.marker(plan)
@@ -143,18 +147,18 @@ class SavedMotorTests(TestCase):
         copies = []
         for marker in (first, second):
             copies.append(self.post(marker['assign_url'], {'saved_motor_id': saved['id']}).json()['marker']['workbook'])
-        self.assertEqual(len({saved['workbook']['id'], original['workbook']['id'], copies[0]['id'], copies[1]['id']}), 4)
+        self.assertEqual(len({saved['workbook']['id'], original['workbook']['id'], copies[0]['id'], copies[1]['id']}), 2)
         metadata = self.client.get(copies[0]['metadata_url']).json()
         self.assertTrue(metadata['can_edit'])
         self.assertTrue(metadata['motor_registration']['registered'])
-        changed = self.post(metadata['save_url'], {'revision': metadata['revision'], 'edits': [{'sheet': '1', 'row': 18, 'col': 3, 'value': 'ABB'}]})
+        changed = self.post(metadata['save_url'], {'revision': metadata['revision'], 'sheet': metadata['preferred_sheet'], 'edits': [{'sheet': metadata['preferred_sheet'], 'row': 18, 'col': 3, 'value': 'ABB'}]})
         self.assertEqual(changed.status_code, 200)
         self.assertEqual(self.cell(copies[0]['id']), 'ABB')
-        self.assertEqual(self.cell(copies[1]['id']), 'WEG')
+        self.assertEqual(self.cell(copies[1]['id']), 'ABB')
         self.assertEqual(self.cell(saved['workbook']['id']), 'WEG')
-        self.assertNotEqual(self.file(copies[0]['download_url']), self.file(copies[1]['download_url']))
-        self.assertIn('ABB', self.file(copies[0]['csv_url']).decode('utf-8-sig'))
-        self.assertNotIn('ABB', self.file(copies[1]['csv_url']).decode('utf-8-sig'))
+        self.assertEqual(self.file(copies[0]['download_url']), self.file(copies[1]['download_url']))
+        self.assertIn('ABB', self.file(copies[0]['csv_url'] + '?sheet=' + copies[0]['preferred_sheet']).decode('utf-8-sig'))
+        self.assertIn('ABB', self.file(copies[1]['csv_url'] + '?sheet=' + copies[1]['preferred_sheet']).decode('utf-8-sig'))
 
     def test_program_copy_cannot_be_registered_again_even_after_editing_its_data(self):
         plan, first = self.marker()
@@ -163,7 +167,7 @@ class SavedMotorTests(TestCase):
         copy = self.post(second['assign_url'], {'saved_motor_id': saved['id']}).json()['marker']['workbook']
         updated = self.fill(copy, 'SERIE-CAMBIADA')
         self.assertTrue(updated['motor_registration']['registered'])
-        response = self.post(reverse('register_motor'), {'workbook_id': updated['id'], 'revision': updated['revision'], 'name': 'Otro nombre'})
+        response = self.post(reverse('register_motor'), {'workbook_id': updated['id'], 'revision': updated['revision'], 'sheet': updated['preferred_sheet'], 'name': 'Otro nombre'})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(SavedMotor.objects.count(), 1)
         self.assertEqual(self.cell(saved['workbook']['id'], 'C20'), 'SN-001')
@@ -181,7 +185,7 @@ class SavedMotorTests(TestCase):
     def test_unmarked_device_original_is_recognized_by_data_after_registration(self):
         _, marker = self.marker()
         filled = self.fill(marker['workbook'])
-        unmarked = self.file(filled['download_url'])
+        unmarked = single_sheet(self.file(filled['download_url']), filled['preferred_sheet'])
         self.assertIsNone(read_origin(unmarked))
         saved = self.register(filled)['motor']
         result = self.client.post(reverse('import_motor_document'), {'file': SimpleUploadedFile('original.xlsx', unmarked)}).json()['workbook']
@@ -203,7 +207,7 @@ class SavedMotorTests(TestCase):
         self.register(self.fill(first['workbook']), 'Motor Norte')
         _, second = self.marker(plan)
         book = self.fill(second['workbook'], 'SN-OTRO')
-        self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': book['revision'], 'name': '  motor   NORTE  '}).status_code, 409)
+        self.assertEqual(self.post(reverse('register_motor'), {'workbook_id': book['id'], 'revision': book['revision'], 'sheet': book['preferred_sheet'], 'name': '  motor   NORTE  '}).status_code, 409)
         self.assertEqual(SavedMotor.objects.count(), 1)
         self.assertIsNone(WorkbookDocument.objects.get(pk=book['id']).origin_uuid)
 
@@ -224,7 +228,7 @@ class SavedMotorTests(TestCase):
     def test_direct_device_registration_keeps_named_filled_snapshot_and_detects_duplicates(self):
         _, marker = self.marker()
         filled = self.fill(marker['workbook'])
-        content = self.file(filled['download_url'])
+        content = single_sheet(self.file(filled['download_url']), filled['preferred_sheet'])
         response = self.client.post(reverse('register_motor'), {
             'file': SimpleUploadedFile('externo.xlsx', content), 'name': 'Motor externo',
         })
@@ -261,7 +265,7 @@ class SavedMotorTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content[:400])
         restored = response.json()['plan']['markers']
         ids = [marker['workbook']['id'] for marker in restored]
-        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual(len(set(ids)), 1)
         for marker in restored:
             metadata = self.client.get(marker['workbook']['metadata_url']).json()
             self.assertEqual(metadata['motor_registration']['saved_motor_id'], saved['id'])
@@ -273,10 +277,11 @@ class SavedMotorTests(TestCase):
         content = self.file(plan['export_project_url'])
         with ZipFile(BytesIO(content)) as archive:
             manifest = json.loads(archive.read('manifest.json'))
-            self.assertEqual(manifest['version'], 2)
+            self.assertEqual(manifest['version'], 3)
             self.assertEqual(len(manifest['workbooks']), 1)
         result = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('vacios.planproj', content)}).json()['plan']
-        self.assertNotEqual(result['markers'][0]['workbook']['id'], result['markers'][1]['workbook']['id'])
+        self.assertEqual(result['markers'][0]['workbook']['id'], result['markers'][1]['workbook']['id'])
+        self.assertNotEqual(result['markers'][0]['sheet_name'], result['markers'][1]['sheet_name'])
 
     def test_migration_separates_existing_shared_motor_books_from_each_other_and_plan_listing(self):
         plan, first = self.marker()
@@ -299,6 +304,8 @@ class SavedMotorTests(TestCase):
         with ZipFile(BytesIO(original)) as source, ZipFile(output, 'w') as target:
             manifest = json.loads(source.read('manifest.json'))
             manifest['version'] = 1
+            selected = single_sheet(source.read(manifest['workbooks'][0]['path']), first['sheet_name'])
+            manifest['listing'] = None
             shared = manifest['workbooks'][0]
             shared.pop('origin_uuid', None)
             manifest['workbooks'] = [shared]
@@ -308,10 +315,10 @@ class SavedMotorTests(TestCase):
             paths = {'manifest.json', shared['path'], manifest['source']}
             for item in source.infolist():
                 if item.filename in paths:
-                    target.writestr(item, json.dumps(manifest) if item.filename == 'manifest.json' else source.read(item.filename))
+                    target.writestr(item, json.dumps(manifest) if item.filename == 'manifest.json' else selected if item.filename == shared['path'] else source.read(item.filename))
         response = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('anterior.planproj', output.getvalue())})
         self.assertEqual(response.status_code, 201, response.content[:400])
         markers = response.json()['plan']['markers']
-        self.assertNotEqual(markers[0]['workbook']['id'], markers[1]['workbook']['id'])
+        self.assertEqual(markers[0]['workbook']['id'], markers[1]['workbook']['id'])
         for marker in markers:
             self.assertEqual(self.cell(marker['workbook']['id'], 'C20'), 'SN-001')

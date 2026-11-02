@@ -179,7 +179,7 @@
             <div class="app-view p-0" id="viewSavedMotors">
                 <div class="app-header"><button type="button" id="btnSavedMotorsBack" class="btn btn-light btn-sm">← Volver</button><h6 class="mb-0 fw-bold">Motores guardados</h6></div>
                 <div class="p-3">
-                    <p class="small text-muted">Guarde motores con nombre y datos rellenados. Al usarlos en un botón se crea una copia independiente.</p>
+                    <p class="small text-muted">Guarde motores con nombre y datos rellenados. Se incorporan como hojas al Excel del plano.</p>
                     <button type="button" id="btnImportMotorRecord" class="btn btn-success w-100 mb-3">Importar ficha del dispositivo</button>
                     <input type="file" id="motorRecordFileInput" accept=".xlsx" hidden>
                     <label for="savedMotorsSearch" class="small">Buscar por nombre</label>
@@ -206,9 +206,9 @@
                     <h6 class="mb-0 fw-bold text-dark text-truncate px-2" style="font-size: 0.88rem;">Plano DXF</h6>
 
                     <!-- Botón Asignar Excel en la esquina -->
-                    <button class="btn-excel" id="btnAssignExcelCorner" title="Asignar Excel al motor seleccionado" hidden>
+                    <button class="btn-excel" id="btnAssignExcelCorner" title="Elegir hoja para el motor seleccionado" hidden>
                         <i class="bi bi-file-earmark-spreadsheet-fill"></i>
-                        <span>Asignar Excel</span>
+                        <span>Asignar hoja</span>
                     </button>
                 </div>
 
@@ -324,11 +324,8 @@
                         <p id="selectedMotorCoordinates" class="motor-coordinates small text-secondary mb-2"></p>
                         <p id="selectedMotorHint" class="small text-muted">Asigne un archivo .xlsx a este motor.</p>
                         <button type="button" class="btn-excel justify-content-center" id="btnAssignMotorExcel" hidden>
-                            <i class="bi bi-file-earmark-spreadsheet"></i> Asignar .xlsx a este motor
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Elegir hoja del plano
                         </button>
-                        <label for="cadWorkbookLibrary" class="small mt-2">Importar motor guardado</label>
-                        <select id="cadWorkbookLibrary" class="form-select form-select-sm"><option value="">Seleccione un motor guardado</option></select>
-                        <button type="button" id="btnCadAssignLibrary" class="btn btn-sm btn-outline-success mt-2">Usar copia del motor seleccionado</button>
                         <div class="mt-3 pt-2 border-top" id="excelLinkedSection" style="display: none;">
                             <div class="d-flex align-items-center justify-content-between">
                                 <div class="d-flex align-items-center gap-2">
@@ -433,7 +430,7 @@
                         <h6 id="pdfSelectedMarkerName" class="fw-bold mt-1 pdf-selection-name"></h6>
                         <p id="pdfSelectedWorkbookName" class="small text-muted pdf-selection-name"></p>
                         <button type="button" id="btnPdfOpenWorkbook" class="btn btn-excel pdf-excel-action mb-2" hidden><i class="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i><span>Abrir y editar Excel</span></button>
-                        <button type="button" id="btnPdfConfigureMarker" class="btn pdf-secondary-action"><i class="bi bi-sliders" aria-hidden="true"></i><span>Configurar botón / asignar Excel</span></button>
+                        <button type="button" id="btnPdfConfigureMarker" class="btn pdf-secondary-action"><i class="bi bi-sliders" aria-hidden="true"></i><span>Asignar hoja</span></button>
                     </section>
                 </div>
             </div>
@@ -480,7 +477,7 @@
             <div id="pdfMarkerCurrentWorkbook" class="small text-success mb-3"></div>
             <label for="pdfWorkbookLibrary" class="small fw-semibold mb-1">Importar motor guardado</label>
             <select id="pdfWorkbookLibrary" class="form-select mb-2"><option value="">Cargando biblioteca…</option></select>
-            <button type="button" id="btnPdfAssignLibrary" class="btn btn-outline-success w-100 mb-2">Usar copia del motor seleccionado</button>
+            <button type="button" id="btnPdfAssignLibrary" class="btn btn-outline-success w-100 mb-2">Vincular motor guardado</button>
             <button type="button" id="btnPdfAssignDevice" class="btn btn-excel w-100 justify-content-center mb-2"><i class="bi bi-folder2-open"></i> Elegir Excel del dispositivo</button>
             <input type="file" id="pdfExcelFileInput" accept=".xlsx" hidden>
             <p class="small text-muted">Las fichas se incluyen al guardar el plano y pueden reutilizarse en otros botones.</p>
@@ -503,6 +500,7 @@
     <script src="{% static 'mobileApp/workbook-editor.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pdf-workflow.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/project-workflow.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/plan-excel.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/motor-library.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/auth.js' %}?v={{ asset_version }}"></script>
 </body>

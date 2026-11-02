@@ -136,14 +136,14 @@ funcionar en la futura WebView.
 ```powershell
 .\.venv\Scripts\python.exe manage.py check
 .\.venv\Scripts\python.exe manage.py test mobileApp --noinput
-.\.venv\Scripts\python.exe scripts/mobile_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/project_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
 ```
 
 Las pruebas de navegador usan Django y archivos temporales aislados únicamente
-para comprobar el proyecto en el PC. La prueba móvil bloquea las solicitudes
-externas y comprueba tamaños, insets, rotación, reducción del área visible,
-edición persistente, fallo de guardado, descargas y el botón Atrás. Reducir el
+para comprobar el proyecto en el PC. La prueba actual del libro compartido comprueba el flujo móvil PDF/DXF,
+asignación de hojas, motores guardados, varios listados, permisos de borrado
+y exportación de un único XLSX por proyecto. Las comprobaciones anteriores de
+viewport, insets y botón Atrás se mantienen en la infraestructura móvil. Reducir el
 viewport simula el espacio del teclado; no sustituye una prueba con IME real.
 Las pruebas Android físicas, el empaquetado Python, el selector de documentos
 y las descargas nativas siguen pendientes de la etapa Android Studio.

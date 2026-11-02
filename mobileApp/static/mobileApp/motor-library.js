@@ -10,7 +10,7 @@
     registerModal.setAttribute('aria-labelledby', 'motorRegisterTitle');
     registerModal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><form id="motorRegisterForm" class="modal-content">
       <div class="modal-header"><h2 id="motorRegisterTitle" class="modal-title fs-5">Guardar motor</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
-      <div class="modal-body"><p class="small text-muted">Se conservará una ficha original con los datos rellenados. Cada botón que la importe tendrá su propia copia.</p>
+      <div class="modal-body"><p class="small text-muted">Se conservará la ficha original para incorporarla a otros planos.</p>
       <label for="motorRegisterName" class="form-label">Nombre del motor</label><input id="motorRegisterName" class="form-control" maxlength="120" required autocomplete="off">
       <p id="motorRegisterStatus" class="small text-danger mt-2" role="status"></p></div>
       <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" id="btnConfirmRegisterMotor" class="btn btn-success">Guardar motor</button></div></form></div>`;
@@ -96,7 +96,7 @@
     }
 
     async function refreshPicker() {
-        byId('savedMotorPickerStatus').textContent = target ? `Se asignará una copia independiente a ${target.name}.` : 'Seleccione un botón del plano para asignarle un motor.';
+        byId('savedMotorPickerStatus').textContent = target ? `Se vinculará la hoja de motor a ${target.name}.` : 'Seleccione un botón del plano para asignarle un motor.';
         try {
             const data = await request(`/api/motor-library/?q=${encodeURIComponent(byId('savedMotorPickerSearch').value)}`);
             const list = byId('savedMotorPickerList');
@@ -117,7 +117,7 @@
         const selected = target;
         if (!selected) return;
         const status = byId(pickerMode ? 'savedMotorPickerStatus' : 'savedMotorsStatus');
-        status.textContent = 'Creando una copia para el botón…';
+        status.textContent = 'Vinculando la hoja del motor…';
         try {
             const result = await post(selected.assign_url, { saved_motor_id: record.id });
             const workbook = selected.apply(result);
@@ -134,14 +134,14 @@
         editor.commitAll();
         if (editor.hasUnsavedChanges && !(await editor.save())) return;
         if (editor.metadata.motor_registration?.registered) {
-            editor.setStatus('Este motor ya existe en Motores guardados. Sus datos del botón siguen siendo independientes.');
+            editor.setStatus('Este motor ya existe en Motores guardados.');
             return;
         }
         if (!editor.metadata.motor_registration?.has_data) {
             editor.setStatus('Rellene datos del motor antes de registrarlo. Una ficha vacía no se puede guardar como motor.', 'error');
             return;
         }
-        registerContext = { editor, epoch: editor.epoch, id: editor.metadata.id, revision: editor.metadata.revision };
+        registerContext = { editor, epoch: editor.epoch, id: editor.metadata.id, revision: editor.metadata.revision, sheet: editor.sheet };
         byId('motorRegisterName').value = (editor.context !== 'motor-import' ? target?.name : null) || editor.metadata.name.replace(/\.xlsx$/i, '');
         byId('motorRegisterStatus').textContent = '';
         registerController.show();
@@ -155,11 +155,11 @@
         byId('btnConfirmRegisterMotor').disabled = true;
         byId('motorRegisterStatus').textContent = 'Guardando motor…';
         try {
-            const result = await post('/api/motor-library/register/', { workbook_id: context.id, revision: context.revision, name: byId('motorRegisterName').value });
+            const result = await post('/api/motor-library/register/', { workbook_id: context.id, revision: context.revision, sheet: context.sheet, name: byId('motorRegisterName').value });
             if (context.editor.visible && context.editor.epoch === context.epoch && result.workbook) {
                 context.editor.metadata = result.workbook;
                 context.editor.applyPermissions();
-                context.editor.setStatus(`Motor «${result.motor.name}» guardado. Las copias de los botones se editan de forma independiente.`, 'success');
+                context.editor.setStatus(`Motor «${result.motor.name}» guardado.`, 'success');
                 context.editor.notifySaved(result.workbook);
             }
             registerController.hide();

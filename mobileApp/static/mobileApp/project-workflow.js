@@ -21,8 +21,8 @@
           <button type="button" data-project-action="add">Agregar botón</button>
           <button type="button" data-project-action="move" id="fullscreenMoveMarker">Mover botón</button>
           <button type="button" data-project-action="saved-motors">Importar motor guardado</button>
-          <button type="button" data-project-action="assign-listing">Asignar listado</button>
-          <button type="button" data-project-action="open-listing" id="fullscreenOpenListing">Ver listado</button>
+          <button type="button" data-project-action="assign-listing">Gestionar listados</button>
+          <button type="button" data-project-action="open-listing" id="fullscreenOpenListing">Ver listados</button>
           <button type="button" data-project-action="save" id="fullscreenSaveMenu" hidden>Guardar plano</button>
           <button type="button" data-project-action="export">Exportar proyecto</button>
           <div class="fullscreen-zoom-actions"><button type="button" data-project-action="zoom-out" aria-label="Alejar">−</button><button type="button" data-project-action="fit">Ajustar</button><button type="button" data-project-action="zoom-in" aria-label="Ampliar">+</button></div>
@@ -34,26 +34,10 @@
           <button type="button" id="fullscreenSavePlan" class="quick-save" hidden><i class="bi bi-floppy" aria-hidden="true"></i><span>Guardar plano</span></button>
           <button type="button" id="fullscreenDeletePlan" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i><span>Eliminar plano</span></button>
         </div>
-        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAssignExcel">Asignar Excel</button><button type="button" id="fullscreenOpenExcel">Ver ficha</button><button type="button" id="fullscreenDeleteMarker" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button></div>
+        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAssignExcel">Asignar hoja</button><button type="button" id="fullscreenOpenExcel">Ver ficha</button><button type="button" id="fullscreenDeleteMarker" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button></div>
         <p id="fullscreenPlanStatus" class="fullscreen-plan-status" role="status"></p>`;
     document.body.append(overlay);
     const fullMenu = byId('fullscreenPlanMenu');
-
-    const listingModal = document.createElement('div');
-    listingModal.className = 'modal fade';
-    listingModal.tabIndex = -1;
-    listingModal.setAttribute('aria-labelledby', 'planListingTitle');
-    listingModal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h2 class="modal-title fs-5" id="planListingTitle">Listado del plano</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
-      <div class="modal-body"><p class="small text-muted">El listado pertenece al plano completo. Use la plantilla con número de motor, especificaciones y sector, o asigne un Excel.</p>
-      <button type="button" id="btnCreatePlanListing" class="btn btn-success w-100 mb-2">Crear listado de motores</button>
-      <button type="button" id="btnUploadPlanListing" class="btn btn-outline-success w-100 mb-3">Importar listado .xlsx</button>
-      <input type="file" id="planListingFileInput" accept=".xlsx" hidden>
-      <label for="planListingLibrary" class="small">Reutilizar un Excel asignado</label><select id="planListingLibrary" class="form-select mb-2"></select>
-      <button type="button" id="btnAssignPlanListingLibrary" class="btn btn-outline-secondary w-100">Asignar Excel seleccionado</button>
-      <p id="planListingStatus" class="small mt-2" role="status"></p></div></div></div>`;
-    document.body.append(listingModal);
-    const listingController = new bootstrap.Modal(listingModal);
 
     async function request(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -242,42 +226,8 @@
         byId('fullscreenDeleteMarker').onclick = configuration.remove;
     }
 
-    async function openListing() {
-        if (active?.plan.listing) await window.workbookEditor.open({ ...active.plan.listing, context: 'listing', preferred_sheet: 'Listado' });
-    }
-    async function configureListing() {
-        if (!active) return;
-        byId('planListingStatus').textContent = '';
-        const library = byId('planListingLibrary');
-        library.replaceChildren(new Option('Cargando…', ''));
-        listingController.show();
-        try {
-            const data = await request('/api/pdf/workbooks/');
-            library.replaceChildren(new Option('Seleccione un Excel', ''));
-            for (const book of data.workbooks) library.append(new Option(book.name, String(book.id)));
-        } catch (error) { byId('planListingStatus').textContent = error.message; }
-    }
-    async function assignListing(values, file) {
-        if (!active) return;
-        const current = active;
-        const buttons = [...listingModal.querySelectorAll('button')];
-        buttons.forEach((button) => { button.disabled = true; });
-        byId('planListingStatus').textContent = 'Asignando listado al plano…';
-        try {
-            let result;
-            if (file) {
-                const body = new FormData();
-                body.append('file', file);
-                result = await request(current.plan.assign_listing_url, { method: 'POST', body });
-            } else result = await post(current.plan.assign_listing_url, values);
-            current.plan.listing = result.listing;
-            dirty();
-            update();
-            listingModal.addEventListener('hidden.bs.modal', () => { if (active === current) openListing(); }, { once: true });
-            listingController.hide();
-        } catch (error) { byId('planListingStatus').textContent = error.message; }
-        finally { buttons.forEach((button) => { button.disabled = false; }); }
-    }
+    async function openListing() { await window.planExcel?.openListings(); }
+    async function configureListing() { await window.planExcel?.listings(); }
 
     async function listSaved() {
         const container = byId('savedPlansContainer');
@@ -384,7 +334,7 @@
         }
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || !byId('pdfMarkerDialog').hidden || listingModal.classList.contains('show')) return;
+        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || !byId('pdfMarkerDialog').hidden || document.querySelector('#excelListingManager.show, #excelBookManager.show, #excelSheetAssignment.show')) return;
         event.preventDefault();
         if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
     });
@@ -398,18 +348,6 @@
         byId(`btn${prefix}OpenListing`).addEventListener('click', openListing);
     }
     byId('btnSavedPlans').addEventListener('click', showSaved);
-    byId('btnCreatePlanListing').addEventListener('click', () => assignListing({ create_template: true }));
-    byId('btnUploadPlanListing').addEventListener('click', () => byId('planListingFileInput').click());
-    byId('planListingFileInput').addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        event.target.value = '';
-        if (file) assignListing(null, file);
-    });
-    byId('btnAssignPlanListingLibrary').addEventListener('click', () => {
-        const id = Number(byId('planListingLibrary').value);
-        if (id) assignListing({ workbook_id: id });
-        else byId('planListingStatus').textContent = 'Seleccione un Excel.';
-    });
     byId('btnImportProject').addEventListener('click', () => byId('projectFileInput').click());
     byId('projectFileInput').addEventListener('change', async (event) => {
         const file = event.target.files[0];
@@ -428,9 +366,9 @@
     });
     document.addEventListener('workbook:saved', dirty);
     window.projectWorkspace = {
-        get active() { return active; }, get full() { return full; },
+        get active() { return active; }, get full() { return full; }, get selected() { return selectedActions; },
         activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged,
         reportError(message) { status(message, true); },
-        reset() { exitFullscreen(); active = null; selection(null); listingController.hide(); update(); },
+        reset() { exitFullscreen(); active = null; selection(null); window.planExcel?.reset(); update(); },
     };
 })();

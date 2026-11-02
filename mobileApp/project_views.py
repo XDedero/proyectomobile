@@ -29,6 +29,7 @@ def get_plan(kind, plan_id):
 
 
 def project_plan_data(kind, plan):
+    from .plan_workbook import workspace_data
     try:
         saved = plan.saved_project
     except SavedProject.DoesNotExist:
@@ -38,7 +39,8 @@ def project_plan_data(kind, plan):
         'save_project_url': reverse('save_project', args=[kind, plan.pk]),
         'export_project_url': reverse('download_project', args=[kind, plan.pk]),
         'assign_listing_url': reverse('assign_plan_listing', args=[kind, plan.pk]),
-        'listing': workbook_data(plan.listing, sheets=False) if plan.listing_id else None,
+        'workbook_url': reverse('plan_workbook', args=[kind, plan.pk]),
+        **workspace_data(plan),
     }
 
 
@@ -150,24 +152,61 @@ def listing_template(count):
 @api_permissions()
 def assign_plan_listing(request, kind, plan_id):
     plan = get_plan(kind, plan_id)
+    from .plan_workbook import add_listing, add_existing_listing, change_primary_listing, delete_listing, workspace_data, WorkbookConflict
     try:
         upload = request.FILES.get('file')
         if upload is not None:
-            document = uploaded_document(upload, request.user)
+            add_listing(plan, request.user, upload)
         else:
             data = json_body(request)
-            if data.get('create_template') is True:
-                count = plan.markers.count() if kind == 'pdf' else plan.motors.count()
-                document = WorkbookDocument.objects.create(name='Listado de motores.xlsx', content=listing_template(count), updated_by=request.user)
-            elif 'workbook_id' in data:
-                document = get_object_or_404(WorkbookDocument, pk=positive_integer(data['workbook_id'], 'Excel'))
+            if data.get('action') == 'delete':
+                delete_listing(plan, positive_integer(data.get('listing_id'), 'Listado'), request.user)
+            elif data.get('action') == 'set_primary':
+                change_primary_listing(plan, data.get('sheet'), request.user)
+            elif data.get('action') == 'add_sheet':
+                add_existing_listing(plan, data.get('sheet'), request.user)
+            elif data.get('action') == 'add' or data.get('create_template') is True:
+                add_listing(plan, request.user)
             else:
-                raise ValidationError('Elija un Excel o cree el listado de motores del plano.')
-        plan.listing = document
-        plan.save(update_fields=['listing'])
+                raise ValidationError('Elija una hoja o agregue un nuevo listado.')
+    except PermissionError as exc:
+        return error_response(exc, status=403)
     except ValidationError as exc:
-        return error_response(exc)
-    return JsonResponse({'listing': workbook_data(document, sheets=False)})
+        return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
+    return JsonResponse(workspace_data(plan, request.user))
+
+
+@api_permissions()
+def plan_workbook(request, kind, plan_id):
+    from .plan_workbook import ensure_workbook, import_workbook, initialize_marker, markers, workspace_data, WorkbookConflict
+    from .views import validate_excel, plan_data
+    if request.method not in ('GET', 'POST'):
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['GET', 'POST'])
+    plan = get_plan(kind, plan_id)
+    try:
+        document = ensure_workbook(plan, request.user)
+        if request.method == 'POST':
+            upload = request.FILES.get('file')
+            if upload is not None:
+                validate_excel(upload)
+                import_workbook(plan, upload.name, upload.read(), request.user)
+            elif json_body(request).get('action') == 'template':
+                if document.plan_mode != 'template':
+                    import_workbook(plan, 'Excel del plano.xlsx', listing_template(9), request.user)
+                    document.refresh_from_db()
+                    document.plan_mode = 'template'
+                    document.save(update_fields=['plan_mode'])
+                for marker in markers(plan).filter(sheet_name=''):
+                    initialize_marker(marker, request.user)
+            else:
+                raise ValidationError('Seleccione un Excel o el formato vacío.')
+        result = workspace_data(plan, request.user)
+        if request.method == 'POST':
+            result['plan'] = pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True)
+        return JsonResponse(result)
+    except ValidationError as exc:
+        return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
 
 
 @require_GET

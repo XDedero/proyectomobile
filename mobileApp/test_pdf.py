@@ -165,9 +165,9 @@ class PdfModuleTests(TestCase):
         second = self.create_marker(plan)
         response = self.client.post(second['assign_url'], json.dumps({'workbook_id': document['id']}), content_type='application/json')
         copied_id = response.json()['marker']['workbook']['id']
-        self.assertNotEqual(copied_id, document['id'])
-        self.assertEqual(bytes(WorkbookDocument.objects.get(pk=copied_id).content),
-                         bytes(WorkbookDocument.objects.get(pk=document['id']).content))
+        self.assertEqual(copied_id, document['id'])
+        self.assertEqual(response.json()['marker']['sheet_name'], assigned.json()['marker']['sheet_name'])
+        self.assertEqual(response.json()['marker']['workbook']['metadata_url'], document['metadata_url'])
         library = self.client.get(reverse('list_workbooks')).json()
         self.assertEqual(library['workbooks'], [])
 
@@ -321,8 +321,12 @@ class PdfModuleTests(TestCase):
         self.assertEqual(assigned.status_code, 200)
         copied_id = assigned.json()['marker']['workbook']['id']
         self.assertNotEqual(copied_id, document['id'])
-        self.assertEqual(bytes(WorkbookDocument.objects.get(pk=copied_id).content),
-                         bytes(WorkbookDocument.objects.get(pk=document['id']).content))
+        content = bytes(WorkbookDocument.objects.get(pk=copied_id).content)
+        copied = load_workbook(BytesIO(content))
+        try:
+            self.assertEqual(copied[assigned.json()['marker']['sheet_name']]['B2'].value, 15)
+        finally:
+            copied.close()
         renamed = self.client.post(marker['update_url'], {'label': 'Motor asignado'}, content_type='application/json')
         self.assertEqual(renamed.status_code, 200)
         for data in ({'x': .8}, {'y': .2}, {'page': 1}):

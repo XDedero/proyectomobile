@@ -56,7 +56,8 @@ class ProjectTests(TestCase):
         plan = self.plan(kind)
         if linked:
             book = self.document()
-            self.assertEqual(self.post(plan['assign_listing_url'], {'workbook_id': book['id']}).status_code, 200)
+            imported = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', self.download(book['download_url']))})
+            self.assertEqual(imported.status_code, 200, imported.content[:400])
             if kind == 'pdf':
                 for x in (.2, .6):
                     marker = self.post(plan['markers_url'], {'page': 2, 'x': x, 'y': .3}).json()['marker']
@@ -64,7 +65,7 @@ class ProjectTests(TestCase):
             else:
                 for motor in plan['motors']:
                     self.assertEqual(self.post(motor['assign_url'], {'workbook_id': book['id']}).status_code, 200)
-        return plan, self.download(plan['export_project_url'])
+        return self.client.get(plan['detail_url']).json(), self.download(plan['export_project_url'])
 
     def test_both_formats_are_explicitly_saved_in_one_library_without_duplicates(self):
         pdf, dxf = self.plan('pdf'), self.plan('dxf')
@@ -93,8 +94,9 @@ class ProjectTests(TestCase):
         self.assertEqual(restored['pages'], original['pages'])
         self.assertEqual([(item['page'], item['x'], item['y']) for item in restored['markers']], [(2, .2, .3), (2, .6, .3)])
         ids = {item['workbook']['id'] for item in restored['markers']}
-        self.assertEqual(len(ids), 2)
-        self.assertNotIn(restored['listing']['id'], ids)
+        self.assertEqual(len(ids), 1)
+        self.assertIn(restored['listing']['id'], ids)
+        self.assertEqual(len({item['sheet_name'] for item in restored['markers']}), 1)
         for marker in restored['markers']:
             self.assertEqual(self.download(marker['workbook']['download_url']), xlsx)
         self.assertEqual(self.download(restored['listing']['download_url']), xlsx)
@@ -106,8 +108,8 @@ class ProjectTests(TestCase):
         restored = restored_response.json()['plan']
         self.assertEqual([(motor['name'], motor['x'], motor['y'], motor['z']) for motor in restored['motors']], [(motor['name'], motor['x'], motor['y'], motor['z']) for motor in original['motors']])
         ids = {motor['excel']['id'] for motor in restored['motors']}
-        self.assertEqual(len(ids), len(restored['motors']))
-        self.assertNotIn(restored['listing']['id'], ids)
+        self.assertEqual(len(ids), 1)
+        self.assertIn(restored['listing']['id'], ids)
         for motor in restored['motors']:
             self.assertEqual(self.download(motor['excel']['url']), self.download(restored['listing']['download_url']))
         self.assertEqual(self.download(restored['export_project_url'])[:2], b'PK')
@@ -116,7 +118,7 @@ class ProjectTests(TestCase):
         plan, _ = self.bundle('pdf')
         self.client.force_login(self.admin)
         document = PdfPlan.objects.get(pk=plan['id']).listing
-        edit = {'revision': 1, 'edits': [{'sheet': 'Equipos', 'row': 2, 'col': 2, 'value': 123}]}
+        edit = {'revision': document.revision, 'edits': [{'sheet': 'Equipos', 'row': 2, 'col': 2, 'value': 123}]}
         self.assertEqual(self.post(reverse('workbook_save', args=[document.pk]), edit).status_code, 200)
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
         snapshot = SavedProject.objects.get(pdf_plan_id=plan['id'])
@@ -128,7 +130,7 @@ class ProjectTests(TestCase):
             book.close()
             motor = next(item for item in manifest['workbooks'] if item['key'] == manifest['markers'][0]['workbook'])
             book = load_workbook(BytesIO(archive.read(motor['path'])))
-            self.assertEqual(book['Equipos']['B2'].value, 15)
+            self.assertEqual(book[manifest['markers'][0]['sheet']]['B2'].value, 15)
             book.close()
 
     def test_template_matches_list_capture_has_logo_and_grows_for_more_motors(self):
@@ -137,8 +139,9 @@ class ProjectTests(TestCase):
             self.post(plan['markers_url'], {'page': 1, 'x': .1 + index*.01, 'y': .3})
         response = self.post(plan['assign_listing_url'], {'create_template': True})
         self.assertEqual(response.status_code, 200)
-        document = response.json()['listing']
-        book = load_workbook(BytesIO(self.download(document['download_url'])))
+        self.assertEqual(response.json()['listings'][-1]['name'], 'Listado motores 2')
+        from .project_views import listing_template
+        book = load_workbook(BytesIO(listing_template(12)))
         self.assertEqual(book.sheetnames, ['Listado'])
         sheet = book['Listado']
         self.assertIn('IDENTIFICACIÓN DE MOTORES', sheet['B2'].value)
@@ -165,7 +168,7 @@ class ProjectTests(TestCase):
         metadata = self.client.get(listing['metadata_url']).json()
         self.assertEqual(metadata['sheets'][0]['layout']['content_bounds']['max_col'], 8)
         changed = self.post(listing['save_url'], {
-            'revision': 1,
+            'revision': metadata['revision'],
             'operations': [
                 {'sheet': 'Listado', 'type': 'insert_column', 'index': 9, 'copy_from': 8, 'extend_header_through_row': 6},
                 {'sheet': 'Listado', 'type': 'insert_row', 'index': 17, 'copy_from': 16},

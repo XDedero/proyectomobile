@@ -45,6 +45,7 @@ urlpatterns = [
     path('api/projects/<str:kind>/<int:plan_id>/save/', project_views.save_project, name='save_project'),
     path('api/projects/<str:kind>/<int:plan_id>/download/', project_views.download_project, name='download_project'),
     path('api/projects/<str:kind>/<int:plan_id>/listing/', project_views.assign_plan_listing, name='assign_plan_listing'),
+    path('api/projects/<str:kind>/<int:plan_id>/workbook/', project_views.plan_workbook, name='plan_workbook'),
     path('api/motor-library/', motor_views.saved_motors, name='saved_motors'),
     path('api/motor-library/register/', motor_views.register_motor, name='register_motor'),
     path('api/motor-library/import/', motor_views.import_motor_document, name='import_motor_document'),
