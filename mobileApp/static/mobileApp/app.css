@@ -89,7 +89,7 @@ html, body {
 .company-logo-login { width: 60px; height: 60px; border: 0; border-radius: 0; box-shadow: none; }
 .company-logo-header { width: 42px; height: 42px; }
 .company-logo-header > img { top: -12px; }
-.company-logo-login > img { top: -1px; }
+.company-logo-login > img { top: 3px; }
 .company-logo-welcome > img { top: 4px; }
 .company-logo-welcome { width: 66px; height: 58px; }
 
