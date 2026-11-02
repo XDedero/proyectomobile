@@ -28,6 +28,10 @@ Abra http://127.0.0.1:8000/ e inicie sesión con una cuenta activa de Django. Pa
 
 Mover botones requiere permiso para modificar el formato correspondiente. Las coordenadas se conservan al cambiar el zoom, la orientación o el tamaño del visor.
 
+El visor PDF mantiene una vista general de **1280 píxeles en el lado mayor**, con las proporciones del plano. Al ampliar o desplazar, dibuja nuevamente solo la zona visible, también con un máximo de 1280 píxeles en su lado mayor. Durante el gesto reutiliza la imagen existente y recupera el detalle al detenerse, tras una pausa de 160 ms. No aumenta el tamaño del lienzo con el zoom ni con la densidad de píxeles del dispositivo. El zoom llega hasta 32 veces el ajuste inicial y los botones conservan sus coordenadas.
+
+El recorte utiliza los límites de operaciones de PDF.js para omitir trazos fuera de la zona visible; al cambiar de página se liberan los lienzos anteriores. El PDF original se conserva sin reducir su resolución. La nitidez de un plano escaneado depende de su imagen original; el límite de los lienzos no limita la memoria que PDF.js necesita para decodificar imágenes del archivo. La implementación sigue el [renderizado de detalle de PDF.js](https://github.com/mozilla/pdf.js/blob/master/web/pdf_page_detail_view.js).
+
 ## Guardar y abrir
 
 **Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Solo aparece para usuarios con permisos de agregar o modificar planos, proyectos, motores o fichas. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
@@ -113,8 +117,11 @@ Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor re
 .\.venv\Scripts\python.exe manage.py test mobileApp --noinput
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
 ```
 
 Las migraciones 0008–0011 incorporan las referencias a hojas y la protección de listados. Los planos de instalaciones anteriores reúnen sus documentos al abrirse; los originales anteriores permanecen disponibles en la base de datos como respaldo de la conversión.
 
 Las pruebas usan bases de datos y archivos temporales. Cubren PDF/DXF, libros con formato, motores compartidos, originales de la biblioteca, varios listados, permisos, importación y exportación de proyectos y el flujo móvil. Las capturas quedan en `.test-artifacts/`. La prueba de navegador actual del sistema de hojas es `shared_workbook_browser_smoke.py`.
+
+`pdf_resolution_browser_smoke.py` comprueba el límite de resolución, la calidad del recorte frente al renderizado completo, el agrupamiento de cambios de zoom, el arrastre, la alineación de botones, páginas giradas, escaneos, cambios de orientación y la liberación de lienzos.

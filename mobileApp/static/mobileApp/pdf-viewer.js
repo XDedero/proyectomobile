@@ -12,6 +12,12 @@ class PdfPlanViewer {
         this.pageNumber = 0;
         this.pageCount = 0;
         this.scale = 1;
+        this.resolution = 1280;
+        this.maxZoom = 32;
+        this.detailCanvas = null;
+        this.detailRegion = null;
+        this.operationBounds = null;
+        this.overviewPromise = null;
         this.placing = false;
         this.moving = false;
         this.selectedId = null;
@@ -54,9 +60,11 @@ class PdfPlanViewer {
             if (button && event.detail === 0) this.emit('onSelect', Number(button.dataset.pdfMarkerId));
         }, { signal });
         this.container.addEventListener('keydown', (event) => this.keyDown(event), { signal });
+        this.container.addEventListener('scroll', () => this.scheduleRender(), { passive: true, signal });
         this.resizeObserver = new ResizeObserver(() => {
             if (!this.page || !this.container.clientWidth || !this.container.clientHeight) return;
             if (this.isFit) this.fit();
+            else { this.layoutStage(); this.scheduleRender(); }
         });
         this.resizeObserver.observe(this.container);
     }
@@ -110,10 +118,21 @@ class PdfPlanViewer {
     async setPage(pageNumber) {
         if (!this.document) return;
         pageNumber = Math.max(1, Math.min(this.pageCount, Number(pageNumber) || 1));
+        if (this.page && pageNumber === this.pageNumber) return this.renderPage();
         const version = this.version;
         const pageVersion = ++this.pageVersion;
         this.renderVersion += 1;
         this.cancelRender();
+        this.overviewPromise = null;
+        const previousPage = this.page;
+        this.page = null;
+        this.releaseCanvases();
+        this.operationBounds = null;
+        this.stage.hidden = true;
+        if (previousPage) {
+            previousPage.recordedBBoxes = null;
+            previousPage.cleanup();
+        }
         this.showMessage(`Cargando página ${pageNumber}…`);
         try {
             const page = await this.document.getPage(pageNumber);
@@ -155,59 +174,155 @@ class PdfPlanViewer {
         this.container.dataset.pdfZoom = (this.scale / this.fitScale()).toFixed(4);
     }
 
-    async renderPage() {
-        if (!this.page) return;
-        const page = this.page;
+    releaseCanvas(canvas) {
+        if (!canvas) return;
+        canvas.remove();
+        // Removing a canvas alone does not immediately release its bitmap.
+        canvas.width = canvas.height = 0;
+    }
+
+    releaseCanvases() {
+        this.releaseCanvas(this.canvas);
+        this.releaseCanvas(this.detailCanvas);
+        this.canvas = this.detailCanvas = null;
+        this.detailRegion = null;
+    }
+
+    visibleRegion() {
+        if (!this.page || !this.container.clientWidth || !this.container.clientHeight) return null;
+        const stage = this.stage.getBoundingClientRect();
+        const container = this.container.getBoundingClientRect();
+        const left = container.left + this.container.clientLeft;
+        const top = container.top + this.container.clientTop;
+        const x = Math.max(0, left - stage.left);
+        const y = Math.max(0, top - stage.top);
+        const right = Math.min(stage.width, left + this.container.clientWidth - stage.left);
+        const bottom = Math.min(stage.height, top + this.container.clientHeight - stage.top);
+        if (right <= x || bottom <= y) return null;
+        return { x, y, width: right - x, height: bottom - y, pageWidth: stage.width, pageHeight: stage.height, scale: this.scale };
+    }
+
+    operationFilter(region) {
+        const bounds = this.operationBounds;
+        if (!bounds || typeof bounds.isEmpty !== 'function') return null;
+        const minX = region.x / region.pageWidth, minY = region.y / region.pageHeight;
+        const maxX = (region.x + region.width) / region.pageWidth;
+        const maxY = (region.y + region.height) / region.pageHeight;
+        // PDF.js records both drawing bounds and the state dependencies they
+        // need. Use the same normalized bounds as its own detail-view renderer.
+        return index => index >= bounds.length || (!bounds.isEmpty(index) &&
+            bounds.minX(index) <= maxX && bounds.maxX(index) >= minX &&
+            bounds.minY(index) <= maxY && bounds.maxY(index) >= minY);
+    }
+
+    async renderSurface(page, viewport, width, height, generation, { transform = null, overview = false, operationsFilter = null } = {}) {
         const version = this.version;
-        const renderVersion = ++this.renderVersion;
-        this.cancelRender();
-        const viewport = page.getViewport({ scale: this.scale });
-        // Large engineering sheets can be zoomed while bitmap memory stays bounded.
-        const maxPixels = 12_000_000;
-        const maxDimension = 8192;
-        const outputScale = Math.min(
-            window.devicePixelRatio || 1,
-            2,
-            Math.sqrt(maxPixels / (viewport.width * viewport.height)),
-            maxDimension / viewport.width,
-            maxDimension / viewport.height,
-        );
-        const renderViewport = page.getViewport({ scale: this.scale * outputScale });
         const canvas = document.createElement('canvas');
-        canvas.className = 'pdf-plan-canvas';
-        canvas.setAttribute('role', 'img');
-        canvas.setAttribute('aria-label', `Página ${this.pageNumber} del plano PDF`);
-        canvas.width = Math.max(1, Math.floor(renderViewport.width));
-        canvas.height = Math.max(1, Math.floor(renderViewport.height));
-        const task = page.render({
-            canvasContext: canvas.getContext('2d', { alpha: false }),
-            viewport: renderViewport,
-            background: '#ffffff',
-        });
+        canvas.className = overview ? 'pdf-plan-canvas' : 'pdf-plan-canvas pdf-plan-detail';
+        canvas.width = Math.max(1, Math.min(this.resolution, Math.round(width)));
+        canvas.height = Math.max(1, Math.min(this.resolution, Math.round(height)));
+        if (overview) {
+            canvas.setAttribute('role', 'img');
+            canvas.setAttribute('aria-label', `Página ${this.pageNumber} del plano PDF`);
+            // A cancelled overview must never leave partial operation bounds.
+            page.recordedBBoxes = null;
+        } else canvas.setAttribute('aria-hidden', 'true');
+        let accepted = false;
+        let task;
+        try {
+            task = page.render({ canvas, viewport, transform, background: '#ffffff', recordOperations: overview, operationsFilter });
+        } catch (error) {
+            this.releaseCanvas(canvas);
+            throw error;
+        }
         this.renderTask = task;
         try {
             await task.promise;
-            if (version !== this.version || renderVersion !== this.renderVersion || page !== this.page) return;
-            this.canvas?.remove();
-            this.canvas = canvas;
-            this.stage.prepend(canvas);
-            this.message.hidden = true;
+            if (version !== this.version || generation !== this.renderVersion || page !== this.page) return null;
+            accepted = true;
+            return canvas;
         } catch (error) {
-            if (error.name !== 'RenderingCancelledException' && version === this.version && renderVersion === this.renderVersion) throw error;
+            if (error.name !== 'RenderingCancelledException' && version === this.version && generation === this.renderVersion) throw error;
+            return null;
         } finally {
             if (this.renderTask === task) this.renderTask = null;
+            if (!accepted) this.releaseCanvas(canvas);
         }
+    }
+
+    async renderPage() {
+        if (!this.page || !this.container.clientWidth || !this.container.clientHeight) return;
+        // The overview is independent of zoom. Finish it once instead of
+        // restarting a heavy page while the user moves the viewport.
+        if (this.overviewPromise) return this.overviewPromise;
+        const page = this.page;
+        const generation = ++this.renderVersion;
+        this.cancelRender();
+        if (!this.canvas) {
+            const scale = this.resolution / Math.max(this.baseViewport.width, this.baseViewport.height);
+            const viewport = page.getViewport({ scale });
+            const pending = this.renderSurface(page, viewport, viewport.width, viewport.height, generation, { overview: true });
+            this.overviewPromise = pending;
+            let canvas;
+            try { canvas = await pending; }
+            finally { if (this.overviewPromise === pending) this.overviewPromise = null; }
+            if (!canvas) return;
+            if (page !== this.page || generation !== this.renderVersion) { this.releaseCanvas(canvas); return; }
+            this.canvas = canvas;
+            this.stage.prepend(canvas);
+            this.operationBounds = page.recordedBBoxes;
+            this.message.hidden = true;
+        }
+        if (this.pointers.size || page !== this.page || generation !== this.renderVersion) return;
+        const region = this.visibleRegion();
+        if (!region) return;
+        const entirePage = region.width >= region.pageWidth - .5 && region.height >= region.pageHeight - .5;
+        if (entirePage) {
+            this.releaseCanvas(this.detailCanvas);
+            this.detailCanvas = this.detailRegion = null;
+            return;
+        }
+        const old = this.detailRegion;
+        if (old && Math.abs(old.scale - region.scale) < 1e-8 &&
+            ['x', 'y', 'width', 'height'].every(key => Math.abs(old[key] - region[key]) < .5)) return;
+        // Rasterize only this window of the page. Even at the zoom limit, no
+        // backing bitmap grows beyond 1280 pixels on either side.
+        const outputScale = this.resolution / Math.max(region.width, region.height);
+        const viewport = page.getViewport({ scale: this.scale });
+        const canvas = await this.renderSurface(page, viewport, region.width * outputScale, region.height * outputScale, generation, {
+            transform: [outputScale, 0, 0, outputScale, -region.x * outputScale, -region.y * outputScale],
+            operationsFilter: this.operationFilter(region),
+        });
+        if (!canvas) return;
+        if (page !== this.page || generation !== this.renderVersion) { this.releaseCanvas(canvas); return; }
+        Object.assign(canvas.style, {
+            left: `${region.x / region.pageWidth * 100}%`, top: `${region.y / region.pageHeight * 100}%`,
+            width: `${region.width / region.pageWidth * 100}%`, height: `${region.height / region.pageHeight * 100}%`,
+        });
+        this.releaseCanvas(this.detailCanvas);
+        this.detailCanvas = canvas;
+        this.detailRegion = region;
+        this.layer.before(canvas);
     }
 
     scheduleRender() {
         clearTimeout(this.renderTimer);
+        if (!this.page || this.overviewPromise) return;
+        if (this.renderTask) {
+            this.renderVersion += 1;
+            this.cancelRender();
+        }
+        // Pan and pinch use the current canvases; only the final view is drawn.
+        if (this.pointers.size) return;
         this.renderTimer = setTimeout(() => {
-            this.renderPage().catch((error) => this.emit('onError', error));
-        }, 140);
+            this.renderTimer = null;
+            this.renderPage().catch(error => this.emit('onError', error));
+        }, 160);
     }
 
     cancelRender() {
         clearTimeout(this.renderTimer);
+        this.renderTimer = null;
         if (this.renderTask) {
             this.renderTask.cancel();
             this.renderTask = null;
@@ -223,7 +338,9 @@ class PdfPlanViewer {
         const anchorX = (clientX - before.left) / before.width;
         const anchorY = (clientY - before.top) / before.height;
         const fitScale = this.fitScale();
-        this.scale = Math.max(fitScale / 4, Math.min(Math.max(fitScale * 32, 8), this.scale * factor));
+        const scale = Math.max(fitScale / 4, Math.min(fitScale * this.maxZoom, this.scale * factor));
+        if (Math.abs(scale - this.scale) < 1e-10) return;
+        this.scale = scale;
         this.isFit = false;
         this.layoutStage();
         const after = this.stage.getBoundingClientRect();
@@ -241,7 +358,7 @@ class PdfPlanViewer {
         this.layoutStage();
         this.container.scrollLeft = 0;
         this.container.scrollTop = 0;
-        if (changed) this.scheduleRender();
+        if (changed || this.detailCanvas || this.renderTask) this.scheduleRender();
     }
 
     setMarkers(markers) {
@@ -334,6 +451,10 @@ class PdfPlanViewer {
             }
         }
         this.container.classList.add('dragging-pdf');
+        if (!this.overviewPromise && this.renderTask) {
+            this.renderVersion += 1;
+            this.cancelRender();
+        }
     }
 
     pointerMove(event) {
@@ -389,6 +510,7 @@ class PdfPlanViewer {
         if (!this.pointers.size) {
             this.gesture = false;
             this.container.classList.remove('dragging-pdf');
+            this.scheduleRender();
         }
     }
 
@@ -458,11 +580,12 @@ class PdfPlanViewer {
         this.pageVersion += 1;
         this.renderVersion += 1;
         this.cancelRender();
+        this.overviewPromise = null;
         this.pointers.clear();
         this.gesture = false;
         this.container.classList.remove('dragging-pdf');
-        this.canvas?.remove();
-        this.canvas = null;
+        this.releaseCanvases();
+        this.operationBounds = null;
         this.page = null;
         this.baseViewport = null;
         this.pageNumber = 0;
