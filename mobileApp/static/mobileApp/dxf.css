@@ -1,0 +1,32 @@
+.dxf-viewport {
+    width: 100%;
+    height: min(52vh, 400px);
+    min-height: 280px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    background: #0f172a;
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+}
+.dxf-viewport.dragging { cursor: grabbing; }
+.dxf-viewport > svg { display: block; width: 100%; height: 100%; }
+.dxf-viewport:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.motor-target { cursor: pointer; }
+.motor-bounds { fill: transparent; stroke: transparent; vector-effect: non-scaling-stroke; }
+.motor-pin { fill: #fbbf24; stroke: #0f172a; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.motor-label { fill: #0f172a; text-anchor: middle; dominant-baseline: central; font-weight: 800; pointer-events: none; }
+.motor-target.has-excel .motor-pin { fill: #4ade80; }
+.motor-target.selected .motor-pin, .motor-target:focus .motor-pin { fill: #60a5fa; stroke: white; stroke-width: 3; }
+.motor-target.selected .motor-bounds { fill: #3b82f622; stroke: #60a5fa; stroke-width: 2; }
+.viewer-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.viewer-toolbar button { min-width: 38px; min-height: 38px; }
+.motor-list { max-height: 160px; overflow-y: auto; display: grid; gap: 6px; }
+.motor-list button { text-align: left; font-size: 0.78rem; border: 1px solid #e2e8f0; border-radius: 10px; background: white; padding: 9px; }
+.motor-list button[aria-pressed="true"] { border-color: #2563eb; background: #eff6ff; }
+.motor-coordinates { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#selectedMotorName, #excelFileName { overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+.excel-table-wrapper { overflow: auto; max-height: 360px; }
+.excel-table-wrapper th, .excel-table-wrapper td { white-space: pre-wrap; min-width: 65px; max-width: 240px; overflow-wrap: anywhere; }

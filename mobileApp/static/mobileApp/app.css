@@ -1,0 +1,228 @@
+:root {
+    --app-bg: #0f172a;
+    --primary-accent: #2563eb;
+    --primary-hover: #1d4ed8;
+    --autocad-red: #d32f2f;
+    --excel-green: #107c41;
+    --app-body-bg: #f8fafc;
+    --text-dark: #0f172a;
+    --text-muted: #64748b;
+}
+
+* {
+    box-sizing: border-box;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--app-body-bg);
+    color: #1e293b;
+}
+
+/* Real application viewport, shared by browser and embedded WebView. */
+.app-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+}
+.app-screen {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    background: var(--app-body-bg);
+}
+
+/* Vistas de la aplicación */
+.app-view {
+    display: none;
+    flex-direction: column;
+    min-height: 100%;
+    padding: 20px;
+    animation: fadeIn 0.25s ease-in-out;
+}
+.app-view.active {
+    display: flex;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Estilos Login */
+.login-hero {
+    text-align: center;
+    margin-top: 8px;
+    margin-bottom: 18px;
+}
+.brand-badge {
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 26px;
+    box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+    margin-bottom: 10px;
+}
+
+.form-control {
+    border-radius: 12px;
+    border: 1.5px solid #e2e8f0;
+    background: #ffffff;
+    font-size: 0.9rem;
+    padding: 10px 14px;
+}
+.form-control:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+
+/* Botones personalizados */
+.btn-modern-primary {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: white;
+    font-weight: 600;
+    padding: 12px;
+    border-radius: 14px;
+    border: none;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+    transition: all 0.2s;
+}
+.btn-modern-primary:hover, .btn-modern-primary:active {
+    background: linear-gradient(135deg, #1e40af, #1d4ed8);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.45);
+    color: white;
+}
+
+/* Header de la App */
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #334155;
+    transition: all 0.2s;
+}
+.icon-btn:hover, .icon-btn:focus {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+/* Tarjeta de Importar Plano */
+.cad-card {
+    border: 2px dashed #cbd5e1;
+    border-radius: 20px;
+    padding: 24px 18px;
+    text-align: center;
+    background: #ffffff;
+    transition: all 0.25s ease;
+}
+.cad-card:hover {
+    border-color: #3b82f6;
+    background: #f8fafc;
+}
+
+.btn-cad {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    border: none;
+    font-weight: 600;
+    border-radius: 14px;
+    padding: 13px 20px;
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.35);
+    transition: all 0.2s;
+}
+.btn-cad:hover {
+    background: linear-gradient(135deg, #b91c1c, #dc2626);
+    color: white;
+    transform: scale(1.02);
+}
+
+.btn-excel {
+    background: linear-gradient(135deg, #15803d, #16a34a);
+    color: white;
+    border: none;
+    font-weight: 600;
+    border-radius: 12px;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+    transition: all 0.2s;
+}
+.btn-excel:hover {
+    background: linear-gradient(135deg, #166534, #15803d);
+    color: white;
+}
+
+/* Notificación de Error personalizada (clickeable para cerrar) */
+.custom-alert {
+    display: none;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 0.86rem;
+    margin-bottom: 14px;
+    cursor: pointer;
+    user-select: none;
+    animation: fadeIn 0.2s ease;
+    transition: opacity 0.2s ease;
+}
+.custom-alert:hover {
+    opacity: 0.92;
+}
+
+/* Dropdown de usuario en la esquina */
+.user-menu-dropdown .dropdown-menu {
+    border-radius: 16px;
+    box-shadow: 0 14px 30px rgba(0,0,0,0.15);
+    border: 1px solid #e2e8f0;
+    padding: 8px;
+    min-width: 220px;
+}
+.user-menu-dropdown .dropdown-item {
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-weight: 500;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+.user-menu-dropdown .dropdown-item:hover {
+    background-color: #f1f5f9;
+}

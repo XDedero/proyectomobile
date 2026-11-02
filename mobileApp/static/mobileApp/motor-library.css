@@ -1,0 +1,11 @@
+.saved-motors-list { display: grid; gap: 10px; }
+.saved-motor-card { border: 1px solid #dce6df; border-radius: 12px; padding: 13px; background: #fff; overflow-wrap: anywhere; }
+.saved-motor-card strong { display: block; margin-bottom: 10px; color: #185b37; font-size: .88rem; }
+.saved-motor-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.saved-motor-actions .btn { min-height: 36px; font-size: .73rem; }
+.wbe-motor-registration { margin: 0; padding: 6px 12px; background: #f1f7f2; border-bottom: 1px solid #dce6df; color: #355d43; font-size: .72rem; flex-shrink: 0; }
+.wbe-motor-registration[hidden] { display: none; }
+.motor-register-modal { z-index: 2700; }
+.modal-backdrop.motor-register-backdrop { z-index: 2600; }
+#workbookEditorSaveMotor { background: #edf8ef; border-color: #7aae87; color: #175d2b; }
+#workbookEditorSaveMotor:disabled { opacity: .55; cursor: default; }
