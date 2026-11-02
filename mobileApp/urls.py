@@ -17,6 +17,7 @@ urlpatterns = [
     path('api/plans/<int:plan_id>/delete/', views.delete_plan, name='delete_plan'),
     path('api/plans/<int:plan_id>/markers/', views.create_cad_marker, name='create_cad_marker'),
     path('api/motors/<int:motor_id>/position/', views.move_cad_marker, name='move_cad_marker'),
+    path('api/motors/<int:motor_id>/delete/', views.delete_cad_marker, name='delete_cad_marker'),
     path('api/motors/<int:motor_id>/workbook/', views.motor_workbook_metadata, name='motor_workbook_metadata'),
     path('api/motors/<int:motor_id>/excel/', views.motor_excel, name='motor_excel'),
     path('api/motors/<int:motor_id>/excel/download/', views.motor_excel_download, name='motor_excel_download'),

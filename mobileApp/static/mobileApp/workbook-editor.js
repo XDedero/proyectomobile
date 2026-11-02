@@ -167,14 +167,19 @@
             titleCopy.append(title, this.filename);
             this.closeButton = this.button('×', 'workbookEditorClose', () => this.requestClose(), 'wbe-close');
             this.closeButton.setAttribute('aria-label', 'Cerrar ventana de Excel');
-            titlebar.append(titleCopy, this.closeButton);
+            this.removeMarkerButton = this.button('', 'workbookEditorDeleteMarker', () => this.removeMarker?.(), 'wbe-delete-marker');
+            this.removeMarkerButton.innerHTML = '<i class="bi bi-trash" aria-hidden="true"></i><span>Eliminar botón</span>';
+            this.removeMarkerButton.title = 'Eliminar botón del plano';
+            this.removeMarkerButton.setAttribute('aria-label', 'Eliminar botón del plano');
+            this.removeMarkerButton.hidden = true;
+            titlebar.append(titleCopy, this.removeMarkerButton, this.closeButton);
 
             const toolbar = this.node('div', 'wbe-toolbar');
             this.sheetSelect = this.node('select', 'wbe-sheet-select');
             this.sheetSelect.id = 'workbookEditorSheet';
             this.sheetSelect.setAttribute('aria-label', 'Hoja del Excel');
             this.sheetSelect.addEventListener('change', () => this.changeSheet(this.sheetSelect.value));
-            this.saveButton = this.button('Guardar plano', 'workbookEditorSave', () => window.projectWorkspace?.saveActive(), 'wbe-save');
+            this.saveButton = this.button('Guardar cambios', 'workbookEditorSave', () => this.save(), 'wbe-save');
             this.rowButton = this.button('+ Fila', 'workbookEditorAddRow', () => this.appendDimension('insert_row'));
             this.colButton = this.button('+ Columna', 'workbookEditorAddColumn', () => this.appendDimension('insert_column'));
             this.downloadButton = this.button('Exportar .xlsx', 'workbookEditorDownload', () => this.download());
@@ -279,6 +284,7 @@
         get canEdit() { return this.metadata?.can_edit === true; }
 
         applyPermissions() {
+            this.removeMarkerButton.hidden = !this.removeMarker;
             for (const button of [this.saveButton, this.rowButton, this.colButton]) button.hidden = !this.canEdit;
             if (['motor-import', 'saved-motor'].includes(this.context)) this.saveButton.hidden = true;
             const registration = this.metadata?.motor_registration;
@@ -301,6 +307,7 @@
             this.returnFocus = document.activeElement;
             this.metadata = metadata;
             this.context = metadata.context || 'motor';
+            this.removeMarker = metadata.removeMarker || null;
             this.visible = true;
             this.overlay.hidden = false;
             this.panel.style.left = '';
@@ -362,6 +369,7 @@
             this.cancelCellEditor();
             this.overlay.hidden = true;
             this.metadata = null;
+            this.removeMarker = null;
             this.sheet = null;
             this.pending.clear();
             this.tiles.clear();
@@ -918,9 +926,10 @@
         updatePending() {
             const count = this.pending.size;
             const draft = this.formulaDirty || (this.activeEdit && this.activeEdit.input.value !== this.activeEdit.originalText);
-            this.pendingLabel.textContent = !this.canEdit ? 'Solo lectura' : count || draft ? `${count + (draft ? 1 : 0)} cambio${count + (draft ? 1 : 0) === 1 ? '' : 's'} sin guardar` : 'Incluido en el plano';
+            this.pendingLabel.textContent = !this.canEdit ? 'Solo lectura' : count || draft ? `${count + (draft ? 1 : 0)} cambio${count + (draft ? 1 : 0) === 1 ? '' : 's'} sin guardar` : 'Sin cambios pendientes';
             this.saveButton.disabled = !this.canEdit || this.busy || this.staleRevision;
             this.saveMotorButton.disabled = Boolean(this.metadata?.motor_registration?.registered) || this.busy || this.staleRevision;
+            this.removeMarkerButton.disabled = this.busy;
         }
 
         setStatus(text, kind = '') {
@@ -943,7 +952,8 @@
             if (!this.canEdit) return false;
             this.commitAll();
             if (this.staleRevision) { this.markStale(); return false; }
-            if (this.busy || !this.metadata || !this.pending.size) return !this.pending.size;
+            if (this.busy || !this.metadata) return false;
+            if (!this.pending.size) { this.setStatus('Sin cambios pendientes.', 'success'); return true; }
             const epoch = this.epoch;
             const edits = [...this.pending.values()];
             this.setBusy(true);
@@ -962,7 +972,7 @@
                 this.inflight.clear();
                 this.populateSheets();
                 this.sheetSelect.value = this.sheet;
-                this.setStatus('Datos actualizados en el plano. Puede seguir editando o exportar el libro.', 'success');
+                this.setStatus('Cambios de Excel guardados.', 'success');
                 this.updateCanvasSize();
                 this.updateSelectionInputs();
                 this.render();
@@ -1040,7 +1050,7 @@
             if (this.busy || !this.metadata) return;
             this.commitAll();
             if (this.hasUnsavedChanges && !window.confirm('Recargar descartará sus cambios sin guardar. ¿Desea continuar?')) return;
-            const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet };
+            const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet, removeMarker: this.removeMarker };
             this.close(true);
             await this.open(metadata);
         }
@@ -1073,7 +1083,7 @@
 
         dialogKeydown(event) {
             if (!this.visible) return;
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); window.projectWorkspace?.saveActive(); return; }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); this.save(); return; }
             if (event.key === 'Escape' && !this.activeEdit && event.target !== this.formula) { event.preventDefault(); this.requestClose(); return; }
             if (event.key !== 'Tab' || event.target === this.viewport || event.target === this.activeEdit?.input) return;
             const elements = [...this.panel.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter((element) => element.getClientRects().length);

@@ -50,6 +50,7 @@ def saved_data(saved):
         'date': saved.saved_at.isoformat(),
         'detail_url': reverse('detail_pdf' if kind == 'pdf' else 'plan_detail', args=[plan.pk]),
         'export_url': reverse('download_saved_project', args=[saved.pk]),
+        'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[plan.pk]),
     }
 
 
@@ -63,6 +64,9 @@ def saved_projects(request):
 @require_POST
 @api_permissions()
 def save_project(request, kind, plan_id):
+    permission = 'can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'
+    if not capabilities(request.user)[permission]:
+        return error_response('No tiene permiso para guardar planos.', status=403)
     plan = get_plan(kind, plan_id)
     try:
         content = export_project(kind, plan)

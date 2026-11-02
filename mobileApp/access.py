@@ -17,6 +17,18 @@ def capabilities(user):
             f'{permission.content_type.app_label}.{permission.codename}'
             for permission in Permission.objects.select_related('content_type').all()
         )
+    # Saving a project includes its drawing and motor workbooks. Honor the
+    # existing motor-editor role as well as explicit add/change project rights.
+    can_save_plan = can_view and any(user.has_perm(f'mobileApp.{action}_{model}')
+        for model in ('plan', 'motor', 'workbookdocument', 'savedproject')
+        for action in ('add', 'change'))
+    can_save_pdf_plan = can_save_plan or (can_view and any(
+        user.has_perm(f'mobileApp.{action}_{model}')
+        for model in ('pdfplan', 'pdfmarker') for action in ('add', 'change')))
+    can_change_plan = can_view and user.has_perm('mobileApp.change_plan')
+    can_delete_plan = can_view and user.has_perm('mobileApp.delete_plan')
+    can_change_pdf_plan = can_view and (user.has_perm('mobileApp.change_pdfplan') or can_change_plan)
+    can_delete_pdf_plan = can_view and (user.has_perm('mobileApp.delete_pdfplan') or can_delete_plan)
     return {
         'can_view': bool(can_view),
         'can_import': bool(can_view),
@@ -24,10 +36,14 @@ def capabilities(user):
         'can_change_excel': bool(can_view and (
             user.has_perm('mobileApp.change_workbookdocument') or user.has_perm('mobileApp.change_motor')
         )),
-        'can_change_plan': bool(can_view and user.has_perm('mobileApp.change_plan')),
-        'can_delete_plan': bool(can_view and user.has_perm('mobileApp.delete_plan')),
-        'can_change_pdf_plan': bool(can_view and (user.has_perm('mobileApp.change_pdfplan') or user.has_perm('mobileApp.change_plan'))),
-        'can_delete_pdf_plan': bool(can_view and (user.has_perm('mobileApp.delete_pdfplan') or user.has_perm('mobileApp.delete_plan'))),
+        'can_save_plan': bool(can_save_plan),
+        'can_save_pdf_plan': bool(can_save_pdf_plan),
+        'can_change_plan': bool(can_change_plan),
+        'can_delete_plan': bool(can_delete_plan),
+        'can_change_pdf_plan': bool(can_change_pdf_plan),
+        'can_delete_pdf_plan': bool(can_delete_pdf_plan),
+        'can_delete_cad_marker': bool(can_view and (can_change_plan or can_delete_plan or user.has_perm('mobileApp.delete_motor'))),
+        'can_delete_pdf_marker': bool(can_view and (can_change_pdf_plan or can_delete_pdf_plan or user.has_perm('mobileApp.delete_pdfmarker') or user.has_perm('mobileApp.delete_motor'))),
         'can_administer': bool(can_administer),
     }
 

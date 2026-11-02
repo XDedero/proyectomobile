@@ -30,11 +30,15 @@ Mover botones requiere permiso para modificar el formato correspondiente. Las co
 
 ## Guardar y abrir
 
-**Guardar plano**, disponible en PDF, DXF, pantalla completa y el editor de fichas, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano.
+**Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Solo aparece para usuarios con permisos de agregar o modificar planos, proyectos, motores o fichas. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
 
 **Ver planos guardados** en el menú principal, el menú de usuario y el módulo PDF abre una biblioteca común. Cada registro muestra **PDF** o **DXF** en pequeño. Volver a guardar el mismo plano actualiza su registro; no crea otra copia. Los planos existentes antes de esta actualización se conservan mediante la migración `0006`.
 
 Las modificaciones y asignaciones del trabajo abierto se mantienen en el servidor. El botón Guardar plano registra o actualiza la copia completa de la biblioteca y su archivo de proyecto. Un plano nuevo no aparece en esa biblioteca hasta guardarlo.
+
+**Eliminar plano** aparece junto a Guardar plano, en pantalla completa y como papelera en la biblioteca, exclusivamente para usuarios con permiso de eliminar el formato correspondiente. Tras confirmar, elimina el plano original, sus botones y su copia guardada; también cierra cualquier copia abierta de ese plano y descarta su restauración automática. No vuelve a la biblioteca hasta importarlo y guardarlo de nuevo. Los motores guardados y las fichas independientes se conservan.
+
+**Eliminar botón** está junto a la selección del plano y en la barra de selección de pantalla completa. En una ficha asociada a un botón también aparece una papelera en la cabecera del editor; las fichas de la biblioteca y los listados no muestran esa acción. La eliminación pide confirmación y conserva el dibujo y el resto de botones. La barra inferior del visor completo ofrece añadir, mover, guardar y eliminar plano según los permisos, sin abrir el menú.
 
 ## Listado general de motores
 
@@ -52,7 +56,7 @@ Todos los botones parten del mismo formato, pero cada uno tiene su propio archiv
 
 Los Excel se conservan con sus tamaños, estilos, bordes, combinaciones e imágenes. Las fichas numeradas se abren en Vista ficha, con ajuste de página, de ancho y zoom. Los gráficos de líneas de consumo y aislación se dibujan desde el XML original. Listado mantiene su vista de tabla.
 
-El guardado es el del plano: no existe un apartado independiente de Excel guardados ni un botón Guardar Excel. Al cerrar una ficha, sus cambios se incorporan al trabajo del plano; **Guardar plano** conserva la copia completa con todas las fichas y el listado. Los conflictos de revisión impiden sobrescribir cambios ajenos; si falló el guardado, la ficha permanece abierta con los cambios.
+**Guardar cambios** y Ctrl+S dentro del editor guardan únicamente los datos del Excel. Al cerrar una ficha también se guardan sus cambios pendientes. Ninguna de esas acciones registra el plano en la biblioteca: **Guardar plano**, fuera del editor, conserva la copia completa con todas las fichas y el listado. Los conflictos de revisión impiden sobrescribir cambios ajenos; si falló el guardado, la ficha permanece abierta con los cambios.
 
 **Exportar .xlsx** descarga el libro completo. **Exportar .csv** descarga la hoja seleccionada en UTF-8 con BOM y separador coma. Estas opciones están disponibles tanto en fichas de motor como en el listado. CSV contiene valores, sin los estilos y gráficos propios de XLSX.
 
@@ -68,7 +72,7 @@ Guardar motor conserva un original para reutilizarlo; **Guardar plano** sigue in
 
 ## Transportar un proyecto
 
-**Exportar proyecto** guarda primero el trabajo y descarga un archivo **.planproj**. Es un ZIP versionado que reúne:
+**Exportar proyecto** descarga un archivo **.planproj**. Si el usuario tiene permiso de guardar, actualiza primero su copia del proyecto; un lector puede exportar el trabajo abierto sin crear una copia en la biblioteca. Es un ZIP versionado que reúne:
 
 - El PDF o DXF original.
 - Las páginas y posiciones de los botones.
@@ -81,15 +85,19 @@ La importación valida el manifiesto, los planos y los Excel; no extrae rutas ar
 
 ## Usuarios y permisos
 
-Todos los usuarios registrados y activos pueden importar, añadir botones, asignar fichas o listados, registrar motores con fichas ya rellenadas, guardar proyectos y exportarlos. Los permisos de modificación y eliminación se mantienen independientes:
+Todos los usuarios registrados y activos pueden importar, añadir botones, asignar fichas o listados, registrar motores con fichas ya rellenadas y exportar proyectos. Guardar un plano requiere permisos de agregar o modificar. Los permisos de modificación y eliminación se mantienen independientes:
 
 | Acción | Permiso |
 | --- | --- |
+| Guardar un plano DXF | Cualquier permiso `add` o `change` de `plan`, `motor`, `workbookdocument` o `savedproject` |
+| Guardar un plano PDF | Los anteriores, o `add`/`change` de `pdfplan` o `pdfmarker` |
 | Editar datos y agregar filas/columnas de Excel | `mobileApp.change_workbookdocument` o `mobileApp.change_motor` |
 | Cambiar nombre o mover botones de un DXF | `mobileApp.change_plan` |
 | Eliminar un DXF | `mobileApp.delete_plan` |
 | Cambiar nombre o mover/eliminar botones de un PDF | `mobileApp.change_pdfplan` o `mobileApp.change_plan` |
 | Eliminar un PDF | `mobileApp.delete_pdfplan` o `mobileApp.delete_plan` |
+| Eliminar un botón DXF | `change_plan`, `delete_plan` o `delete_motor` |
+| Eliminar un botón PDF | `change_pdfplan`, `change_plan`, `delete_pdfplan`, `delete_plan`, `delete_pdfmarker` o `delete_motor` |
 
 Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor rechaza cambios de contenido y movimientos sin permiso. Todas las modificaciones requieren CSRF. No se cambian cuentas, contraseñas o permisos existentes.
 
@@ -106,6 +114,7 @@ Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor re
 .\.venv\Scripts\python.exe scripts/motor_workbook_smoke.py
 .\.venv\Scripts\python.exe scripts/motor_library_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/mobile_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/plan_actions_browser_smoke.py
 ```
 
 Las pruebas Chrome usan bases de datos y archivos temporales independientes. Para comparar un Excel real: `scripts/motor_workbook_smoke.py --workbook "ruta\Ficha Motores.xlsx"`. Las capturas se guardan en `.test-artifacts/`. El archivo original y la base de datos de la aplicación no se modifican durante esas pruebas.

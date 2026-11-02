@@ -80,7 +80,7 @@ def check_browser(url, directory):
             exported.value.save_as(directory / 'registered-export.xlsx')
             edit(page, 'C18', 'WEG copia del primer botón')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             page.locator('#workbookEditorClose').click()
             print('PASS: blank standard form, required name, filled named registration and duplicate button lock', flush=True)
 
@@ -109,7 +109,7 @@ def check_browser(url, directory):
             first = page.request.get(url + f'api/pdf/workbooks/{first_id}/metadata/').json()
             assert value(page.request.get(urljoin(url, first['download_url'])).body()) == 'WEG copia del primer botón'
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Sin cambios pendientes')
             page.locator('#workbookEditorClose').click()
             print('PASS: fullscreen saved motor picker creates independent XLSX/CSV data and leaves original intact', flush=True)
 

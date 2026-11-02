@@ -242,7 +242,7 @@ def check_browser(url, directory):
             page.locator('#workbookEditorFormula').fill('Revisado')
             page.locator('#workbookEditorFormula').press('Enter')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             check_workbook_layout(page)
             page.locator('#workbookEditorClose').click()
             with page.expect_download() as download_info:
@@ -263,6 +263,8 @@ def check_browser(url, directory):
             expect(page.locator('#excelFileName')).to_have_text('motor_01.xlsx')
             print('PASS: motor tapping, independent XLSX assignments, download and invalid content rejection', flush=True)
 
+            page.locator('#btnCadSavePlan').click()
+            expect(page.locator('#cadProjectSaveStatus')).to_have_text('Plano guardado')
             page.reload()
             login(page)
             expect(page.locator('.motor-target')).to_have_count(3)

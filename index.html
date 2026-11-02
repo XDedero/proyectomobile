@@ -8,18 +8,18 @@
     <meta name="color-scheme" content="light">
     <title>Gestión de Planos DXF y Motores</title>
     <!-- Bootstrap 5.3 CSS -->
-    <link href="mobileApp/static/mobileApp/vendor/bootstrap.min.css?v=1793577955018203800" rel="stylesheet">
+    <link href="mobileApp/static/mobileApp/vendor/bootstrap.min.css?v=1793586162199482700" rel="stylesheet">
     <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/vendor/bootstrap-icons.css?v=1793577955018203800">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/vendor/bootstrap-icons.css?v=1793586162199482700">
 
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/app.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/dxf.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-viewer.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-workflow.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/workbook-editor.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/project-workflow.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/motor-library.css?v=1793577955018203800">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/mobile-layout.css?v=1793577955018203800">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/app.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/dxf.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-viewer.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-workflow.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/workbook-editor.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/project-workflow.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/motor-library.css?v=1793586162199482700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/mobile-layout.css?v=1793586162199482700">
 </head>
 <body>
 
@@ -261,7 +261,7 @@
                             <span class="badge bg-danger-subtle text-danger fw-semibold px-2 py-1" style="font-size: 0.72rem;">
                                 <i class="bi bi-file-code-fill me-1"></i> Plano Activo
                             </span>
-                            <button class="btn btn-sm btn-link text-muted p-0 text-decoration-none" id="btnRemovePlan" title="Cerrar plano; permanece en Planos guardados">
+                            <button class="btn btn-sm btn-link text-muted p-0 text-decoration-none" id="btnRemovePlan" title="Cerrar vista del plano">
                                 <i class="bi bi-x-lg"></i> Cerrar
                             </button>
                         </div>
@@ -282,10 +282,13 @@
 
                     <div class="d-flex gap-2 mb-2">
                         <button type="button" id="btnRenameCadPlan" class="btn btn-sm btn-outline-secondary" hidden>Cambiar nombre</button>
-                        <button type="button" id="btnDeleteCadPlan" class="btn btn-sm btn-outline-danger" hidden>Eliminar plano guardado</button>
                     </div>
                     <div id="cadProjectActions" class="project-actions mb-2" hidden>
-                        <button type="button" id="btnCadSavePlan" class="btn btn-primary btn-sm">Guardar plano</button>
+                        <div class="plan-primary-actions">
+                            <button type="button" id="btnCadSavePlan" class="btn btn-primary" hidden><i class="bi bi-floppy" aria-hidden="true"></i> Guardar plano</button>
+                            <span id="cadSaveBadge" class="plan-save-badge" role="status"></span>
+                            <button type="button" id="btnDeleteCadPlan" class="btn btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar plano</button>
+                        </div>
                         <button type="button" id="btnCadExportProject" class="btn btn-outline-primary btn-sm">Exportar proyecto</button>
                         <button type="button" id="btnCadAssignListing" class="btn btn-outline-success btn-sm">Asignar listado</button>
                         <button type="button" id="btnCadOpenListing" class="btn btn-outline-success btn-sm" hidden>Ver listado</button>
@@ -313,7 +316,10 @@
                     </section>
 
                     <section id="selectedMotorCard" class="card border-0 shadow-sm rounded-4 p-3 mb-3" hidden>
-                        <span class="text-primary small fw-semibold mb-1">Motor seleccionado</span>
+                        <div class="marker-selection-heading">
+                            <span class="text-primary small fw-semibold">Botón seleccionado</span>
+                            <button type="button" id="btnDeleteCadMarker" class="btn btn-sm btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button>
+                        </div>
                         <h6 id="selectedMotorName" class="fw-bold mb-2"></h6>
                         <p id="selectedMotorCoordinates" class="motor-coordinates small text-secondary mb-2"></p>
                         <p id="selectedMotorHint" class="small text-muted">Asigne un archivo .xlsx a este motor.</p>
@@ -377,7 +383,11 @@
                             <button type="button" id="btnPdfClosePlan" class="btn pdf-close-action"><i class="bi bi-x-lg" aria-hidden="true"></i><span>Cerrar</span></button>
                         </div>
                         <div class="project-actions mb-2">
-                            <button type="button" id="btnPdfSavePlan" class="btn btn-primary btn-sm">Guardar plano</button>
+                            <div class="plan-primary-actions">
+                                <button type="button" id="btnPdfSavePlan" class="btn btn-primary" hidden><i class="bi bi-floppy" aria-hidden="true"></i> Guardar plano</button>
+                                <span id="pdfSaveBadge" class="plan-save-badge" role="status"></span>
+                                <button type="button" id="btnDeletePdfPlan" class="btn btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar plano</button>
+                            </div>
                             <button type="button" id="btnPdfExportProject" class="btn btn-outline-primary btn-sm">Exportar proyecto</button>
                             <button type="button" id="btnPdfAssignListing" class="btn btn-outline-success btn-sm">Asignar listado</button>
                             <button type="button" id="btnPdfOpenListing" class="btn btn-outline-success btn-sm" hidden>Ver listado</button>
@@ -386,7 +396,6 @@
                         <p id="pdfProjectSaveStatus" class="small text-secondary" role="status"></p>
                         <div class="d-flex gap-2 mb-2">
                             <button type="button" id="btnRenamePdfPlan" class="btn btn-sm btn-outline-secondary" hidden>Cambiar nombre</button>
-                            <button type="button" id="btnDeletePdfPlan" class="btn btn-sm btn-outline-danger" hidden>Eliminar plano guardado</button>
                         </div>
                         <div class="pdf-view-controls mb-3">
                             <div>
@@ -417,7 +426,10 @@
                         <div id="pdfMarkerList" class="pdf-marker-list" aria-label="Botones de esta página"></div>
                     </section>
                     <section id="pdfSelectedMarker" class="card border-0 shadow-sm rounded-4 p-3 mb-3" hidden>
-                        <span class="small text-primary fw-semibold">Botón seleccionado</span>
+                        <div class="marker-selection-heading">
+                            <span class="small text-primary fw-semibold">Botón seleccionado</span>
+                            <button type="button" id="btnPdfDeleteSelectedMarker" class="btn btn-sm btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button>
+                        </div>
                         <h6 id="pdfSelectedMarkerName" class="fw-bold mt-1 pdf-selection-name"></h6>
                         <p id="pdfSelectedWorkbookName" class="small text-muted pdf-selection-name"></p>
                         <button type="button" id="btnPdfOpenWorkbook" class="btn btn-excel pdf-excel-action mb-2" hidden><i class="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i><span>Abrir y editar Excel</span></button>
@@ -434,7 +446,7 @@
          MODAL: PLANOS GUARDADOS
          ============================================== -->
     <div class="modal fade" id="modalSavedPlans" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content rounded-4 border-0 shadow">
                 <div class="modal-header border-0 pb-0">
                     <h6 class="modal-title fw-bold text-dark">
@@ -445,6 +457,7 @@
                 <div class="modal-body">
                     <p class="text-muted small mb-3">Historial de planos guardados:</p>
                     <div class="list-group gap-2 border-0" id="savedPlansContainer"></div>
+                    <p id="savedPlansFeedback" class="small text-danger mt-2 mb-0" role="alert"></p>
                 </div>
                 <div class="modal-footer border-0 pt-0">
                     <button type="button" class="btn btn-secondary btn-sm w-100 rounded-3" data-bs-dismiss="modal">Cerrar</button>
@@ -480,17 +493,17 @@
     </div>
 
     <!-- Bootstrap 5.3 Bundle JS con Popper -->
-    <script src="mobileApp/static/mobileApp/vendor/bootstrap.bundle.min.js?v=1793577955018203800"></script>
+    <script src="mobileApp/static/mobileApp/vendor/bootstrap.bundle.min.js?v=1793586162199482700"></script>
 
-    <script src="mobileApp/static/mobileApp/mobile-runtime.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/app-state.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/dxf-viewer.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/plan-workflow.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/pdf-viewer.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/workbook-editor.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/pdf-workflow.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/project-workflow.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/motor-library.js?v=1793577955018203800"></script>
-    <script src="mobileApp/static/mobileApp/auth.js?v=1793577955018203800"></script>
+    <script src="mobileApp/static/mobileApp/mobile-runtime.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/app-state.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/dxf-viewer.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/plan-workflow.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/pdf-viewer.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/workbook-editor.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/pdf-workflow.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/project-workflow.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/motor-library.js?v=1793586162199482700"></script>
+    <script src="mobileApp/static/mobileApp/auth.js?v=1793586162199482700"></script>
 </body>
 </html>

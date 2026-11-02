@@ -21,6 +21,7 @@ class ProjectTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = get_user_model().objects.create_user('proyectos', password='clave-proyectos')
+        cls.user.user_permissions.add(Permission.objects.get(content_type__app_label='mobileApp', codename='add_savedproject'))
         cls.admin = get_user_model().objects.create_superuser('admin_proyectos', password='clave')
 
     def setUp(self):

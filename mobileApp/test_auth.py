@@ -107,6 +107,8 @@ class AuthenticationPermissionTests(TestCase):
             'can_view': True, 'can_import': True, 'can_assign': True,
             'can_change_excel': False, 'can_change_plan': False, 'can_delete_plan': False,
             'can_change_pdf_plan': False, 'can_delete_pdf_plan': False, 'can_administer': False,
+            'can_save_plan': False, 'can_save_pdf_plan': False,
+            'can_delete_cad_marker': False, 'can_delete_pdf_marker': False,
         })
         self.assertFalse(self.reader.has_perm('mobileApp.add_plan'))
         plan = self.import_plan(self.reader)

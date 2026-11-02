@@ -77,7 +77,7 @@ def check_browser(url, directory, source):
             page.locator('#workbookEditorGo').click()
             page.locator('#workbookEditorFormula').fill('Motor de prueba')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             expect(page.locator('.wbe-sheet-chart')).to_have_count(2)
             page.locator('#workbookEditorPresentation').click()
             expect(page.locator('.workbook-editor-panel')).not_to_have_class(re.compile(r'\bis-form-view\b'))

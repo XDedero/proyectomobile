@@ -82,12 +82,15 @@
         for (const id of ['btnImportPdf', 'btnPdfClosePlan', 'btnPdfAddMarker', 'btnPdfMoveMarker']) byId(id).disabled = value;
         for (const button of dialog.querySelectorAll('button')) button.disabled = value;
         updatePermissions();
+        byId('btnPdfDeleteSelectedMarker').disabled = value;
+        window.projectWorkspace?.update();
     }
     function selectedMarker() { return plan?.markers.find((marker) => marker.id === selectedId); }
     function markerName(marker) {
         return marker.label || `Botón ${plan?.markers.findIndex((item) => item.id === marker.id) + 1}`;
     }
     function setMode(next) {
+        window.projectWorkspace?.modeChanged(next);
         mode = next;
         viewer.setPlacing(next === 'add');
         viewer.setMoving(next === 'move');
@@ -124,7 +127,7 @@
         const marker = selectedMarker();
         byId('pdfSelectedMarker').hidden = !marker;
         if (window.projectWorkspace?.active?.kind === 'pdf') window.projectWorkspace.selection(marker ? {
-            name: markerName(marker), workbook: marker.workbook, assign: configureMarker, open: () => openWorkbook(marker.workbook),
+            name: markerName(marker), workbook: marker.workbook, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
             target: { name: markerName(marker), assign_url: marker.assign_url, apply(result) {
                 const index = plan.markers.findIndex((item) => item.id === result.marker.id);
                 if (index < 0) return null;
@@ -134,7 +137,7 @@
                 activateProject();
                 updateMarkers();
                 window.projectWorkspace.dirty();
-                return result.marker.workbook;
+                return { ...result.marker.workbook, removeMarker: appState.user?.permissions.can_delete_pdf_marker ? deleteSelectedMarker : null };
             } },
         } : null);
         if (!marker) return;
@@ -163,7 +166,7 @@
 
     async function openWorkbook(workbook) {
         hideDialog();
-        try { await editor.open(workbook); }
+        try { await editor.open({ ...workbook, removeMarker: appState.user?.permissions.can_delete_pdf_marker ? deleteSelectedMarker : null }); }
         catch (error) { showError(error); }
     }
 
@@ -363,16 +366,22 @@
     byId('btnPdfUnlinkWorkbook').addEventListener('click', () => markerAction(
         (marker) => post(marker.update_url, { workbook_id: null }), 'Nueva ficha vacía asignada al botón.', true,
     ));
-    byId('btnPdfDeleteMarker').addEventListener('click', () => {
+    async function deleteSelectedMarker() {
         const marker = selectedMarker();
-        if (!marker || !window.confirm(`¿Eliminar «${markerName(marker)}» del plano? El Excel seguirá en la biblioteca.`)) return;
-        markerAction(() => post(marker.delete_url, {}), 'Botón eliminado.');
-    });
+        if (!marker || busy || !appState.user?.permissions.can_delete_pdf_marker) return;
+        if (!window.confirm(`¿Eliminar el botón «${markerName(marker)}» del plano?`)) return;
+        if (!(await editor.requestClose())) return;
+        await markerAction(() => post(marker.delete_url, {}), 'Botón eliminado.');
+        setMode('explore');
+    }
+    byId('btnPdfDeleteMarker').addEventListener('click', deleteSelectedMarker);
+    byId('btnPdfDeleteSelectedMarker').addEventListener('click', deleteSelectedMarker);
     function updatePermissions() {
         const permissions = appState.user?.permissions || {};
         byId('btnGoToPdfSection').hidden = !appState.user;
         byId('btnPdfMoveMarker').hidden = !permissions.can_change_pdf_plan;
-        byId('btnPdfDeleteMarker').hidden = !permissions.can_change_pdf_plan;
+        byId('btnPdfDeleteMarker').hidden = !permissions.can_delete_pdf_marker;
+        byId('btnPdfDeleteSelectedMarker').hidden = !permissions.can_delete_pdf_marker;
         byId('btnRenamePdfPlan').hidden = !plan || !permissions.can_change_pdf_plan;
         byId('btnDeletePdfPlan').hidden = !plan || !permissions.can_delete_pdf_plan;
         byId('btnPdfOpenWorkbook').querySelector('span').textContent = permissions.can_change_excel ? 'Abrir y editar Excel' : 'Ver Excel';
@@ -390,13 +399,6 @@
         } catch (error) { showError(error); }
         finally { setBusy(false); }
     });
-    byId('btnDeletePdfPlan').addEventListener('click', async () => {
-        if (!plan || busy || !window.confirm(`¿Eliminar el plano guardado «${plan.name}»? Los Excel seguirán en la biblioteca.`)) return;
-        setBusy(true);
-        try { await post(plan.delete_url, {}); reset(); }
-        catch (error) { showError(error); }
-        finally { setBusy(false); }
-    });
     dialog.addEventListener('click', (event) => { if (event.target === dialog && !busy) hideDialog(); });
     dialog.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && !busy) { event.preventDefault(); hideDialog(); }
@@ -408,6 +410,7 @@
     });
     window.pdfWorkflow = {
         reset,
+        removeDeleted(id) { if (plan?.id === id) reset(); },
         permissionsChanged: updatePermissions,
         canLeave() { return editor.requestClose(); },
         async open(nextPlan) {
@@ -418,7 +421,7 @@
 
     function activateProject() {
         if (plan && view.classList.contains('active')) {
-            window.projectWorkspace?.activate({ kind: 'pdf', plan, viewport, viewer, setMode });
+            window.projectWorkspace?.activate({ kind: 'pdf', plan, viewport, viewer, setMode, isBusy: () => busy });
             updateSelection();
         }
     }

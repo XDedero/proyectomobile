@@ -1,5 +1,16 @@
 .project-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .project-actions .btn { min-height: 38px; font-size: .75rem; }
+.plan-primary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding: 10px; margin-bottom: 3px; border: 1px solid #dbe4ef; border-radius: 12px; background: #f8fafc; }
+.plan-primary-actions .btn { font-size: .8rem; }
+.plan-primary-actions > .btn-outline-danger { margin-left: auto; }
+.plan-save-badge { font-size: .7rem; color: #15803d; }
+.plan-save-badge.has-changes { color: #92400e; }
+.marker-selection-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.marker-selection-heading .btn { font-size: .75rem; }
+.saved-plan-row { display: flex; align-items: center; gap: 6px; padding: 8px; }
+.saved-plan-row > button:first-child { flex: 1; min-width: 0; }
+.saved-plan-row > .btn { flex-shrink: 0; }
+.saved-plan-row > a, .saved-plan-row > [data-delete-plan] { min-width: 44px; }
 .project-kind-badge { display: block; margin-top: 4px; font-size: .65rem; color: #64748b; letter-spacing: .04em; }
 .plan-fullscreen { position: fixed; inset: 0; width: 100%; height: 100dvh; z-index: 1040; display: flex; flex-direction: column; background: #0f172a; color: white; }
 .plan-fullscreen[hidden], .project-actions[hidden] { display: none !important; }
@@ -20,6 +31,22 @@
 .fullscreen-selection { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: #172337; }
 .fullscreen-selection[hidden] { display: none; }
 .fullscreen-selection > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+.fullscreen-selection { flex-wrap: wrap; }
+.fullscreen-selection > span { flex-basis: 100%; }
+.plan-quick-actions { display: flex; flex-shrink: 0; gap: 6px; padding: 8px max(8px, var(--safe-right, 0px)) 8px max(8px, var(--safe-left, 0px)); background: #172337; border-top: 1px solid #334155; }
+.plan-quick-actions button { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 48px; padding: 5px; border: 1px solid #526176; border-radius: 10px; background: #243449; color: #f8fafc; font-size: .68rem; }
+.plan-quick-actions button > i { font-size: 1rem; }
+.plan-quick-actions .quick-save { background: #1d4ed8; border-color: #3b82f6; }
+.plan-quick-actions button[aria-pressed="true"] { background: #e0ecff; border-color: #60a5fa; color: #172337; }
+.plan-quick-actions .quick-danger, .fullscreen-selection .quick-danger { border-color: #f87171; color: #fecaca; }
+.plan-quick-actions button:disabled { opacity: .45; }
+.wbe-delete-marker { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 44px; min-height: 44px; border: 1px solid #fca5a5; border-radius: 9px; background: #fff1f2; color: #be123c; font-size: .75rem !important; padding: 7px 10px; }
+@media (max-width: 600px) {
+    .wbe-delete-marker > span { display: none; }
+    .fullscreen-selection > button { flex: 1; padding-inline: 6px; font-size: .7rem; }
+    .plan-primary-actions { gap: 6px; }
+    .plan-save-badge { order: 3; flex-basis: 100%; }
+}
 .fullscreen-plan-status { margin: 0; padding: 5px 12px max(5px, env(safe-area-inset-bottom)); min-height: 26px; background: #172337; font-size: .75rem; }
 .fullscreen-plan-status.has-error { color: #fecaca; }
 .dxf-viewport.moving-markers .motor-target { cursor: grab; }

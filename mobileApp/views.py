@@ -104,6 +104,7 @@ def motor_data(motor):
         'excel': excel,
         'assign_url': reverse('motor_excel', args=[motor.pk]),
         'move_url': reverse('move_cad_marker', args=[motor.pk]),
+        'delete_url': reverse('delete_cad_marker', args=[motor.pk]),
     }
 
 
@@ -349,6 +350,22 @@ def delete_plan(request, plan_id):
         for storage, name in files:
             transaction.on_commit(lambda storage=storage, name=name: storage.delete(name))
     # WorkbookDocument objects remain in the library when a plan is removed.
+    return JsonResponse({'deleted': True})
+
+
+@require_POST
+@api_permissions()
+def delete_cad_marker(request, motor_id):
+    if not capabilities(request.user)['can_delete_cad_marker']:
+        return JsonResponse({'error': 'No tiene permiso para eliminar botones de este plano.'}, status=403)
+    motor = get_object_or_404(Motor, pk=motor_id)
+    legacy_file = (motor.excel.storage, motor.excel.name) if motor.excel else None
+    with transaction.atomic():
+        motor.delete()
+        if legacy_file:
+            storage, name = legacy_file
+            transaction.on_commit(lambda: storage.delete(name))
+    # Motor originals and workbooks remain available independently of the pin.
     return JsonResponse({'deleted': True})
 
 

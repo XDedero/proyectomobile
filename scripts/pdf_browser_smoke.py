@@ -78,7 +78,7 @@ def edit_cell(page, address, expected, replacement):
     page.locator('#workbookEditorFormula').fill(replacement)
     page.locator('#workbookEditorFormula').press('Enter')
     page.locator('#workbookEditorSave').click()
-    expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+    expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
 
 
 def run_checks(url, directory):

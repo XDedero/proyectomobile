@@ -59,7 +59,7 @@ def check_browser(url, directory):
             page.locator('#workbookEditorGo').click()
             page.locator('#workbookEditorFormula').fill('Motor actualizado en pantalla completa')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             with page.expect_download() as motor_csv:
                 page.locator('#workbookEditorCsv').click()
             assert 'Motor actualizado en pantalla completa' in Path(motor_csv.value.path()).read_text(encoding='utf-8-sig')
@@ -88,12 +88,12 @@ def check_browser(url, directory):
             expect(page.locator('#workbookEditorStatus')).to_contain_text('Columna agregada')
             page.locator('#workbookEditorFormula').fill('Columna adicional')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             page.locator('#workbookEditorAddRow').click()
             expect(page.locator('#workbookEditorStatus')).to_contain_text('Fila agregada')
             page.locator('#workbookEditorFormula').fill('Motor adicional')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Cambios de Excel guardados')
             with page.expect_download() as csv_download:
                 page.locator('#workbookEditorCsv').click()
             assert csv_download.value.suggested_filename.endswith('.csv')
@@ -153,7 +153,7 @@ def check_browser(url, directory):
             page.locator('#btnCreatePlanListing').click()
             expect(page.locator('#workbookEditorSheet')).to_have_value('Listado')
             page.locator('#workbookEditorSave').click()
-            expect(page.locator('#workbookEditorStatus')).to_contain_text('Plano guardado')
+            expect(page.locator('#workbookEditorStatus')).to_contain_text('Sin cambios pendientes')
             page.locator('#workbookEditorClose').click()
             with page.expect_download() as cad_export:
                 menu(page, 'export')

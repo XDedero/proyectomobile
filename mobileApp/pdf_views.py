@@ -213,8 +213,8 @@ def update_marker(request, marker_id):
 @require_POST
 @api_permissions()
 def delete_marker(request, marker_id):
-    if not capabilities(request.user)['can_change_pdf_plan']:
-        return error_response('No tiene permiso para modificar este plano.', status=403)
+    if not capabilities(request.user)['can_delete_pdf_marker']:
+        return error_response('No tiene permiso para eliminar botones de este plano.', status=403)
     marker = get_object_or_404(PdfMarker, pk=marker_id)
     marker.delete()
     return JsonResponse({'deleted': True})

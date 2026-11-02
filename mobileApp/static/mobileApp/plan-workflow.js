@@ -35,6 +35,8 @@
         btnRemovePlan.disabled = value;
         btnImportAutoCAD.innerHTML = value ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Procesando…' : originalImportLabel;
         if (message) status.textContent = message;
+        document.getElementById('btnDeleteCadMarker').disabled = value;
+        window.projectWorkspace?.update();
     }
 
     async function request(url, file, values) {
@@ -88,7 +90,7 @@
         motorCard.hidden = !motor;
         excelLinkedSection.style.display = motor?.excel ? 'block' : 'none';
         if (window.projectWorkspace?.active?.kind === 'dxf') window.projectWorkspace.selection(motor ? {
-            name: motor.name, workbook: motor.excel, assign: chooseExcel, open: showPreview,
+            name: motor.name, workbook: motor.excel, assign: chooseExcel, open: showPreview, remove: deleteSelectedMarker,
             target: { name: motor.name, assign_url: motor.assign_url, apply(result) {
                 const current = appState.currentPlan?.motors.find((item) => item.id === result.motor.id);
                 if (!current) return null;
@@ -98,7 +100,7 @@
                 updatePlanCardUI();
                 viewer.select(current.id);
                 window.projectWorkspace.dirty();
-                return current.excel;
+                return { ...current.excel, removeMarker: permissions().can_delete_cad_marker ? deleteSelectedMarker : null };
             } },
         } : null);
         if (!motor) return;
@@ -272,7 +274,7 @@
     async function showPreview() {
         const motor = selectedMotor();
         if (!motor?.excel || !permissions().can_view) return;
-        await window.workbookEditor.open(motor.excel);
+        await window.workbookEditor.open({ ...motor.excel, removeMarker: permissions().can_delete_cad_marker ? deleteSelectedMarker : null });
     }
 
     function updateActions() {
@@ -281,6 +283,7 @@
         document.getElementById('btnDeleteCadPlan').hidden = !plan || !permissions().can_delete_plan;
         document.getElementById('btnAddCadMarker').disabled = busy || !permissions().can_assign;
         document.getElementById('btnMoveCadMarker').hidden = !permissions().can_change_plan;
+        document.getElementById('btnDeleteCadMarker').hidden = !permissions().can_delete_cad_marker;
     }
 
     async function loadLibrary() {
@@ -318,6 +321,7 @@
         viewer.container.classList.toggle('moving-markers', viewer.moving);
         document.getElementById('btnAddCadMarker').setAttribute('aria-pressed', String(placing));
         document.getElementById('btnMoveCadMarker').setAttribute('aria-pressed', String(viewer.moving));
+        window.projectWorkspace?.modeChanged(mode);
         status.textContent = placing ? 'Toque el plano donde desea añadir el botón.' : viewer.moving ? 'Arrastre un botón hasta su nueva ubicación.' : 'Puede recorrer el plano.';
     }
     document.getElementById('btnAddCadMarker').addEventListener('click', () => setMode(placing ? 'explore' : 'add'));
@@ -347,7 +351,7 @@
     };
     function activateProject() {
         if (appState.currentPlan && viewImportAutoCAD.classList.contains('active')) {
-            window.projectWorkspace?.activate({ kind: 'dxf', plan: appState.currentPlan, viewport: viewer.container, viewer, setMode });
+            window.projectWorkspace?.activate({ kind: 'dxf', plan: appState.currentPlan, viewport: viewer.container, viewer, setMode, isBusy: () => busy });
             updateMotorCard();
         }
     }
@@ -382,14 +386,32 @@
         } catch (error) { showError(error.message); }
         finally { setBusy(false); }
     });
-    document.getElementById('btnDeleteCadPlan').addEventListener('click', async () => {
+    async function deleteSelectedMarker() {
         const plan = appState.currentPlan;
-        if (!plan || busy || !window.confirm(`¿Eliminar el plano guardado «${plan.name}»? Los Excel seguirán en la biblioteca.`)) return;
+        const motor = selectedMotor();
+        if (!plan || !motor || busy || !permissions().can_delete_cad_marker) return;
+        if (!window.confirm(`¿Eliminar el botón «${motor.name}» del plano?`)) return;
+        if (!(await window.workbookEditor.requestClose())) return;
+        const currentRevision = revision;
         setBusy(true);
-        try { await request(plan.delete_url, null, {}); close(); }
+        try {
+            await request(motor.delete_url, null, {});
+            if (currentRevision !== revision || appState.currentPlan !== plan) return;
+            plan.motors = plan.motors.filter((item) => item.id !== motor.id);
+            viewer.pins.get(motor.id)?.group.remove();
+            viewer.pins.delete(motor.id);
+            [...viewer.pins.values()].forEach((pin, index) => { pin.label.textContent = String(index + 1); });
+            appState.selectedMotorId = null;
+            setMode('explore');
+            updatePlanCardUI();
+            viewer.update();
+            window.projectWorkspace.dirty();
+            status.textContent = 'Botón eliminado.';
+        }
         catch (error) { showError(error.message); }
         finally { setBusy(false); }
-    });
+    }
+    document.getElementById('btnDeleteCadMarker').addEventListener('click', deleteSelectedMarker);
     window.addEventListener('workbook-saved', (event) => {
         for (const motor of appState.currentPlan?.motors || []) {
             if (motor.excel?.id === event.detail.id) {
@@ -415,6 +437,11 @@
 
     document.getElementById('btnPreviewExcel').addEventListener('click', () => showPreview());
     window.planWorkflow = { close, listSaved, restore, permissionsChanged, activate: activateProject,
+        removeDeleted(id) {
+            let remembered;
+            try { remembered = localStorage.getItem(activeKey()); } catch (_) {}
+            if (appState.currentPlan?.id === id || remembered === String(id)) close();
+        },
         async open(plan) {
             switchView(viewImportAutoCAD);
             await openPlan(plan, ++revision);
