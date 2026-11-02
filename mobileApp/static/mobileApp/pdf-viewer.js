@@ -71,23 +71,47 @@ class PdfPlanViewer {
 
     async library() {
         if (!this.libraryPromise) {
-            const url = this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf.mjs';
+            const url = this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf-entry.mjs';
             this.libraryPromise = import(url).then((pdfjs) => {
-                pdfjs.GlobalWorkerOptions.workerSrc = this.options.workerUrl || '/static/mobileApp/vendor/pdfjs/pdf.worker.mjs';
+                this.pdfjsVersion = pdfjs.version;
+                pdfjs.GlobalWorkerOptions.workerSrc = this.options.workerUrl || '/static/mobileApp/vendor/pdfjs/pdf.worker-entry.mjs';
                 return pdfjs;
             }).catch((error) => { this.libraryPromise = null; throw error; });
         }
         return this.libraryPromise;
     }
 
+    viewerError(error, phase) {
+        if (error.name === 'PdfViewerError') return error;
+        const detail = String(error.message || '');
+        let message;
+        if (error.status === 401 || error.status === 403) message = 'No se pudo acceder al PDF con esta sesión. Inicie sesión nuevamente.';
+        else if (error.status === 404 || error.name === 'MissingPDFException') message = 'El archivo PDF no está disponible en esta instalación. Vuelva a importar el plano si no hay una copia guardada válida.';
+        else if (error.name === 'PasswordException') message = 'Este PDF está protegido con contraseña. Importe una copia sin protección.';
+        else if (error.name === 'InvalidPDFException') message = 'El archivo recibido no es un PDF válido o está incompleto. Vuelva a importar el original.';
+        else if (/version.*does not match/i.test(detail)) message = 'Los componentes del visor PDF tienen versiones distintas. Recargue la página para actualizarlos.';
+        else if (/is not a function|is not defined|unsupported|unexpected token/i.test(detail) || error.name === 'SyntaxError') message = 'Este navegador no puede iniciar el visor PDF. Actualice iOS o el navegador y vuelva a abrir la aplicación.';
+        else if (phase === 'library' || /worker/i.test(detail)) message = 'No se pudo cargar el visor PDF. Compruebe la conexión y recargue la página.';
+        else if (phase === 'render') message = 'El dispositivo no pudo dibujar esta página del PDF. Cierre otras pestañas e intente nuevamente.';
+        else message = 'No se pudo descargar el PDF. Compruebe la conexión y vuelva a abrir el plano.';
+        console.error('[Visor PDF]', { phase, name: error.name, detail, version: this.pdfjsVersion }, error);
+        const failure = new Error(message, { cause: error });
+        failure.name = 'PdfViewerError';
+        failure.status = error.status;
+        failure.phase = phase;
+        return failure;
+    }
+
     async load(sourceUrl, markers = [], initialPage = 1) {
         this.clear();
         const version = this.version;
         this.showMessage('Abriendo plano PDF…');
+        let phase = 'library';
         try {
             const pdfjs = await this.library();
             if (version !== this.version) return false;
-            const assetBase = new URL('.', new URL(this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf.mjs', location.href)).href;
+            phase = 'document';
+            const assetBase = new URL('.', new URL(this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf-entry.mjs', location.href)).href;
             const loadingTask = pdfjs.getDocument({
                 url: sourceUrl,
                 withCredentials: true,
@@ -102,16 +126,15 @@ class PdfPlanViewer {
             this.document = document;
             this.pageCount = document.numPages;
             this.setMarkers(markers);
+            phase = 'render';
             await this.setPage(initialPage);
             return version === this.version;
         } catch (error) {
             if (version !== this.version) return false;
-            const message = error.name === 'PasswordException'
-                ? 'Este PDF está protegido con contraseña. Importe una copia sin protección.'
-                : 'No se pudo mostrar el PDF. Compruebe el archivo e intente nuevamente.';
-            this.showMessage(message);
-            this.emit('onError', new Error(message));
-            throw new Error(message, { cause: error });
+            const failure = this.viewerError(error, phase);
+            this.showMessage(failure.message);
+            this.emit('onError', failure);
+            throw failure;
         }
     }
 
@@ -154,9 +177,10 @@ class PdfPlanViewer {
             this.emit('onPageChange', { page: this.pageNumber, pageCount: this.pageCount });
         } catch (error) {
             if (version !== this.version || pageVersion !== this.pageVersion || error.name === 'RenderingCancelledException') return;
-            this.showMessage('No se pudo dibujar esta página del PDF.');
-            this.emit('onError', error);
-            throw error;
+            const failure = this.viewerError(error, 'render');
+            this.showMessage(failure.message);
+            this.emit('onError', failure);
+            throw failure;
         }
     }
 
@@ -358,7 +382,7 @@ class PdfPlanViewer {
         this.layoutStage();
         this.container.scrollLeft = 0;
         this.container.scrollTop = 0;
-        if (changed || this.detailCanvas || this.renderTask) this.scheduleRender();
+        if (changed || !this.canvas || this.detailCanvas || this.renderTask) this.scheduleRender();
     }
 
     setMarkers(markers) {

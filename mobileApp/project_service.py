@@ -17,7 +17,7 @@ from django.db import transaction
 from pypdf import PdfReader
 
 from .dxf_service import import_dxf, MAX_MOTORS
-from .models import Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet
+from .models import Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet, SavedProject
 
 MAX_PROJECT_BYTES = 100 * 1024 * 1024
 MAX_PROJECT_UNPACKED = 250 * 1024 * 1024
@@ -27,6 +27,39 @@ def plan_model(kind):
     if kind not in ('pdf', 'dxf'):
         raise ValidationError('El formato del plano debe ser PDF o DXF.')
     return PdfPlan if kind == 'pdf' else Plan
+
+
+def open_plan_source(kind, plan):
+    """Use the saved original when a deployment has lost the media file."""
+    if plan.source:
+        try:
+            return plan.source.open('rb')
+        except FileNotFoundError:
+            pass
+    saved = SavedProject.objects.filter(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}).values_list('content', flat=True).first()
+    if saved and len(saved) <= MAX_PROJECT_BYTES:
+        try:
+            with ZipFile(BytesIO(bytes(saved))) as archive:
+                if archive.getinfo('manifest.json').file_size > 8 * 1024 * 1024:
+                    raise ValueError('Manifest too large')
+                manifest = json.loads(archive.read('manifest.json'))
+                path = f'plan/source.{kind}'
+                if (not isinstance(manifest, dict) or manifest.get('format') != 'motor-plan-project'
+                        or type(manifest.get('version')) is not int or manifest['version'] not in (1, 2, 3)
+                        or manifest.get('kind') != kind or manifest.get('source') != path):
+                    raise ValueError('Invalid source reference')
+                info = archive.getinfo(path)
+                if not 0 < info.file_size <= settings.PLAN_UPLOAD_MAX_BYTES:
+                    raise ValueError('Invalid source size')
+                # Read only the known member; never extract archive paths.
+                with archive.open(info) as member:
+                    source = member.read(settings.PLAN_UPLOAD_MAX_BYTES + 1)
+                if len(source) != info.file_size or (kind == 'pdf' and not source.startswith(b'%PDF-')):
+                    raise ValueError('Invalid original')
+                return BytesIO(source)
+        except (BadZipFile, KeyError, ValueError, TypeError, OSError, RuntimeError, NotImplementedError, EOFError, ZlibError):
+            pass
+    raise ValidationError('El archivo original del plano no está disponible y no hay una copia válida en el proyecto guardado. Vuelva a importar el plano.', code='plan_source_missing')
 
 
 def export_project(kind, plan):
@@ -53,7 +86,7 @@ def export_project(kind, plan):
     }
     manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode('utf-8')
     content = bytes(document.content)
-    with plan.source.open('rb') as stream:
+    with open_plan_source(kind, plan) as stream:
         source = stream.read()
     if len(markers) > MAX_MOTORS or len(manifest_bytes) > 8 * 1024 * 1024 or len(source) + len(content) + len(manifest_bytes) > MAX_PROJECT_UNPACKED:
         raise ValidationError('El proyecto supera el tamaño transportable permitido.')

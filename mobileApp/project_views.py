@@ -59,8 +59,24 @@ def saved_data(saved):
 @require_GET
 @api_permissions()
 def saved_projects(request):
-    projects = SavedProject.objects.defer('content', 'cad_plan__svg').select_related('cad_plan', 'pdf_plan')
-    return JsonResponse({'plans': [saved_data(saved) for saved in projects]})
+    projects = SavedProject.objects.select_related('cad_plan', 'pdf_plan').only(
+        'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
+        'cad_plan__id', 'cad_plan__name', 'pdf_plan__id', 'pdf_plan__name',
+    )
+    availability = {}
+    try:
+        for kind, model in (('pdf', PdfPlan), ('dxf', Plan)):
+            value = request.GET.get(kind)
+            if value is not None:
+                if not value.isascii() or not value.isdecimal() or len(value) > 19:
+                    raise ValidationError('Plano debe ser un entero válido mayor que cero.')
+                plan_id = positive_integer(int(value), 'Plano', maximum=2**63 - 1)
+                availability[kind] = {'id': plan_id, 'exists': model.objects.filter(pk=plan_id).exists()}
+    except ValidationError as exc:
+        return error_response(exc)
+    # Check working plans as well as saved copies: a newly imported plan is
+    # intentionally absent from the library until the user saves it.
+    return JsonResponse({'plans': [saved_data(saved) for saved in projects], 'availability': availability})
 
 
 @require_POST

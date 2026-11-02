@@ -117,6 +117,41 @@ class PlanActionTests(TestCase):
             self.assertEqual(self.client.get(marker['delete_url']).status_code, 405)
             self.grant()
 
+    def test_deletion_is_authoritative_for_other_devices_and_stale_saves(self):
+        deleting_device = Client()
+        deleting_device.force_login(self.admin)
+        other_device = Client()
+        other_device.force_login(self.reader)
+        self.grant('add_plan')
+        for kind in ('pdf', 'dxf'):
+            with self.subTest(kind=kind):
+                plan = self.import_plan(kind)
+                # Unsaved imports must not be treated as deleted by live checks.
+                response = other_device.get(reverse('saved_projects'), {kind: plan['id']})
+                self.assertTrue(response.json()['availability'][kind]['exists'])
+                self.assertEqual(response.json()['plans'], [])
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+                saved = other_device.get(reverse('saved_projects')).json()['plans'][0]
+                self.assertEqual(other_device.get(plan['detail_url']).status_code, 200)
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertEqual(self.post(plan['delete_url'], client=deleting_device).status_code, 200)
+                state = other_device.get(reverse('saved_projects'), {kind: plan['id']})
+                self.assertEqual(state.json()['plans'], [])
+                self.assertEqual(state.json()['availability'][kind], {'id': plan['id'], 'exists': False})
+                self.assertIn('no-store', state.headers['Cache-Control'])
+                for endpoint in (plan['detail_url'], saved['export_url'], plan['export_project_url']):
+                    self.assertEqual(other_device.get(endpoint).status_code, 404)
+                self.assertEqual(self.post(plan['save_project_url'], client=other_device).status_code, 404)
+                self.assertEqual(other_device.get(reverse('saved_projects')).json()['plans'], [])
+
+    def test_availability_checks_require_login_and_valid_plan_ids(self):
+        self.assertEqual(Client().get(reverse('saved_projects'), {'pdf': 1}).status_code, 401)
+        for value in ('', 'abc', '-1', '0', '1.5'):
+            self.assertEqual(self.client.get(reverse('saved_projects'), {'pdf': value}).status_code, 400)
+        pdf, dxf = self.import_plan('pdf'), self.import_plan('dxf')
+        state = self.client.get(reverse('saved_projects'), {'pdf': pdf['id'], 'dxf': dxf['id']}).json()
+        self.assertEqual(state['availability'], {'pdf': {'id': pdf['id'], 'exists': True}, 'dxf': {'id': dxf['id'], 'exists': True}})
+
     def test_marker_deletion_retains_csrf_and_authentication_requirements(self):
         plan = self.import_plan('dxf')
         url = plan['motors'][0]['delete_url']

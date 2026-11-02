@@ -5,6 +5,7 @@
     let selectedActions = null;
     let previousOverflow = '', fullscreenOwned = false;
     let pickingFile = false;
+    let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
     const overlay = document.createElement('section');
     overlay.id = 'planFullscreen';
     overlay.className = 'plan-fullscreen';
@@ -160,9 +161,14 @@
         if (!window.confirm(`¿Eliminar «${plan.name}» de la aplicación? Se quitarán sus botones y desaparecerá de Planos guardados.`)) return;
         if (!(await window.workbookEditor.requestClose())) return;
         deleting = true;
+        libraryRequestVersion += 1;
+        libraryLoading = false;
         update();
         try {
-            await post(plan.delete_url);
+            try { await post(plan.delete_url); }
+            catch (error) { if (error.status !== 404) throw error; }
+            libraryRequestVersion += 1;
+            libraryLoading = false;
             if (kind === 'pdf') window.pdfWorkflow.removeDeleted(plan.id);
             else window.planWorkflow.removeDeleted(plan.id);
             await listSaved();
@@ -229,13 +235,36 @@
     async function openListing() { await window.planExcel?.openListings(); }
     async function configureListing() { await window.planExcel?.listings(); }
 
-    async function listSaved() {
+    async function listSaved({ quiet = false } = {}) {
+        const userId = appState.user?.id;
+        if (!userId) return;
+        const version = ++libraryRequestVersion;
+        const parameters = new URLSearchParams();
+        for (const [kind, workflow] of [['pdf', window.pdfWorkflow], ['dxf', window.planWorkflow]]) {
+            if (workflow?.currentPlan) parameters.set(kind, workflow.currentPlan.id);
+        }
         const container = byId('savedPlansContainer');
-        byId('savedPlansFeedback').textContent = '';
-        container.textContent = 'Cargando planos guardados…';
+        if (!quiet) {
+            byId('savedPlansFeedback').textContent = '';
+            container.textContent = 'Cargando planos guardados…';
+        }
+        libraryLoading = true;
         try {
-            const data = await request('/api/projects/');
+            const data = await request(`/api/projects/?${parameters}`);
+            if (version !== libraryRequestVersion || appState.user?.id !== userId) return;
+            for (const [kind, state] of Object.entries(data.availability || {})) {
+                if (state.exists !== false || isBusy()) continue;
+                const workflow = kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow;
+                if (workflow?.currentPlan?.id !== state.id) continue;
+                workflow.removeDeleted(state.id);
+                window.planExcel?.reset();
+                status('Este plano fue eliminado de la aplicación.', false, kind);
+            }
             byId('savedCountBadge').textContent = data.plans.length;
+            if (quiet && !byId('modalSavedPlans').classList.contains('show')) return;
+            const signature = JSON.stringify(data.plans);
+            if (quiet && signature === librarySignature) return;
+            librarySignature = signature;
             container.replaceChildren();
             if (!data.plans.length) container.textContent = 'No hay planos guardados. Abra un PDF o DXF y pulse Guardar plano.';
             for (const saved of data.plans) {
@@ -251,13 +280,21 @@
                 badge.textContent = saved.kind.toUpperCase();
                 button.append(name, badge);
                 button.addEventListener('click', async () => {
+                    let detailsLoaded = false;
                     try {
                         if (!(await window.workbookEditor.requestClose())) return;
                         exitFullscreen();
                         modalSavedPlans.hide();
                         const plan = await request(saved.detail_url);
+                        detailsLoaded = true;
                         await openPlan(saved.kind, plan);
-                    } catch (error) { container.textContent = error.message; }
+                    } catch (error) {
+                        if (error.status === 404 && !detailsLoaded) {
+                            (saved.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow)?.removeDeleted(saved.plan_id);
+                            await listSaved();
+                            byId('savedPlansFeedback').textContent = 'Este plano fue eliminado de la aplicación.';
+                        } else container.textContent = error.message;
+                    }
                 });
                 const exportButton = document.createElement('a');
                 exportButton.className = 'btn btn-sm btn-outline-primary';
@@ -281,9 +318,24 @@
                 }
                 container.append(row);
             }
-        } catch (error) { container.textContent = error.message; }
+        } catch (error) {
+            // Connection failures never mean a plan was deleted. Keep the last
+            // confirmed state until this installation can be reached again.
+            if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) container.textContent = error.message;
+        } finally { if (version === libraryRequestVersion) libraryLoading = false; }
     }
     function showSaved() { modalSavedPlans.show(); listSaved(); }
+    function synchronize() {
+        if (!appState.user || document.hidden || isBusy() || libraryLoading) return;
+        listSaved({ quiet: true });
+    }
+    window.addEventListener('focus', synchronize);
+    window.addEventListener('pageshow', synchronize);
+    window.addEventListener('online', synchronize);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
+    setInterval(() => {
+        if (window.pdfWorkflow?.currentPlan || window.planWorkflow?.currentPlan || byId('modalSavedPlans').classList.contains('show')) synchronize();
+    }, 5000);
     async function openPlan(kind, plan) {
         if (kind === 'pdf') await window.pdfWorkflow.open(plan);
         else await window.planWorkflow.open(plan);
@@ -369,6 +421,11 @@
         get active() { return active; }, get full() { return full; }, get selected() { return selectedActions; },
         activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged,
         reportError(message) { status(message, true); },
-        reset() { exitFullscreen(); active = null; selection(null); window.planExcel?.reset(); update(); },
+        reset() {
+            libraryRequestVersion += 1;
+            libraryLoading = false;
+            librarySignature = null;
+            exitFullscreen(); active = null; selection(null); window.planExcel?.reset(); update();
+        },
     };
 })();

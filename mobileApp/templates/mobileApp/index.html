@@ -418,7 +418,7 @@
                             <button type="button" id="btnPdfMoveMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-arrows-move" aria-hidden="true"></i><span>Mover botones</span></button>
                         </div>
                         <p id="pdfModeHint" class="small text-muted mb-2">Deslice para recorrer el plano. Use + y − para ampliar.</p>
-                        <div id="pdfViewport" data-pdfjs-url="{% static 'mobileApp/vendor/pdfjs/pdf.mjs' %}" data-worker-url="{% static 'mobileApp/vendor/pdfjs/pdf.worker.mjs' %}" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
+                        <div id="pdfViewport" data-pdfjs-url="{% static 'mobileApp/vendor/pdfjs/pdf-entry.mjs' %}?v={{ asset_version }}" data-worker-url="{% static 'mobileApp/vendor/pdfjs/pdf.worker-entry.mjs' %}?v={{ asset_version }}" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
                         <p class="small text-muted mt-2">Toque un botón para abrir su Excel o asignarle uno.</p>
                         <div id="pdfMarkerList" class="pdf-marker-list" aria-label="Botones de esta página"></div>
                     </section>

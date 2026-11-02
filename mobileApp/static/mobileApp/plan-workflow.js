@@ -414,11 +414,17 @@
 
     document.getElementById('btnPreviewExcel').addEventListener('click', () => showPreview());
     window.planWorkflow = { close, listSaved, restore, permissionsChanged, activate: activateProject,
+        get currentPlan() { return appState.currentPlan; },
         select: selectMotor,
         removeDeleted(id) {
             let remembered;
             try { remembered = localStorage.getItem(activeKey()); } catch (_) {}
-            if (appState.currentPlan?.id === id || remembered === String(id)) close();
+            if (appState.currentPlan?.id === id) {
+                const documentId = window.workbookEditor?.metadata?.id;
+                const current = appState.currentPlan;
+                if (documentId && (current.workbook?.id === documentId || current.listing?.id === documentId || current.motors.some(motor => motor.excel?.id === documentId))) window.workbookEditor.close(true);
+                close();
+            } else if (remembered === String(id)) remember(null);
         },
         async open(plan) {
             switchView(viewImportAutoCAD);

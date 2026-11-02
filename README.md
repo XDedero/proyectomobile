@@ -32,6 +32,12 @@ El visor PDF mantiene una vista general de **1280 píxeles en el lado mayor**, c
 
 El recorte utiliza los límites de operaciones de PDF.js para omitir trazos fuera de la zona visible; al cambiar de página se liberan los lienzos anteriores. El PDF original se conserva sin reducir su resolución. La nitidez de un plano escaneado depende de su imagen original; el límite de los lienzos no limita la memoria que PDF.js necesita para decodificar imágenes del archivo. La implementación sigue el [renderizado de detalle de PDF.js](https://github.com/mozilla/pdf.js/blob/master/web/pdf_page_detail_view.js).
 
+El visor utiliza **PDF.js 6.4.299 legacy**, con compatibilidad adicional para `Promise.withResolvers` en la página y en su worker. Ambos componentes tienen versiones de caché coordinadas, lo que evita mezclar archivos antiguos y nuevos. Esto corrige fallos reproducidos con funciones JavaScript ausentes en perfiles de Safari. La versión concreta de iOS sigue determinando las funciones disponibles. El origen de la dependencia y sus verificaciones están en [SOURCE.md](mobileApp/static/mobileApp/vendor/pdfjs/SOURCE.md).
+
+Si un PDF guardado conserva su registro pero falta el archivo físico en `media/`, la aplicación lee el original incluido en su proyecto guardado. También utiliza esa copia al exportar o volver a guardar el proyecto. Se comprueban formato, referencia y tamaño del archivo. Al eliminar el plano se elimina también esa copia guardada. Si el original tampoco está en el respaldo, aparece un error que solicita volver a importarlo. Importar en `localhost` guarda archivos en esa instalación; transferir únicamente la base de datos no transfiere `media/`.
+
+Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un archivo inválido, una incompatibilidad del navegador y un fallo de dibujo. La consola conserva el error técnico para diagnosticarlo; un archivo físico ausente no se confunde con un plano eliminado.
+
 ## Guardar y abrir
 
 **Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Solo aparece para usuarios con permisos de agregar o modificar planos, proyectos, motores o fichas. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
@@ -41,6 +47,10 @@ El recorte utiliza los límites de operaciones de PDF.js para omitir trazos fuer
 Las modificaciones y asignaciones del trabajo abierto se mantienen en el servidor. El botón Guardar plano registra o actualiza la copia completa de la biblioteca y su archivo de proyecto. Un plano nuevo no aparece en esa biblioteca hasta guardarlo.
 
 **Eliminar plano** aparece junto a Guardar plano, en pantalla completa y como papelera en la biblioteca, exclusivamente para usuarios con permiso de eliminar el formato correspondiente. Tras confirmar, elimina el plano original, sus botones y su copia guardada; también cierra cualquier copia abierta de ese plano y descarta su restauración automática. No vuelve a la biblioteca hasta importarlo y guardarlo de nuevo. Los motores guardados y las fichas independientes se conservan.
+
+Las sesiones conectadas a la misma instalación comprueban los planos abiertos y la biblioteca visible cada cinco segundos, al volver a la aplicación y al recuperar la conexión. Un plano eliminado se retira también de esos visores y se cierra su ficha abierta. Los fallos de conexión conservan el último estado confirmado; una respuesta antigua no puede reemplazar una consulta más reciente. Los planos recién importados siguen disponibles aunque aún no estén guardados.
+
+Si un plano vuelve a aparecer **después de recargar**, hay que comprobar que ambos dispositivos usan la misma instalación y que su almacenamiento es persistente. Este proyecto utiliza SQLite en `PLANOS_DATA_DIR` (por defecto, la carpeta del proyecto) y actualmente `db.sqlite3` está incluido en Git. Un despliegue que recupera esa copia antigua puede recuperar también sus planos. Render utiliza por defecto un [sistema de archivos temporal](https://render.com/docs/disks): el código de borrado no puede conservar cambios de una base que la plataforma descarta. Esta corrección no cambia la configuración de Render ni modifica o elimina la base de datos local.
 
 **Eliminar botón** está junto a la selección del plano y en la barra de selección de pantalla completa. En una ficha asociada a un botón también aparece una papelera en la cabecera del editor; las fichas de la biblioteca y los listados no muestran esa acción. La eliminación pide confirmación y conserva el dibujo y el resto de botones. La barra inferior del visor completo ofrece añadir, mover, guardar y eliminar plano según los permisos, sin abrir el menú.
 
@@ -118,6 +128,9 @@ Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor re
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/multi_device_deletion_browser_smoke.py
+.\.venv\Scripts\python.exe -m playwright install webkit
+.\.venv\Scripts\python.exe scripts/pdf_compatibility_browser_smoke.py
 ```
 
 Las migraciones 0008–0011 incorporan las referencias a hojas y la protección de listados. Los planos de instalaciones anteriores reúnen sus documentos al abrirse; los originales anteriores permanecen disponibles en la base de datos como respaldo de la conversión.
@@ -125,3 +138,7 @@ Las migraciones 0008–0011 incorporan las referencias a hojas y la protección 
 Las pruebas usan bases de datos y archivos temporales. Cubren PDF/DXF, libros con formato, motores compartidos, originales de la biblioteca, varios listados, permisos, importación y exportación de proyectos y el flujo móvil. Las capturas quedan en `.test-artifacts/`. La prueba de navegador actual del sistema de hojas es `shared_workbook_browser_smoke.py`.
 
 `pdf_resolution_browser_smoke.py` comprueba el límite de resolución, la calidad del recorte frente al renderizado completo, el agrupamiento de cambios de zoom, el arrastre, la alineación de botones, páginas giradas, escaneos, cambios de orientación y la liberación de lienzos.
+
+`multi_device_deletion_browser_smoke.py` abre sesiones independientes, elimina PDF y DXF y comprueba su retirada de los visores, fichas y bibliotecas del otro dispositivo, incluida la recarga. También cubre consultas que llegan fuera de orden y fallos de conexión.
+
+`pdf_compatibility_browser_smoke.py` comprueba Chromium y WebKit con sesiones independientes, funciones JavaScript ausentes en la página y el worker y un PDF cuyo archivo en `media/` se ha eliminado. Abre la copia guardada, páginas giradas y escaneadas y verifica el zoom a 1280 píxeles. También comprueba el mensaje de archivo inaccesible y la reapertura posterior.

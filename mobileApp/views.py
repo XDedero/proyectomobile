@@ -34,6 +34,7 @@ def index(request):
     frontend_files = [app_directory / 'templates' / 'mobileApp' / 'index.html']
     frontend_files.extend((app_directory / 'static' / 'mobileApp').glob('*.js'))
     frontend_files.extend((app_directory / 'static' / 'mobileApp').glob('*.css'))
+    frontend_files.extend((app_directory / 'static' / 'mobileApp' / 'vendor' / 'pdfjs').glob('*.mjs'))
     asset_version = max(path.stat().st_mtime_ns for path in frontend_files)
     return render(request, 'mobileApp/index.html', {'asset_version': str(asset_version)})
 

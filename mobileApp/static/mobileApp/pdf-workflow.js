@@ -281,19 +281,23 @@
         pageSelect.replaceChildren();
         for (let index = 1; index <= plan.pages.length; index += 1) pageSelect.append(new Option(`Página ${index} / ${plan.pages.length}`, String(index)));
         setMode('explore');
-        await viewer.load(plan.source_url, plan.markers);
-        if (currentRevision !== revision) return;
-        updateMarkers();
+        setBusy(true);
         activateProject();
-        status('Plano listo. Puede recorrer sus páginas y añadir botones.');
-        clearError();
+        try {
+            const loaded = await viewer.load(plan.source_url, plan.markers);
+            if (currentRevision !== revision || !loaded) return;
+            updateMarkers();
+            activateProject();
+            status('Plano listo. Puede recorrer sus páginas y añadir botones.');
+            clearError();
+        } finally { if (currentRevision === revision) setBusy(false); }
     }
 
-    function reset() {
+    function reset({ closeEditor = true } = {}) {
         window.projectWorkspace?.deactivate('pdf');
         revision += 1;
         hideDialog();
-        editor.close(true);
+        if (closeEditor) editor.close(true);
         viewer.clear();
         plan = null;
         selectedId = null;
@@ -415,8 +419,14 @@
     });
     window.pdfWorkflow = {
         reset,
+        get currentPlan() { return plan; },
         select(id) { return selectMarker(id, false); },
-        removeDeleted(id) { if (plan?.id === id) reset(); },
+        removeDeleted(id) {
+            if (plan?.id !== id) return;
+            const documentId = editor.metadata?.id;
+            const closeEditor = Boolean(documentId && (plan.workbook?.id === documentId || plan.listing?.id === documentId || plan.markers.some(marker => marker.workbook?.id === documentId)));
+            reset({ closeEditor });
+        },
         permissionsChanged: updatePermissions,
         canLeave() { return editor.requestClose(); },
         async open(nextPlan) {

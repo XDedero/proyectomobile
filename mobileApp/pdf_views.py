@@ -167,7 +167,12 @@ def detail_pdf(request, plan_id):
 @api_permissions()
 def source_pdf(request, plan_id):
     plan = get_object_or_404(PdfPlan, pk=plan_id)
-    response = FileResponse(plan.source.open('rb'), content_type='application/pdf', filename=plan.name)
+    from .project_service import open_plan_source
+    try:
+        source = open_plan_source('pdf', plan)
+    except ValidationError as exc:
+        return error_response(exc, status=404)
+    response = FileResponse(source, content_type='application/pdf', filename=plan.name)
     response['X-Content-Type-Options'] = 'nosniff'
     return response
 
