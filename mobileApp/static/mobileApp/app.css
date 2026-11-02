@@ -1,12 +1,16 @@
 :root {
-    --app-bg: #0f172a;
-    --primary-accent: #2563eb;
-    --primary-hover: #1d4ed8;
-    --autocad-red: #d32f2f;
+    --app-bg: #153e70;
+    --primary-accent: #2368a7;
+    --primary-hover: #174e83;
+    --autocad-red: #2368a7;
     --excel-green: #107c41;
-    --app-body-bg: #f8fafc;
-    --text-dark: #0f172a;
-    --text-muted: #64748b;
+    --app-body-bg: #edf5ff;
+    --text-dark: #173451;
+    --text-muted: #58718a;
+    --bs-primary: #2368a7;
+    --bs-primary-rgb: 35, 104, 167;
+    --bs-link-color: #1d5f9c;
+    --bs-link-hover-color: #174e83;
 }
 
 * {
@@ -21,7 +25,7 @@ html, body {
     margin: 0;
     overflow: hidden;
     background: var(--app-body-bg);
-    color: #1e293b;
+    color: #18344f;
 }
 
 /* Real application viewport, shared by browser and embedded WebView. */
@@ -79,6 +83,15 @@ html, body {
     box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
     margin-bottom: 10px;
 }
+.company-brand-badge { overflow: hidden; border: 1px solid #dce9f7; background: #fff; box-shadow: 0 8px 20px rgba(35, 104, 167, .12); }
+.company-logo-window { position: relative; display: block; flex: none; overflow: hidden; border: 1px solid #dbe8f6; border-radius: 15px; background: #fff; box-shadow: 0 4px 12px rgba(20, 55, 90, .12); }
+.company-logo-window > img { position: absolute; top: -9px; left: 50%; display: block; width: 100px; max-width: none; height: 100px; object-fit: contain; transform: translateX(-50%); }
+.company-logo-login { width: 60px; height: 60px; border: 0; border-radius: inherit; box-shadow: none; }
+.company-logo-header { width: 42px; height: 42px; border-radius: 13px; }
+.company-logo-header > img { top: -12px; }
+.company-logo-login > img { top: -1px; }
+.company-logo-welcome > img { top: 0; }
+.company-logo-welcome { width: 66px; height: 58px; border-color: rgba(255,255,255,.68); border-radius: 16px; box-shadow: 0 5px 14px rgba(9,43,86,.15); }
 
 .form-control {
     border-radius: 12px;
@@ -88,26 +101,26 @@ html, body {
     padding: 10px 14px;
 }
 .form-control:focus {
-    border-color: #2563eb;
-    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+    border-color: #3d80bb;
+    box-shadow: 0 0 0 4px rgba(35, 104, 167, 0.13);
 }
 
 
 /* Botones personalizados */
 .btn-modern-primary {
-    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    background: linear-gradient(135deg, #174e83, #2878b7);
     color: white;
     font-weight: 600;
     padding: 12px;
     border-radius: 14px;
     border: none;
-    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+    box-shadow: 0 6px 18px rgba(35, 104, 167, 0.25);
     transition: all 0.2s;
 }
 .btn-modern-primary:hover, .btn-modern-primary:active {
-    background: linear-gradient(135deg, #1e40af, #1d4ed8);
+    background: linear-gradient(135deg, #123e6b, #1c619d);
     transform: translateY(-1px);
-    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.45);
+    box-shadow: 0 8px 22px rgba(23, 78, 131, 0.3);
     color: white;
 }
 
@@ -117,8 +130,8 @@ html, body {
     align-items: center;
     justify-content: space-between;
     padding: 12px 18px;
-    background: #ffffff;
-    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(110deg, #dbeafe 0%, #edf5ff 68%, #e4f0fd 100%);
+    border-bottom: 1px solid #c9ddf3;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -156,23 +169,23 @@ html, body {
 }
 
 .btn-cad {
-    background: linear-gradient(135deg, #dc2626, #ef4444);
+    background: linear-gradient(135deg, #174e83, #2878b7);
     color: white;
     border: none;
     font-weight: 600;
     border-radius: 14px;
     padding: 13px 20px;
-    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.35);
+    box-shadow: 0 6px 16px rgba(35, 104, 167, 0.23);
     transition: all 0.2s;
 }
 .btn-cad:hover {
-    background: linear-gradient(135deg, #b91c1c, #dc2626);
+    background: linear-gradient(135deg, #123e6b, #1c619d);
     color: white;
     transform: scale(1.02);
 }
 
 .btn-excel {
-    background: linear-gradient(135deg, #15803d, #16a34a);
+    background: linear-gradient(135deg, #174e83, #2878b7);
     color: white;
     border: none;
     font-weight: 600;
@@ -182,11 +195,11 @@ html, body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+    box-shadow: 0 4px 12px rgba(35, 104, 167, 0.23);
     transition: all 0.2s;
 }
 .btn-excel:hover {
-    background: linear-gradient(135deg, #166534, #15803d);
+    background: linear-gradient(135deg, #123e6b, #1c619d);
     color: white;
 }
 
@@ -225,4 +238,79 @@ html, body {
 }
 .user-menu-dropdown .dropdown-item:hover {
     background-color: #f1f5f9;
+}
+
+/* Reloncabi blue interface palette. */
+.btn-primary, .btn-success {
+    --bs-btn-color: #fff;
+    --bs-btn-bg: #2368a7;
+    --bs-btn-border-color: #2368a7;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #174e83;
+    --bs-btn-hover-border-color: #174e83;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #123e6b;
+    --bs-btn-active-border-color: #123e6b;
+    --bs-btn-disabled-bg: #7ea5c9;
+    --bs-btn-disabled-border-color: #7ea5c9;
+    background-color: #2368a7;
+    border-color: #2368a7;
+}
+.btn-primary:hover, .btn-success:hover { background-color: #174e83; border-color: #174e83; }
+.btn-outline-primary, .btn-outline-success {
+    --bs-btn-color: #205f99;
+    --bs-btn-border-color: #5790c2;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #2368a7;
+    --bs-btn-hover-border-color: #2368a7;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #174e83;
+    --bs-btn-active-border-color: #174e83;
+    color: #205f99;
+    border-color: #5790c2;
+}
+.btn-outline-primary:hover, .btn-outline-success:hover { color: #fff; background: #2368a7; border-color: #2368a7; }
+
+.main-module-heading { display: inline-flex; align-items: center; justify-content: center; gap: 11px; color: #173c62; font-size: 1.05rem; font-weight: 750; letter-spacing: .005em; }
+.main-module-logo { display: inline-grid; width: 48px; height: 48px; flex: none; place-items: center; overflow: hidden; border: 1px solid #d8e8f8; border-radius: 50%; background: linear-gradient(145deg, #f7fbff, #e4f1ff); }
+.main-module-logo img { width: 40px; height: 40px; object-fit: contain; }
+
+.welcome-card {
+    position: relative;
+    display: flex;
+    min-height: 130px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    overflow: hidden;
+    padding: 19px 21px;
+    border: 1px solid rgba(255, 255, 255, .28);
+    border-radius: 21px;
+    background: linear-gradient(113deg, #183f79 0%, #225ca0 58%, #2879b8 100%);
+    box-shadow: 0 9px 22px rgba(27, 76, 130, .17);
+    color: #fff;
+    isolation: isolate;
+}
+.welcome-card::before, .welcome-card::after {
+    position: absolute;
+    z-index: -1;
+    right: -75px;
+    bottom: -112px;
+    width: 490px;
+    height: 168px;
+    border-radius: 52% 48% 0 0 / 70% 73% 0 0;
+    content: "";
+    pointer-events: none;
+}
+.welcome-card::before { background: rgba(173, 216, 255, .14); transform: rotate(-8deg); }
+.welcome-card::after { right: 16px; bottom: -137px; width: 530px; height: 176px; border: 1px solid rgba(231, 243, 255, .2); transform: rotate(7deg); }
+.welcome-copy { position: relative; z-index: 1; min-width: 0; max-width: 880px; }
+.welcome-session { display: inline-flex; margin-bottom: 7px; padding: 3px 9px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(255,255,255,.13); color: #e5f2ff; font-size: .68rem; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
+.welcome-copy h5 { margin: 0 0 5px; color: #fff; font-size: clamp(1.06rem, 3.7vw, 1.4rem); font-weight: 750; line-height: 1.2; overflow-wrap: anywhere; }
+.welcome-copy p { margin: 0; color: #e1efff; font-size: .88rem; line-height: 1.45; }
+.welcome-card > .company-logo-window { position: relative; z-index: 1; }
+@media (max-width: 420px) {
+    .welcome-card { min-height: 118px; padding: 16px; gap: 12px; }
+    .company-logo-welcome { width: 58px; height: 54px; }
+    .welcome-copy p { font-size: .81rem; }
 }

@@ -4,22 +4,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#f8fafc">
+    <meta name="theme-color" content="#eaf4ff">
     <meta name="color-scheme" content="light">
-    <title>Gestión de Planos DXF y Motores</title>
+    <title>Reloncabi APP · Reloncavi Valdivia</title>
     <!-- Bootstrap 5.3 CSS -->
-    <link href="mobileApp/static/mobileApp/vendor/bootstrap.min.css?v=1793633400237337100" rel="stylesheet">
+    <link href="mobileApp/static/mobileApp/vendor/bootstrap.min.css?v=1793643957608135700" rel="stylesheet">
     <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/vendor/bootstrap-icons.css?v=1793633400237337100">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/vendor/bootstrap-icons.css?v=1793643957608135700">
 
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/app.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/dxf.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-viewer.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-workflow.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/workbook-editor.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/project-workflow.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/motor-library.css?v=1793633400237337100">
-    <link rel="stylesheet" href="mobileApp/static/mobileApp/mobile-layout.css?v=1793633400237337100">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/app.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/dxf.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-viewer.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/pdf-workflow.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/workbook-editor.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/project-workflow.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/motor-library.css?v=1793643957608135700">
+    <link rel="stylesheet" href="mobileApp/static/mobileApp/mobile-layout.css?v=1793643957608135700">
 </head>
 <body>
 
@@ -32,11 +32,11 @@
                  ============================================== -->
             <div class="app-view active" id="viewLogin">
                 <div class="login-hero">
-                    <div class="brand-badge">
-                        <i class="bi bi-building-gear"></i>
+                    <div class="brand-badge company-brand-badge">
+                        <span class="company-logo-window company-logo-login"><img src="mobileApp/static/mobileApp/img/reloncavi-logo.png" alt=""></span>
                     </div>
-                    <h4 class="fw-bold text-dark mb-1">AutoCAD Mobile</h4>
-                    <p class="text-muted small mb-0">Gestión de Planos & Datos de Ingeniería</p>
+                    <h4 class="fw-bold text-dark mb-1">Reloncabi APP</h4>
+                    <p class="text-muted small mb-0">Reloncavi Valdivia</p>
                 </div>
 
                 <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
@@ -77,12 +77,12 @@
                 <!-- Barra superior con botón de menú en la esquina -->
                 <div class="app-header">
                     <div class="d-flex align-items-center gap-2">
-                        <div class="brand-badge m-0" style="width: 34px; height: 34px; font-size: 16px; border-radius: 10px;">
-                            <i class="bi bi-layers-half"></i>
+                        <div class="company-logo-window company-logo-header">
+                            <img src="mobileApp/static/mobileApp/img/reloncavi-logo.png" alt="">
                         </div>
                         <div>
-                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;">AutoCAD App</h6>
-                            <small class="text-muted" style="font-size: 0.72rem;">Menú Principal</small>
+                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;">Reloncabi APP</h6>
+                            <small class="text-muted" style="font-size: 0.72rem;">Reloncavi Valdivia</small>
                         </div>
                     </div>
 
@@ -130,32 +130,25 @@
                 <!-- Contenido Menú Principal -->
                 <div class="p-3">
                     
-                    <!-- Tarjeta de bienvenida con "Hola al nombre de usuario" -->
-                    <div class="card border-0 rounded-4 text-white p-3 mb-3" style="background: linear-gradient(135deg, #1e3a8a, #2563eb);">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <span class="badge bg-white bg-opacity-25 text-white mb-2" style="font-size: 0.7rem;">Sesión Iniciada</span>
-                                <h5 class="fw-bold mb-1" id="welcomeUserText">¡Hola, Usuario!</h5>
-                                <p class="small text-white-50 mb-0" id="permissionSummary"></p>
-                            </div>
-                            <div class="bg-white bg-opacity-10 p-2 rounded-3">
-                                <i class="bi bi-compass fs-2 text-white"></i>
-                            </div>
+                    <div class="welcome-card mb-3">
+                        <div class="welcome-copy">
+                            <span class="welcome-session">Sesión iniciada</span>
+                            <h5 id="welcomeUserText">Bienvenido</h5>
+                            <p id="permissionSummary"></p>
                         </div>
+                        <div class="company-logo-window company-logo-welcome"><img src="mobileApp/static/mobileApp/img/reloncavi-logo.png" alt=""></div>
                     </div>
 
                     <p id="appAuthError" class="small text-danger" role="alert"></p>
                     <a id="btnAdminister" class="btn btn-outline-primary w-100 mb-3 rounded-3" href="/admin/" hidden>
                         <i class="bi bi-gear me-1"></i> Administrar
                     </a>
-                    <!-- Módulo principal: Acceso a Importar Plano AutoCAD -->
                     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white text-center">
                         <div class="mb-3">
-                            <span class="d-inline-flex p-3 rounded-circle bg-danger-subtle text-danger mb-2">
-                                <i class="bi bi-file-earmark-ruled-fill fs-2"></i>
+                            <span class="main-module-heading">
+                                <span class="main-module-logo"><img src="mobileApp/static/mobileApp/img/motor-logo.png" alt=""></span>
+                                <span>planimetría de motores</span>
                             </span>
-                            <h6 class="fw-bold text-dark mb-1">Módulo de Planos & Excel</h6>
-                            <p class="text-muted small mb-0">Elija el formato de su plano para importar y gestionar sus archivos Excel.</p>
                         </div>
 
                         <div class="main-import-actions">
@@ -170,7 +163,6 @@
                         </div>
                         <button type="button" id="btnSavedPlans" class="btn btn-outline-primary w-100 mt-3">Ver planos guardados</button>
                         <button type="button" id="btnSavedMotors" class="btn btn-outline-success w-100 mt-2">Motores guardados</button>
-                        <p class="small text-muted mt-3 mb-0">Vincule sus fichas Excel a botones en planos DXF o PDF.</p>
                     </div>
 
                 </div>
@@ -418,7 +410,7 @@
                             <button type="button" id="btnPdfMoveMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-arrows-move" aria-hidden="true"></i><span>Mover botones</span></button>
                         </div>
                         <p id="pdfModeHint" class="small text-muted mb-2">Deslice para recorrer el plano. Use + y − para ampliar.</p>
-                        <div id="pdfViewport" data-pdfjs-url="mobileApp/static/mobileApp/vendor/pdfjs/pdf-entry.mjs?v=1793633400237337100" data-worker-url="mobileApp/static/mobileApp/vendor/pdfjs/pdf.worker-entry.mjs?v=1793633400237337100" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
+                        <div id="pdfViewport" data-pdfjs-url="mobileApp/static/mobileApp/vendor/pdfjs/pdf-entry.mjs?v=1793643957608135700" data-worker-url="mobileApp/static/mobileApp/vendor/pdfjs/pdf.worker-entry.mjs?v=1793643957608135700" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
                         <p class="small text-muted mt-2">Toque un botón para abrir su Excel o asignarle uno.</p>
                         <div id="pdfMarkerList" class="pdf-marker-list" aria-label="Botones de esta página"></div>
                     </section>
@@ -490,18 +482,18 @@
     </div>
 
     <!-- Bootstrap 5.3 Bundle JS con Popper -->
-    <script src="mobileApp/static/mobileApp/vendor/bootstrap.bundle.min.js?v=1793633400237337100"></script>
+    <script src="mobileApp/static/mobileApp/vendor/bootstrap.bundle.min.js?v=1793643957608135700"></script>
 
-    <script src="mobileApp/static/mobileApp/mobile-runtime.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/app-state.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/dxf-viewer.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/plan-workflow.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/pdf-viewer.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/workbook-editor.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/pdf-workflow.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/project-workflow.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/plan-excel.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/motor-library.js?v=1793633400237337100"></script>
-    <script src="mobileApp/static/mobileApp/auth.js?v=1793633400237337100"></script>
+    <script src="mobileApp/static/mobileApp/mobile-runtime.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/app-state.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/dxf-viewer.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/plan-workflow.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/pdf-viewer.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/workbook-editor.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/pdf-workflow.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/project-workflow.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/plan-excel.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/motor-library.js?v=1793643957608135700"></script>
+    <script src="mobileApp/static/mobileApp/auth.js?v=1793643957608135700"></script>
 </body>
 </html>
