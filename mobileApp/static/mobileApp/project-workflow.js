@@ -6,6 +6,9 @@
     let previousOverflow = '', fullscreenOwned = false;
     let pickingFile = false;
     let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
+    let localRows = [], cloudRows = [];
+    let cloudRequestVersion = 0, cloudLoading = false, cloudOpening = false, cloudCheckedAt = 0;
+    const cloudMessages = { local: "Guardado en este equipo", pending: "Guardado aquí. Publicando en la nube…", synced: "Guardado en Drive y Supabase", partial: "Disponible en Drive. Supabase pendiente", error: "Guardado aquí. Falló la publicación en la nube" };
     const overlay = document.createElement('section');
     overlay.id = 'planFullscreen';
     overlay.className = 'plan-fullscreen';
@@ -122,6 +125,10 @@
         try {
             const editor = window.workbookEditor;
             if (editor?.visible) {
+                if (editor.busy) {
+                    status('Espere a que termine la operación de Excel antes de guardar.', true);
+                    return false;
+                }
                 editor.commitAll();
                 if (editor.hasUnsavedChanges && !(await editor.save())) {
                     status('El plano no se guardó. Revise los cambios de la ficha abierta.', true);
@@ -131,7 +138,7 @@
             const data = await post(current.plan.save_project_url);
             current.plan.saved_at = data.saved_at;
             current.plan._projectDirty = false;
-            if (active === current) status('Plano guardado');
+            if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(data.saved.cloud_status));
             return true;
         } catch (error) {
             status(error.message, true);
@@ -246,7 +253,8 @@
         const container = byId('savedPlansContainer');
         if (!quiet) {
             byId('savedPlansFeedback').textContent = '';
-            container.textContent = 'Cargando planos guardados…';
+            librarySignature = null;
+            if (!localRows.length && !cloudRows.length) container.textContent = 'Cargando planos guardados…';
         }
         libraryLoading = true;
         try {
@@ -261,73 +269,173 @@
                 status('Este plano fue eliminado de la aplicación.', false, kind);
             }
             byId('savedCountBadge').textContent = data.plans.length;
+            const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === active?.plan.id);
+            if (currentSaved && !active.plan._projectDirty && !isBusy()) status(currentSaved.cloud_error || cloudMessages[currentSaved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(currentSaved.cloud_status));
             if (quiet && !byId('modalSavedPlans').classList.contains('show')) return;
-            const signature = JSON.stringify(data.plans);
-            if (quiet && signature === librarySignature) return;
-            librarySignature = signature;
-            container.replaceChildren();
-            if (!data.plans.length) container.textContent = 'No hay planos guardados. Abra un PDF o DXF y pulse Guardar plano.';
-            for (const saved of data.plans) {
-                const row = document.createElement('div');
-                row.className = 'list-group-item saved-plan-row rounded-3';
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'btn text-start flex-grow-1 text-break';
-                const name = document.createElement('span');
-                name.textContent = saved.name;
-                const badge = document.createElement('small');
-                badge.className = 'project-kind-badge';
-                badge.textContent = saved.kind.toUpperCase();
-                button.append(name, badge);
-                button.addEventListener('click', async () => {
-                    let detailsLoaded = false;
-                    try {
-                        if (!(await window.workbookEditor.requestClose())) return;
-                        exitFullscreen();
-                        modalSavedPlans.hide();
-                        const plan = await request(saved.detail_url);
-                        detailsLoaded = true;
-                        await openPlan(saved.kind, plan);
-                    } catch (error) {
-                        if (error.status === 404 && !detailsLoaded) {
-                            (saved.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow)?.removeDeleted(saved.plan_id);
-                            await listSaved();
-                            byId('savedPlansFeedback').textContent = 'Este plano fue eliminado de la aplicación.';
-                        } else container.textContent = error.message;
-                    }
-                });
-                const exportButton = document.createElement('a');
-                exportButton.className = 'btn btn-sm btn-outline-primary';
-                exportButton.innerHTML = '<i class="bi bi-download" aria-hidden="true"></i>';
-                exportButton.title = 'Exportar proyecto';
-                exportButton.setAttribute('aria-label', `Exportar ${saved.name}`);
-                exportButton.href = saved.export_url;
-                exportButton.download = '';
-                row.append(button, exportButton);
-                if (canDelete(saved.kind)) {
-                    const deleteButton = document.createElement('button');
-                    deleteButton.type = 'button';
-                    deleteButton.className = 'btn btn-sm btn-outline-danger';
-                    deleteButton.dataset.deletePlan = saved.plan_id;
-                    deleteButton.innerHTML = '<i class="bi bi-trash" aria-hidden="true"></i>';
-                    deleteButton.title = 'Eliminar plano';
-                    deleteButton.setAttribute('aria-label', `Eliminar ${saved.name}`);
-                    deleteButton.disabled = deleting;
-                    deleteButton.addEventListener('click', () => deletePlan({ kind: saved.kind, plan: { ...saved, id: saved.plan_id } }));
-                    row.append(deleteButton);
-                }
-                container.append(row);
-            }
+            localRows = [...data.plans, ...(data.cached || [])];
+            renderLibrary();
         } catch (error) {
             // Connection failures never mean a plan was deleted. Keep the last
             // confirmed state until this installation can be reached again.
             if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) container.textContent = error.message;
         } finally { if (version === libraryRequestVersion) libraryLoading = false; }
     }
-    function showSaved() { modalSavedPlans.show(); listSaved(); }
+    const titleKey = (name) => name.replace(/\.pdf$/i, '').trim().toLocaleLowerCase('es');
+    function libraryRows() {
+        const entries = cloudRows.map(cloud => ({ name: cloud.title || cloud.name, cloud, copies: [] }));
+        for (const copy of localRows) {
+            const match = entries.find(({ cloud, copies }) => (copy.cloud_origin && copies.some(local => local.cloud_origin === copy.cloud_origin)) || (cloud && copy.kind === 'pdf' && (
+                copy.cloud_origin === cloud.id || (cloud.cloud_key && copy.cloud_key === cloud.cloud_key &&
+                (cloud.cloud_key.startsWith('project_') || titleKey(copy.name) === titleKey(cloud.title || cloud.name))))));
+            if (match) match.copies.push(copy);
+            else entries.push({ name: copy.name, cloud: null, copies: [copy] });
+        }
+        const filter = byId('savedDeviceFilter').value;
+        const order = byId('savedCloudOrder').value;
+        const day = byId('savedCloudDate').value;
+        const localDate = new Intl.DateTimeFormat('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const date = entry => Date.parse(entry.cloud?.date || entry.copies[0]?.date || '') || 0;
+        return entries.filter(entry => (filter === 'all' || Boolean(entry.copies.length) === (filter === 'local')) &&
+            (!day || (entry.cloud?.date && Number.isFinite(Date.parse(entry.cloud.date)) && localDate.format(new Date(entry.cloud.date)) === day)))
+            .sort((a, b) => (order === 'device' ? Number(Boolean(b.copies.length)) - Number(Boolean(a.copies.length)) : 0) ||
+                (order === 'oldest' ? date(a) - date(b) : date(b) - date(a)));
+    }
+    function libraryAction(label, icon, style, callback) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-sm btn-outline-${style}`;
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        button.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i>`;
+        button.addEventListener('click', callback);
+        return button;
+    }
+    function renderLibrary() {
+        const rows = libraryRows();
+        const signature = JSON.stringify(rows);
+        if (signature === librarySignature) return;
+        librarySignature = signature;
+        const container = byId('savedPlansContainer');
+        container.replaceChildren();
+        if (!rows.length) container.textContent = 'No hay planos para mostrar con estos filtros.';
+        for (const entry of rows) {
+            const { copies, cloud, name } = entry;
+            const local = copies[0];
+            const kind = local?.kind || 'pdf';
+            const row = document.createElement('div');
+            row.className = 'list-group-item saved-plan-row rounded-3';
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'btn text-start flex-grow-1 text-break';
+            const title = document.createElement('span');
+            title.textContent = name;
+            const badge = document.createElement('small');
+            badge.className = 'project-kind-badge';
+            badge.textContent = [kind.toUpperCase(), local ? 'En este PC' : 'Sin copia en este PC',
+                cloud && 'En la nube', cloud?.date && new Date(cloud.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
+            open.append(title, badge);
+            open.addEventListener('click', () => openLibraryEntry(entry, !local));
+            row.append(open);
+            if (cloud && local) row.append(libraryAction('Abrir versión de la nube', 'bi-cloud-arrow-down', 'primary', () => openLibraryEntry(entry, true)));
+            if (local?.export_url) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
+            if (copies.length && copies.every(copy => copy.clear_url)) {
+                const clear = libraryAction('Limpiar copia de este PC', 'bi-pc-display', 'secondary', () => removeLibraryEntry(entry, true));
+                clear.dataset.deletePlan = local.plan_id;
+                row.append(clear);
+            }
+            if (canDelete(kind) && (cloud?.delete_url || local?.delete_url)) {
+                const remove = libraryAction('Eliminar proyecto completo', 'bi-trash', 'danger', () => removeLibraryEntry(entry, false));
+                remove.dataset.deletePlan = local?.plan_id || cloud.id;
+                row.append(remove);
+            }
+            container.append(row);
+        }
+        update();
+    }
+    async function openLibraryEntry(entry, remote) {
+        if (isBusy() || cloudOpening || !(await window.workbookEditor.requestClose())) return;
+        const user = appState.user?.id;
+        const local = entry.copies[0];
+        const feedback = byId('savedPlansFeedback');
+        cloudOpening = true;
+        feedback.textContent = remote ? 'Descargando el plano, sus hojas y botones…' : 'Abriendo copia de este PC…';
+        try {
+            const result = remote ? await post(entry.cloud.open_url) : { plan: await request(local.detail_url) };
+            if (appState.user?.id !== user) return;
+            exitFullscreen();
+            modalSavedPlans.hide();
+            await openPlan(remote ? 'pdf' : local.kind, result.plan);
+            if (remote) status(result.warning || 'Plano y Excel abiertos desde la nube.', Boolean(result.warning));
+        } catch (error) {
+            feedback.textContent = error.message;
+            if (error.status === 404) await listSaved({quiet: true});
+        } finally { cloudOpening = false; }
+    }
+    async function removeLibraryEntry(entry, localOnly) {
+        if (isBusy() || cloudOpening) return;
+        const { cloud, copies, name } = entry;
+        if (!localOnly && !cloud) return deletePlan({ kind: copies[0].kind, plan: { ...copies[0], id: copies[0].plan_id } });
+        const message = localOnly ? `¿Limpiar «${name}» de este PC? ${cloud ? 'La copia en la nube seguirá disponible.' : 'Se quitará la copia guardada en este PC.'}` :
+            `¿Eliminar «${name}» de todos los equipos? Se retirarán el PDF, el Excel y el registro de Supabase.`;
+        if (!window.confirm(message) || !(await window.workbookEditor.requestClose())) return;
+        deleting = true;
+        update();
+        try {
+            if (localOnly) {
+                for (const copy of copies) {
+                    await post(copy.clear_url);
+                    (copy.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow).removeDeleted(copy.plan_id);
+                }
+            } else {
+                const result = await post(cloud.delete_url);
+                for (const id of result.local_ids || []) window.pdfWorkflow.removeDeleted(id);
+                cloudRows = cloudRows.filter(item => item.id !== cloud.id);
+            }
+        } catch (error) { byId('savedPlansFeedback').textContent = error.message; }
+        finally {
+            deleting = false;
+            update();
+            await listSaved({ quiet: true });
+            if (!localOnly) await showCloudProjects({ quiet: true });
+        }
+    }
+    function showSaved() { modalSavedPlans.show(); listSaved(); showCloudProjects(); }
+    async function showCloudProjects({ quiet = false } = {}) {
+        const user = appState.user?.id;
+        if (!user || cloudLoading) return;
+        const version = ++cloudRequestVersion;
+        cloudLoading = true;
+        cloudCheckedAt = Date.now();
+        const control = byId('btnCloudProjects');
+        const feedback = byId('cloudProjectsStatus');
+        control.disabled = true;
+        if (!quiet) feedback.textContent = 'Consultando la nube…';
+        try {
+            const { plans } = await request('/api/projects/cloud/');
+            if (appState.user?.id !== user || version !== cloudRequestVersion) return;
+            cloudRows = plans;
+            feedback.textContent = '';
+            renderLibrary();
+        } catch (error) {
+            if (appState.user?.id === user && version === cloudRequestVersion) feedback.textContent = error.message;
+        } finally {
+            cloudLoading = false;
+            control.disabled = false;
+            if (version !== cloudRequestVersion && appState.user?.id === user && byId('modalSavedPlans').classList.contains('show')) showCloudProjects();
+        }
+    }
+    byId('btnCloudProjects').addEventListener('click', () => showCloudProjects());
+    for (const id of ['savedDeviceFilter', 'savedCloudOrder', 'savedCloudDate']) byId(id).addEventListener('change', renderLibrary);
+    byId('modalSavedPlans').addEventListener('hidden.bs.modal', () => {
+        cloudRequestVersion++;
+        cloudRows = [];
+        localRows = [];
+        librarySignature = null;
+    });
     function synchronize() {
         if (!appState.user || document.hidden || isBusy() || libraryLoading) return;
         listSaved({ quiet: true });
+        if (byId('modalSavedPlans').classList.contains('show') && Date.now() - cloudCheckedAt > 15000) showCloudProjects({ quiet: true });
     }
     window.addEventListener('focus', synchronize);
     window.addEventListener('pageshow', synchronize);
@@ -386,7 +494,7 @@
         }
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || !byId('pdfMarkerDialog').hidden || document.querySelector('#excelListingManager.show, #excelBookManager.show, #excelSheetAssignment.show')) return;
+        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || !byId('pdfMarkerDialog').hidden || document.querySelector('#excelListingManager.show, #excelBookManager.show, #excelSheetAssignment.show, #newPlanButton.show')) return;
         event.preventDefault();
         if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
     });

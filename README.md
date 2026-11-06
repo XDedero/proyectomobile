@@ -10,6 +10,14 @@ ni Android Studio; el futuro APK deberá incorporar también el código Python.
 
 ## Ejecutar
 
+En Windows, abre **ejecutar_debug.bat**. Si falta el entorno de Python,
+el lanzador prepara uno local e instala las dependencias. Luego aplica las
+migraciones de SQLite y abre la app en **http://127.0.0.1:8000/** cuando esté lista.
+El arranque local no depende de una sesión en Supabase. Para comprobar solo la
+instalación, ejecuta `ejecutar_debug.bat --check-only`.
+
+Para iniciar manualmente desde un entorno ya creado:
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe manage.py migrate

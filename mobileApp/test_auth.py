@@ -391,13 +391,20 @@ class AuthenticationPermissionTests(TestCase):
         workbook.save(stream)
         workbook.close()
         plan = self.import_plan()
-        response = self.client.post(plan['motors'][0]['assign_url'], {'file': SimpleUploadedFile('grande.xlsx', stream.getvalue())})
+        assign_url = plan['motors'][0]['assign_url']
+        source = self.client.post(assign_url, {
+            'file': SimpleUploadedFile('grande.xlsx', stream.getvalue()), 'action': 'inspect', 'source_sheet': 'Segunda',
+        })
+        self.assertEqual(source.json()['rows'][0][0], 'Otra hoja')
+        response = self.client.post(assign_url, {
+            'file': SimpleUploadedFile('grande.xlsx', stream.getvalue()), 'source_sheet': 'Grande',
+        })
         url = response.json()['motor']['excel']['preview_url']
         preview = self.client.get(url, {'sheet': 'Grande'}).json()
         self.assertEqual(len(preview['rows']), 100)
         self.assertEqual(len(preview['rows'][0]), 20)
         self.assertTrue(preview['truncated'])
-        self.assertEqual(self.client.get(url, {'sheet': 'Segunda'}).json()['rows'][0][0], 'Otra hoja')
+        self.assertEqual(self.client.get(url, {'sheet': 'Segunda'}).status_code, 400)
         self.assertEqual(self.client.get(url, {'sheet': 'Inexistente'}).status_code, 400)
 
     def test_authenticated_responses_are_not_cached(self):

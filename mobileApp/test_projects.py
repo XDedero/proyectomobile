@@ -1,8 +1,10 @@
 import csv
+from datetime import datetime
 from io import BytesIO, StringIO
 import json
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from django.contrib.auth import get_user_model
@@ -10,9 +12,10 @@ from django.contrib.auth.models import Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 
-from .models import Motor, PdfMarker, PdfPlan, Plan, SavedProject, WorkbookDocument
+from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload, excel_upload
 from .tests import dxf_file
 
@@ -79,6 +82,355 @@ class ProjectTests(TestCase):
         for plan in saved:
             self.assertEqual(self.client.get(plan['detail_url']).status_code, 200)
             self.assertTrue(self.download(plan['export_url']).startswith(b'PK'))
+
+    def test_opening_or_deleting_cloud_copy_does_not_publish(self):
+        from . import cloud_projects, terminal_monitor as monitor
+
+        project = {'id': 'remote-pdf-1', 'name': 'Plano compartido.pdf', 'date': '2026-11-06T15:07:38Z',
+                   'pdfVersion': '2026-11-06T15:07:35Z', 'excelId': 'remote-xlsx-1', 'excelName': 'Equipos.xlsx'}
+
+        def drive(*args):
+            if args[0] == '--list-projects':
+                return {'ok': True, 'projects': [project]}
+            self.assertEqual(args[:3], ('--read-project', '--drive-id', project['id']))
+            directory = Path(args[-1])
+            (directory / 'plan.pdf').write_bytes(pdf_upload().read())
+            (directory / 'project.xlsx').write_bytes(excel_upload().read())
+            return {'ok': True, 'project': project}
+
+        category = ButtonCategory.objects.get(name='Motores')
+        metadata = {'name': 'Plano compartido', 'plan_mode': 'imported', 'markers': [
+            {'page': 1, 'x': .25, 'y': .4, 'label': 'Motor 1', 'sheet': 'Equipos',
+             'category_id': str(category.pk), 'category_name': category.name},
+        ]}
+        self.client.force_login(self.admin)
+        with (
+            patch.object(cloud_projects, 'drive_command', side_effect=drive),
+            patch.object(cloud_projects, 'supabase_metadata', return_value=metadata),
+            patch.object(monitor, 'is_monitor_enabled', return_value=True),
+            patch.object(monitor, '_log_line'),
+            patch.object(monitor, 'enqueue_sync_task') as queue,
+        ):
+            self.assertEqual(Client().get(reverse('cloud_projects')).status_code, 401)
+            self.assertEqual(self.client.get(reverse('saved_projects')).json()['plans'], [])
+            cloud = self.client.get(reverse('cloud_projects')).json()['plans']
+            self.assertEqual([row['name'] for row in cloud], ['Plano compartido.pdf'])
+            response = self.post(cloud[0]['open_url'])
+            self.assertEqual(response.status_code, 200, response.content)
+            data = response.json()
+            self.assertEqual(data['warning'], '')
+            plan = data['plan']
+            self.assertEqual(plan['markers'][0]['sheet_name'], 'Equipos')
+            self.assertEqual(plan['markers'][0]['category_name'], 'Motores')
+            self.assertEqual(self.post(cloud[0]['open_url']).json()['plan']['id'], plan['id'])
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertEqual(self.post(plan['delete_url']).status_code, 200)
+            queue.assert_not_called()
+
+    def test_saving_a_second_button_updates_the_existing_shared_excel_and_rejects_newer_versions(self):
+        from . import cloud_projects, terminal_monitor as monitor
+
+        self.client.force_login(self.admin)
+        original = self.plan('pdf')
+        self.post(original['markers_url'], {'page': 1, 'x': .2, 'y': .3})
+        with ZipFile(BytesIO(self.download(original['export_project_url']))) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            source = archive.read('plan/source.pdf')
+            workbook = archive.read('workbooks/w1.xlsx')
+        project = {'id': 'remote-pdf', 'name': 'Plano.pdf', 'date': '2026-11-06T21:00:00Z',
+                   'pdfVersion': '2026-11-06T20:59:00Z', 'excelId': 'remote-xlsx', 'excelName': 'Plano.xlsx',
+                   'projectKey': 'local_pdf_12'}
+        updated_at = '2026-11-06T21:05:00Z'
+
+        def drive(*args):
+            if args[0] == '--list-projects':
+                return {'ok': True, 'projects': [project.copy()]}
+            directory = Path(args[-1])
+            (directory / 'plan.pdf').write_bytes(source)
+            (directory / 'project.xlsx').write_bytes(workbook)
+            return {'ok': True, 'project': project.copy(), 'manifest': manifest}
+
+        with (
+            patch.object(cloud_projects, 'drive_command', side_effect=drive),
+            patch.object(monitor, 'is_monitor_enabled', return_value=True),
+            patch.object(monitor, '_log_line'),
+            patch.object(monitor, 'enqueue_sync_task') as queue,
+            patch.object(monitor, '_sync_pdf_plan_worker', return_value={'drive_file_id': project['id'], 'modified_time': updated_at, 'supabase_ok': True}) as pdf,
+            patch.object(monitor, '_sync_workbook_worker', return_value={'drive_file_id': project['excelId'], 'modified_time': updated_at, 'supabase_ok': True}) as excel,
+            patch.object(monitor, '_sync_marker_snapshot', return_value=True) as markers,
+        ):
+            plan = self.post(reverse('open_cloud_project', args=[project['id']])).json()['plan']
+            # Simulate a copy downloaded before the workbook version field existed.
+            PdfPlan.objects.filter(pk=plan['id']).update(cloud_workbook_version='')
+            self.assertEqual(self.post(plan['markers_url'], {'page': 1, 'x': .5, 'y': .6}).status_code, 201)
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertEqual(self.post(plan['save_project_url']).json()['saved']['cloud_status'], 'pending')
+            queue.call_args.args[0]()
+            self.assertEqual(pdf.call_args.kwargs['drive_target']['id'], project['id'])
+            self.assertEqual(excel.call_args.kwargs['drive_target'], {'id': project['excelId'], 'modifiedTime': project['date']})
+            published = load_workbook(BytesIO(excel.call_args.args[4]), read_only=True)
+            try:
+                self.assertEqual(published.sheetnames, ['Listado', 'Motor 1', 'Motor 2'])
+            finally:
+                published.close()
+            self.assertEqual([marker['sheet'] for marker in markers.call_args.args[1]['markers']], ['Motor 1', 'Motor 2'])
+            self.assertEqual(SavedProject.objects.get(pdf_plan_id=plan['id']).cloud_status, 'synced')
+            self.assertEqual(PdfPlan.objects.get(pk=plan['id']).cloud_workbook_version, f"{project['excelId']}:{updated_at}")
+
+            project['date'] = '2026-11-06T21:06:00Z'
+            with self.captureOnCommitCallbacks(execute=True):
+                self.post(plan['save_project_url'])
+            queue.call_args.args[0]()
+            saved = SavedProject.objects.get(pdf_plan_id=plan['id'])
+            self.assertEqual(saved.cloud_status, 'error')
+            self.assertIn('versión distinta', saved.cloud_error)
+            excel.assert_called_once()
+
+    def test_drive_sync_waits_for_project_save_and_deletes_both_copies(self):
+        from . import terminal_monitor as monitor
+
+        self.client.force_login(self.admin)
+        with (
+            patch.object(monitor, 'is_monitor_enabled', return_value=True),
+            patch.object(monitor, '_log_line'),
+            patch.object(monitor, 'enqueue_sync_task') as queue,
+            patch.object(monitor, '_sync_pdf_plan_worker') as upload_pdf,
+            patch.object(monitor, '_sync_workbook_worker') as upload_excel,
+            patch.object(monitor, '_sync_marker_snapshot', return_value=True),
+            patch.object(monitor, '_delete_drive_copy') as delete_copy,
+        ):
+            plan = self.plan('pdf')
+            self.assertEqual(self.client.post(plan['workbook_url'], {'file': excel_upload()}).status_code, 200)
+            queue.assert_not_called()
+            document = PdfPlan.objects.get(pk=plan['id']).workbook
+            workbook_bytes = bytes(document.content)
+
+            with self.captureOnCommitCallbacks(execute=True):
+                saved = self.post(plan['save_project_url'])
+                self.assertEqual(saved.status_code, 200)
+                queue.assert_not_called()
+            self.assertEqual(queue.call_count, 1)
+            self.assertEqual(saved.json()['saved']['cloud_status'], 'pending')
+            tasks = [call.args[0] for call in queue.call_args_list]
+            queue.reset_mock()
+            document.content = b'Draft after saving'
+            document.save(update_fields=['content'])
+            queue.assert_not_called()
+            for task in tasks:
+                task()
+            self.assertEqual(SavedProject.objects.get(pdf_plan_id=plan['id']).cloud_status, 'synced')
+            self.assertEqual(upload_pdf.call_args.args[0], plan['id'])
+            self.assertTrue(upload_pdf.call_args.args[2].startswith(b'%PDF-'))
+            self.assertEqual(upload_excel.call_args.args[0], document.pk)
+            self.assertEqual(upload_excel.call_args.args[4], workbook_bytes)
+            timestamp = timezone.localtime(datetime.fromisoformat(saved.json()['saved_at'])).strftime('%Y-%m-%d_%H-%M-%S')
+            self.assertEqual(upload_pdf.call_args.args[4], f'plano - {timestamp}.pdf')
+            self.assertEqual(upload_excel.call_args.args[6], f'plano - {timestamp}.xlsx')
+
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertEqual(self.post(plan['delete_url']).status_code, 200)
+                queue.assert_not_called()
+            for call in queue.call_args_list:
+                call.args[0]()
+            key = upload_pdf.call_args.args[5]
+            self.assertTrue(key.startswith('project_'))
+            self.assertEqual(
+                [call.args for call in delete_copy.call_args_list],
+                [('excel', 'workbook_documents', f'{key}_xlsx', key),
+                 ('pdf', 'pdf_plans', key, key)],
+            )
+
+    def test_cloud_project_recovers_buttons_without_supabase_or_local_project(self):
+        from . import cloud_projects
+        original, bundle = self.bundle('pdf')
+        with ZipFile(BytesIO(bundle)) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            source = archive.read('plan/source.pdf')
+            workbook = archive.read('workbooks/w1.xlsx')
+        PdfPlan.objects.all().delete()
+        WorkbookDocument.objects.all().delete()
+        self.assertEqual(self.client.get(reverse('saved_projects')).json()['plans'], [])
+        project = {'id': 'remote-pdf', 'name': 'Compartido.pdf', 'excelId': 'remote-book', 'excelName': 'Compartido.xlsx', 'date': '2026-11-06'}
+
+        def drive(*args):
+            if args[0] == '--list-projects':
+                return {'ok': True, 'projects': [project]}
+            directory = Path(args[-1])
+            (directory / 'plan.pdf').write_bytes(source)
+            (directory / 'project.xlsx').write_bytes(workbook)
+            return {'ok': True, 'project': project, 'manifest': manifest}
+
+        with patch.object(cloud_projects, 'drive_command', side_effect=drive), patch.object(cloud_projects, 'supabase_metadata') as database:
+            listed = self.client.get(reverse('cloud_projects')).json()['plans']
+            response = self.post(listed[0]['open_url'])
+            self.assertEqual(response.status_code, 200, response.content)
+            restored = response.json()['plan']
+            self.assertEqual(response.json()['warning'], '')
+            self.assertEqual(len(restored['markers']), len(manifest['markers']))
+            self.assertEqual([m['sheet_name'] for m in restored['markers']], [m['sheet'] for m in manifest['markers']])
+            self.assertEqual(self.download(restored['workbook']['download_url']), workbook)
+            database.assert_not_called()
+            manifest['markers'][0]['x'] = 'invalid'
+            self.assertEqual(self.post(listed[0]['open_url']).status_code, 400)
+
+    def test_cloud_status_reports_failures_and_does_not_overwrite_a_newer_save(self):
+        from . import terminal_monitor as monitor
+        self.client.force_login(self.admin)
+        plan = self.plan('pdf')
+        with (
+            patch.object(monitor, 'is_monitor_enabled', return_value=True),
+            patch.object(monitor, '_log_line'),
+            patch.object(monitor, 'enqueue_sync_task') as queue,
+            patch.object(monitor, '_sync_pdf_plan_worker', return_value={'drive_file_id': 'pdf1', 'supabase_ok': False}),
+            patch.object(monitor, '_sync_workbook_worker', return_value={'drive_file_id': 'xlsx1', 'supabase_ok': False}) as book,
+        ):
+            for _ in range(2):
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+            queue.call_args_list[0].args[0]()
+            self.assertEqual(SavedProject.objects.get(pdf_plan_id=plan['id']).cloud_status, 'pending')
+            queue.call_args_list[1].args[0]()
+            self.assertEqual(SavedProject.objects.get(pdf_plan_id=plan['id']).cloud_status, 'partial')
+            self.assertTrue(book.call_args.args[7]['sheets'])
+            with self.captureOnCommitCallbacks(execute=True):
+                self.post(plan['save_project_url'])
+            book.return_value = None
+            queue.call_args.args[0]()
+            self.assertEqual(SavedProject.objects.get(pdf_plan_id=plan['id']).cloud_status, 'error')
+
+    def test_button_changes_stay_local_until_save_and_new_projects_have_distinct_keys(self):
+        from . import terminal_monitor as monitor
+        self.client.force_login(self.admin)
+        with patch.object(monitor, 'is_monitor_enabled', return_value=True), patch.object(monitor, '_log_line'), patch.object(monitor, 'enqueue_sync_task') as queue:
+            first, second = self.plan('pdf'), self.plan('pdf')
+            self.assertNotEqual(PdfPlan.objects.get(pk=first['id']).cloud_key, PdfPlan.objects.get(pk=second['id']).cloud_key)
+            marker = self.post(first['markers_url'], {'page': 1, 'x': .2, 'y': .3}).json()['marker']
+            PdfMarker.objects.filter(pk=marker['id']).delete()
+            queue.assert_not_called()
+
+    def test_clear_local_removes_working_files_without_sending_a_cloud_delete(self):
+        from . import terminal_monitor as monitor
+        self.client.force_login(self.admin)
+        plan = self.plan('pdf')
+        saved = self.post(plan['save_project_url']).json()['saved']
+        model = PdfPlan.objects.get(pk=plan['id'])
+        path, workbook_id = Path(model.source.path), model.workbook_id
+        with patch.object(monitor, 'is_monitor_enabled', return_value=True), patch.object(monitor, '_log_line'), patch.object(monitor, 'enqueue_sync_task') as queue:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.post(saved['clear_url'])
+            self.assertEqual(response.status_code, 200, response.content)
+            queue.assert_not_called()
+        self.assertFalse(path.exists())
+        self.assertFalse(SavedProject.objects.filter(pk=saved['id']).exists())
+        self.assertFalse(WorkbookDocument.objects.filter(pk=workbook_id).exists())
+
+    def test_absolute_cloud_delete_reverts_drive_when_supabase_cannot_delete(self):
+        from . import cloud_projects as cloud
+        self.client.force_login(self.admin)
+        plan = self.plan('pdf')
+        local = PdfPlan.objects.get(pk=plan['id'])
+        pair = {'id': 'pdf-verified', 'excelId': 'xls-verified', 'name': 'Archivo.pdf', 'projectKey': local.cloud_key}
+        url = reverse('delete_cloud_project', args=[pair['id']])
+        with patch.object(cloud, 'list_cloud_projects', return_value=[pair]), patch.object(cloud, 'drive_command') as drive, patch.object(cloud, 'supabase_query') as sql:
+            sql.side_effect = [{}, cloud.CloudUnavailable('Supabase no respondió')]
+            self.assertEqual(self.post(url).status_code, 503)
+            self.assertTrue(PdfPlan.objects.filter(pk=local.pk).exists())
+            self.assertEqual([call.args[0] for call in drive.call_args_list], ['--delete-project', '--restore-project'])
+            sql.side_effect = None
+            self.assertEqual(self.post(url).json()['local_ids'], [local.pk])
+        self.assertFalse(PdfPlan.objects.filter(pk=local.pk).exists())
+
+    def test_button_imports_one_selected_sheet_and_preserves_independent_categories(self):
+        plan = self.plan('pdf')
+        first = self.post(plan['markers_url'], {'page': 1, 'x': .2, 'y': .3}).json()['marker']
+        second = self.post(plan['markers_url'], {'page': 1, 'x': .6, 'y': .3}).json()['marker']
+        document = PdfPlan.objects.get(pk=plan['id']).workbook
+        preview = self.client.post(first['assign_url'], {'file': excel_upload(), 'action': 'inspect', 'source_sheet': 'Otra hoja'})
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()['sheets'], ['Equipos', 'Otra hoja'])
+        self.assertEqual(preview.json()['rows'][0][0], 'Conservar')
+        self.assertEqual(self.client.post(first['assign_url'], {'file': excel_upload()}).status_code, 400)
+        self.assertEqual(WorkbookDocument.objects.get(pk=document.pk).revision, document.revision)
+
+        chosen = self.client.post(first['assign_url'], {'file': excel_upload(), 'source_sheet': 'Otra hoja'})
+        self.assertEqual(chosen.status_code, 200)
+        self.assertEqual(chosen.json()['marker']['sheet_name'], 'Otra hoja')
+        categories = dict(ButtonCategory.objects.values_list('name', 'id'))
+        for marker, category in ((first, 'Motores'), (second, 'Controladores')):
+            response = self.post(marker['assign_url'], {'action': 'set_category', 'category_id': str(categories[category])})
+            self.assertEqual(response.json()['marker']['category_name'], category)
+        shared = self.post(second['assign_url'], {'sheet': 'Otra hoja'}).json()['marker']
+        self.assertEqual(shared['category_name'], 'Controladores')
+        self.assertEqual(PdfMarker.objects.get(pk=first['id']).category_id, categories['Motores'])
+
+        imported = self.client.post(second['assign_url'], {
+            'file': SimpleUploadedFile('Control.csv', b'ID;Nota\r\n001;=texto\r\n'),
+            'source_sheet': 'Control',
+        })
+        self.assertEqual(imported.status_code, 200)
+        self.assertEqual(imported.json()['marker']['category_name'], 'Controladores')
+        saved = self.post(plan['save_project_url'])
+        self.assertEqual(saved.status_code, 200)
+        bundle = self.download(saved.json()['saved']['export_url'])
+        with ZipFile(BytesIO(bundle)) as archive:
+            workbook = load_workbook(BytesIO(archive.read('workbooks/w1.xlsx')))
+            try:
+                self.assertIn('Listado', workbook.sheetnames)
+                self.assertIn('Otra hoja', workbook.sheetnames)
+                self.assertNotIn('Equipos', workbook.sheetnames)
+                self.assertEqual(workbook['Control']['A2'].value, '001')
+                self.assertEqual(workbook['Control']['B2'].data_type, 's')
+            finally:
+                workbook.close()
+        restored = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('Proyecto.planproj', bundle)})
+        self.assertEqual(restored.status_code, 201)
+        self.assertEqual([marker['category_name'] for marker in restored.json()['plan']['markers']], ['Motores', 'Controladores'])
+
+    def test_new_button_keeps_source_tabs_and_materializes_only_its_selected_tab_on_save(self):
+        plan = self.plan('pdf')
+        category = ButtonCategory.objects.get(name='Controladores')
+        position = {'page': 1, 'x': .25, 'y': .5, 'origin': 'upload', 'category_id': str(category.pk)}
+        created = self.client.post(plan['markers_url'], {'placement': json.dumps(position), 'file': excel_upload()})
+        self.assertEqual(created.status_code, 201)
+        button = created.json()['marker']
+        self.assertEqual(button['category_name'], 'Controladores')
+        self.assertEqual(button['source_sheet'], 'Equipos')
+        source_url = button['workbook']['metadata_url']
+        self.assertEqual([sheet['name'] for sheet in self.client.get(source_url).json()['sheets']], ['Equipos', 'Otra hoja'])
+
+        def shared_sheets():
+            document = PdfPlan.objects.get(pk=plan['id']).workbook
+            workbook = load_workbook(BytesIO(document.content), read_only=True)
+            try:
+                return workbook.sheetnames
+            finally:
+                workbook.close()
+
+        self.assertEqual(shared_sheets(), ['Listado'])
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+
+        selected = self.post(button['assign_url'], {
+            'action': 'select_source', 'source_sheet': 'Otra hoja', 'source_workbook_id': button['workbook']['id'],
+        })
+        self.assertEqual(selected.status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+        self.assertEqual(self.client.get(plan['detail_url']).json()['markers'][0]['workbook']['preferred_sheet'], 'Otra hoja')
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Otra hoja'])
+        self.assertEqual(len(self.client.get(source_url).json()['sheets']), 2)
+
+        replacement = self.client.post(button['assign_url'], {
+            'action': 'stage', 'source_sheet': 'Nuevo',
+            'file': SimpleUploadedFile('Nuevo.csv', b'Equipo,ID\r\nTablero,001\r\n'),
+        })
+        self.assertEqual(replacement.status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Otra hoja'])
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        self.assertEqual(shared_sheets(), ['Listado', 'Nuevo'])
+        self.assertEqual(replacement.json()['marker']['category_name'], 'Controladores')
 
     def test_pdf_project_round_trip_keeps_pages_positions_listing_and_shared_xlsx_bytes(self):
         original, content = self.bundle('pdf')

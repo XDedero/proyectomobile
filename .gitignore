@@ -1,4 +1,5 @@
 .venv/
+.venv-local/
 __pycache__/
 *.py[cod]
 media/
@@ -6,3 +7,15 @@ staticfiles/
 .test-artifacts/
 node_modules/
 
+# Tokens y credenciales privadas (Google Drive / Supabase)
+gdrive-token.json
+client_secret*.json
+credenciales*.txt
+conexion*.txt
+debug_app.log
+cambios.zip
+
+# Bases de datos SQLite locales
+*.sqlite3
+*.sqlite3-*
+.local-backup/

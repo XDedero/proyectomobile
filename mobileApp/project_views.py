@@ -44,13 +44,22 @@ def project_plan_data(kind, plan):
     }
 
 
-def saved_data(saved):
+def local_copy_data(kind, plan, user):
+    return {
+        'plan_id': plan.pk, 'kind': kind, 'name': plan.name,
+        'cloud_key': plan.cloud_key, 'cloud_origin': getattr(plan, 'cloud_origin', ''),
+        'detail_url': reverse('detail_pdf' if kind == 'pdf' else 'plan_detail', args=[plan.pk]),
+        'clear_url': reverse('clear_local_project', args=[kind, plan.pk]) if can_clear_local(kind, plan, user) else None,
+    }
+
+
+def saved_data(saved, user):
     kind = 'pdf' if saved.pdf_plan_id else 'dxf'
     plan = saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan
     return {
-        'id': saved.pk, 'plan_id': plan.pk, 'kind': kind, 'name': plan.name,
+        **local_copy_data(kind, plan, user), 'id': saved.pk,
         'date': saved.saved_at.isoformat(),
-        'detail_url': reverse('detail_pdf' if kind == 'pdf' else 'plan_detail', args=[plan.pk]),
+        'cloud_status': saved.cloud_status, 'cloud_error': saved.cloud_error,
         'export_url': reverse('download_saved_project', args=[saved.pk]),
         'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[plan.pk]),
     }
@@ -61,7 +70,9 @@ def saved_data(saved):
 def saved_projects(request):
     projects = SavedProject.objects.select_related('cad_plan', 'pdf_plan').only(
         'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
-        'cad_plan__id', 'cad_plan__name', 'pdf_plan__id', 'pdf_plan__name',
+        'cloud_status', 'cloud_error',
+        'cad_plan__id', 'cad_plan__name', 'cad_plan__cloud_key', 'cad_plan__imported_by_id',
+        'pdf_plan__id', 'pdf_plan__name', 'pdf_plan__cloud_key', 'pdf_plan__cloud_origin', 'pdf_plan__imported_by_id',
     )
     availability = {}
     try:
@@ -76,26 +87,138 @@ def saved_projects(request):
         return error_response(exc)
     # Check working plans as well as saved copies: a newly imported plan is
     # intentionally absent from the library until the user saves it.
-    return JsonResponse({'plans': [saved_data(saved) for saved in projects], 'availability': availability})
+    return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects],
+                         'cached': cached_projects(request.user), 'availability': availability})
+
+
+def cached_projects(user):
+    plans = PdfPlan.objects.exclude(cloud_origin='').filter(saved_project__isnull=True).only(
+        'id', 'name', 'cloud_key', 'cloud_origin', 'imported_by_id', 'imported_at')
+    return [{**local_copy_data('pdf', plan, user), 'date': plan.imported_at.isoformat(),
+             'export_url': reverse('download_project', args=['pdf', plan.pk])} for plan in plans]
+
+
+def can_clear_local(kind, plan, user):
+    return capabilities(user)['can_delete_pdf_plan' if kind == 'pdf' else 'can_delete_plan'] or (
+        kind == 'pdf' and bool(plan.cloud_origin) and plan.imported_by_id == user.pk and not hasattr(plan, 'saved_project')
+    )
+
+
+def clear_plan_files(kind, plan):
+    files = [(plan.source.storage, plan.source.name)] if plan.source else []
+    if kind == 'dxf':
+        files.extend((motor.excel.storage, motor.excel.name) for motor in plan.motors.all() if motor.excel)
+    workbook_ids = {plan.workbook_id, plan.listing_id} - {None}
+    plan._keep_cloud = True
+    with transaction.atomic():
+        plan.delete()
+        for workbook_id in workbook_ids:
+            WorkbookDocument.objects.filter(pk=workbook_id, pdf_workspaces__isnull=True, pdf_listings__isnull=True,
+                cad_workspaces__isnull=True, cad_listings__isnull=True, markers__isnull=True, motors__isnull=True,
+                saved_motor__isnull=True).delete()
+        for storage, name in files:
+            transaction.on_commit(lambda storage=storage, name=name: storage.delete(name))
+
+
+@require_POST
+@api_permissions()
+def clear_local_project(request, kind, plan_id):
+    plan = get_plan(kind, plan_id)
+    if not can_clear_local(kind, plan, request.user):
+        return error_response('No tiene permiso para limpiar esta copia.', status=403)
+    clear_plan_files(kind, plan)
+    return JsonResponse({'deleted': True})
+
+
+@require_GET
+@api_permissions()
+def cloud_projects(request):
+    from .cloud_projects import CloudUnavailable, list_cloud_projects, project_title
+
+    try:
+        return JsonResponse({'plans': [
+            {'id': project['id'], 'name': project['name'], 'title': project_title(project['name']), 'date': project['date'],
+             'cloud_key': project.get('projectKey'), 'open_url': reverse('open_cloud_project', args=[project['id']]),
+             'delete_url': reverse('delete_cloud_project', args=[project['id']])}
+            for project in list_cloud_projects()
+        ]})
+    except CloudUnavailable as exc:
+        return error_response(exc, status=503)
+
+
+@require_POST
+@api_permissions()
+def open_cloud_project(request, pdf_id):
+    from .cloud_projects import CloudUnavailable, open_cloud_project as restore
+
+    try:
+        plan, warning = restore(pdf_id, request.user)
+        return JsonResponse({'plan': pdf_data(plan), 'warning': warning})
+    except CloudUnavailable as exc:
+        return error_response(exc, status=503)
+    except ValidationError as exc:
+        return error_response(exc)
+
+
+@require_POST
+@api_permissions()
+def delete_cloud_project(request, pdf_id):
+    from .cloud_projects import CloudUnavailable, drive_command, list_cloud_projects, project_title, supabase_query
+
+    if not capabilities(request.user)['can_delete_pdf_plan']:
+        return error_response('No tiene permiso para eliminar el proyecto de la nube.', status=403)
+    try:
+        project = next((item for item in list_cloud_projects() if item['id'] == pdf_id), None)
+        if not project:
+            return error_response('El proyecto ya no está en Drive.', status=404)
+        excel_id = project['excelId']
+        if not all(value and all(char.isascii() and (char.isalnum() or char in '_-') for char in value) for value in (pdf_id, excel_id)):
+            return error_response('Identificador de Drive inválido.')
+        supabase_query('SELECT 1;', read_only=True)
+        drive_command('--delete-project', '--drive-id', pdf_id, '--excel-id', excel_id)
+        try:
+            supabase_query(f"BEGIN; DELETE FROM public.saved_projects WHERE pdf_drive_file_id = '{pdf_id}'; "
+                           f"DELETE FROM public.pdf_plans WHERE drive_file_id = '{pdf_id}'; "
+                           f"DELETE FROM public.workbook_documents WHERE drive_file_id = '{excel_id}'; COMMIT;", read_only=False)
+        except CloudUnavailable:
+            drive_command('--restore-project', '--drive-id', pdf_id, '--excel-id', excel_id)
+            raise
+    except CloudUnavailable as exc:
+        return error_response(exc, status=503)
+    with transaction.atomic():
+        copies = list(PdfPlan.objects.filter(cloud_origin=pdf_id))
+        original = PdfPlan.objects.filter(cloud_key=project.get('projectKey')).first()
+        if original and (original.cloud_key.startswith('project_') or project_title(original.name).casefold() == project_title(project['name']).casefold()):
+            copies.append(original)
+        removed = [plan.pk for plan in copies]
+        for plan in copies:
+            clear_plan_files('pdf', plan)
+    return JsonResponse({'deleted': True, 'local_ids': removed})
 
 
 @require_POST
 @api_permissions()
 def save_project(request, kind, plan_id):
+    from .plan_workbook import materialize_button_sources
+    from .terminal_monitor import queue_saved_project_sync
+
     permission = 'can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'
     if not capabilities(request.user)[permission]:
         return error_response('No tiene permiso para guardar planos.', status=403)
     plan = get_plan(kind, plan_id)
     try:
-        content = export_project(kind, plan)
         with transaction.atomic():
+            materialize_button_sources(plan, request.user)
+            content = export_project(kind, plan)
             saved, _ = SavedProject.objects.update_or_create(
                 **{'pdf_plan' if kind == 'pdf' else 'cad_plan': plan},
                 defaults={'name': plan.name, 'content': content, 'saved_by': request.user},
             )
+            queue_saved_project_sync(kind, plan, content, saved.saved_at)
     except (ValidationError, OSError) as exc:
         return error_response(exc)
-    return JsonResponse({'saved': saved_data(saved), 'saved_at': saved.saved_at.isoformat()})
+    saved.refresh_from_db(fields=['cloud_status', 'cloud_error'])
+    return JsonResponse({'saved': saved_data(saved, request.user), 'saved_at': saved.saved_at.isoformat()})
 
 
 def project_file(content, name):

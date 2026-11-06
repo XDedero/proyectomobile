@@ -159,11 +159,13 @@ class PdfModuleTests(TestCase):
     def test_marker_assignment_from_device_and_existing_library(self):
         plan = self.import_plan()
         first = self.create_marker(plan)
-        assigned = self.client.post(first['assign_url'], {'file': excel_upload()})
+        assigned = self.client.post(first['assign_url'], {'file': excel_upload(), 'source_sheet': 'Equipos'})
         self.assertEqual(assigned.status_code, 200)
         document = assigned.json()['marker']['workbook']
         second = self.create_marker(plan)
-        response = self.client.post(second['assign_url'], json.dumps({'workbook_id': document['id']}), content_type='application/json')
+        response = self.client.post(second['assign_url'], json.dumps({
+            'workbook_id': document['id'], 'source_sheet': assigned.json()['marker']['sheet_name'],
+        }), content_type='application/json')
         copied_id = response.json()['marker']['workbook']['id']
         self.assertEqual(copied_id, document['id'])
         self.assertEqual(response.json()['marker']['sheet_name'], assigned.json()['marker']['sheet_name'])
@@ -341,7 +343,7 @@ class PdfModuleTests(TestCase):
         self.client.force_login(self.other)
         plan = self.import_plan()
         marker = self.create_marker(plan)
-        assigned = self.client.post(marker['assign_url'], {'file': excel_upload()})
+        assigned = self.client.post(marker['assign_url'], {'file': excel_upload(), 'source_sheet': 'Equipos'})
         document_id = assigned.json()['marker']['workbook']['id']
         source_path = Path(PdfPlan.objects.get(pk=plan['id']).source.path)
         self.assertEqual(self.client.post(plan['update_url'], {'name': 'Sala A'}, content_type='application/json').status_code, 403)

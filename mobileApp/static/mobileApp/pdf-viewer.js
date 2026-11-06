@@ -395,6 +395,22 @@ class PdfPlanViewer {
         this.buttons.clear();
         for (const [index, marker] of this.markers.entries()) {
             if (Number(marker.page) !== this.pageNumber) continue;
+
+            // Renderizar área de cobertura circular / elíptica si está activa
+            if (marker.has_area) {
+                const area = document.createElement('div');
+                area.className = 'pdf-marker-coverage-area';
+                area.dataset.areaMarkerId = marker.id;
+                const rx = marker.area_radius_x || 0.05;
+                const ry = marker.area_radius_y || rx;
+                area.style.left = `${Math.max(0, Math.min(1, Number(marker.x))) * 100}%`;
+                area.style.top = `${Math.max(0, Math.min(1, Number(marker.y))) * 100}%`;
+                area.style.width = `${rx * 200}%`;
+                area.style.height = `${ry * 200}%`;
+                if (marker.area_color) area.style.backgroundColor = marker.area_color;
+                this.layer.append(area);
+            }
+
             const button = document.createElement('button');
             button.type = 'button';
             button.className = `pdf-plan-marker${marker.workbook ? ' has-workbook' : ''}`;
@@ -412,8 +428,15 @@ class PdfPlanViewer {
 
     positionButton(button, x, y) {
         if (!button) return;
-        button.style.left = `${Math.max(0, Math.min(1, Number(x))) * 100}%`;
-        button.style.top = `${Math.max(0, Math.min(1, Number(y))) * 100}%`;
+        const left = `${Math.max(0, Math.min(1, Number(x))) * 100}%`;
+        const top = `${Math.max(0, Math.min(1, Number(y))) * 100}%`;
+        button.style.left = left;
+        button.style.top = top;
+        const area = this.layer.querySelector(`[data-area-marker-id="${button.dataset?.pdfMarkerId}"]`);
+        if (area) {
+            area.style.left = left;
+            area.style.top = top;
+        }
     }
 
     select(id) {
@@ -422,7 +445,36 @@ class PdfPlanViewer {
             const selected = markerId === this.selectedId;
             button.classList.toggle('selected', selected);
             button.setAttribute('aria-pressed', String(selected));
+            const area = this.layer.querySelector(`[data-area-marker-id="${markerId}"]`);
+            if (area) area.classList.toggle('selected', selected);
         }
+    }
+
+    previewMarkerArea(markerId, hasArea, rx, ry) {
+        const marker = this.markers.find(m => m.id === Number(markerId));
+        if (marker) {
+            marker.has_area = Boolean(hasArea);
+            marker.area_radius_x = rx;
+            marker.area_radius_y = ry;
+        }
+        let area = this.layer.querySelector(`[data-area-marker-id="${markerId}"]`);
+        if (!hasArea) {
+            if (area) area.remove();
+            return;
+        }
+        if (!area) {
+            area = document.createElement('div');
+            area.className = 'pdf-marker-coverage-area';
+            area.dataset.areaMarkerId = markerId;
+            if (marker) {
+                area.style.left = `${Math.max(0, Math.min(1, Number(marker.x))) * 100}%`;
+                area.style.top = `${Math.max(0, Math.min(1, Number(marker.y))) * 100}%`;
+            }
+            this.layer.prepend(area);
+        }
+        area.style.width = `${(rx || 0.05) * 200}%`;
+        area.style.height = `${(ry || 0.05) * 200}%`;
+        area.classList.toggle('selected', Number(markerId) === this.selectedId);
     }
 
     setPlacing(value) {

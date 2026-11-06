@@ -17,7 +17,7 @@ from django.db import transaction
 from pypdf import PdfReader
 
 from .dxf_service import import_dxf, MAX_MOTORS
-from .models import Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet, SavedProject
+from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet, SavedProject
 
 MAX_PROJECT_BYTES = 100 * 1024 * 1024
 MAX_PROJECT_UNPACKED = 250 * 1024 * 1024
@@ -68,12 +68,18 @@ def export_project(kind, plan):
     rows = list(document.plan_sheets.all())
     if kind == 'pdf':
         markers = [{'page': item.page, 'x': item.x, 'y': item.y, 'label': item.label,
-                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name}
-                   for item in plan.markers.all()]
+                    'has_area': getattr(item, 'has_area', False),
+                    'area_radius_x': getattr(item, 'area_radius_x', None),
+                    'area_radius_y': getattr(item, 'area_radius_y', None),
+                    'area_color': getattr(item, 'area_color', 'rgba(59, 130, 246, 0.25)'),
+                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
+                    **category_data(item)}
+                   for item in plan.markers.select_related('category')]
     else:
         markers = [{'entity_key': item.entity_key, 'name': item.name, 'x': item.x, 'y': item.y, 'z': item.z,
-                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name}
-                   for item in plan.motors.all()]
+                    'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
+                    **category_data(item)}
+                   for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
@@ -99,6 +105,12 @@ def export_project(kind, plan):
     if len(result) > MAX_PROJECT_BYTES:
         raise ValidationError('El proyecto supera el tamaño máximo de 100 MB.')
     return result
+
+
+def category_data(button):
+    if not button.category_id:
+        return {}
+    return {'category_id': str(button.category_id), 'category_name': button.category.name}
 
 
 def validate_pdf_source(content):
@@ -155,6 +167,13 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
     if sum(row['is_primary'] for row in specs) > 1 or manifest.get('workbook_mode') not in ('template', 'imported'):
         raise ValidationError('La configuración del Excel del plano no es válida.')
     motor_names = {row['name'] for row in specs if not row['is_listing']}
+    categories = list(ButtonCategory.objects.values_list('id', 'name'))
+    category_ids = {str(identifier): identifier for identifier, _ in categories}
+    category_names = {name.casefold(): identifier for identifier, name in categories}
+    def category_for(item):
+        # Importing a project can use categories that an admin has already created.
+        return category_ids.get(item.get('category_id')) or category_names.get((item.get('category_name') or '').casefold())
+
     for item in markers:
         sheet = item.get('sheet')
         if not isinstance(sheet, str) or (sheet and (sheet not in motor_names or item.get('workbook') != key)) or (not sheet and item.get('workbook') is not None):
@@ -168,13 +187,19 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
     plan.save()
     if kind == 'pdf':
         PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'],
-            label=item.get('label', ''), workbook=document, sheet_name=item['sheet']) for item in markers])
+            label=item.get('label', ''),
+            has_area=item.get('has_area', False),
+            area_radius_x=item.get('area_radius_x'),
+            area_radius_y=item.get('area_radius_y'),
+            area_color=item.get('area_color', 'rgba(59, 130, 246, 0.25)'),
+            workbook=document, sheet_name=item['sheet'], category_id=category_for(item)) for item in markers])
     else:
         a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
         Motor.objects.bulk_create([Motor(plan=plan, entity_key=item['entity_key'], name=item['name'],
             x=item['x'], y=item['y'], z=item['z'], svg_x=a*item['x']+c*item['y']+e,
             svg_y=b*item['x']+d*item['y']+f, svg_bounds=[a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f, 0, 0],
-            workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else []) for item in markers])
+            workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else [],
+            category_id=category_for(item)) for item in markers])
     return kind, plan
 
 
@@ -240,6 +265,10 @@ def import_project(upload, user):
                     raise ValidationError('Un botón hace referencia a un Excel inexistente.')
                 if marker.get('workbook_name') is not None and (not isinstance(marker['workbook_name'], str) or len(marker['workbook_name']) > 255):
                     raise ValidationError('El nombre de una ficha no es válido.')
+                if marker.get('category_id') is not None and not isinstance(marker['category_id'], str):
+                    raise ValidationError('La categoría de un botón no es válida.')
+                if marker.get('category_name') is not None and (not isinstance(marker['category_name'], str) or len(marker['category_name']) > 80):
+                    raise ValidationError('El nombre de la categoría de un botón no es válido.')
                 if kind == 'pdf':
                     if type(marker.get('page')) is not int or not 1 <= marker['page'] <= len(pages) or any(not finite(marker.get(key)) or not 0 <= marker[key] <= 1 for key in ('x', 'y')):
                         raise ValidationError('Un botón PDF tiene página o coordenadas no válidas.')

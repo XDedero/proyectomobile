@@ -169,6 +169,7 @@
     outline: none;
     box-sizing: border-box;
 }
+textarea.wbe-cell-editor { resize: none; }
 .wbe-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 7px 12px; border-top: 1px solid #dce6df; font-size: .69rem; color: #54705e; flex-shrink: 0; }
 .wbe-calculation-notice { flex-basis: 100%; margin: 0; padding-top: 3px; line-height: 1.35; color: #6b561d; }
 .wbe-footer-copy { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

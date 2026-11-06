@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consola Debug: Supabase + Google Drive + Área Circular</title>
+    <script src="./google-drive.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 20px;
+            background-color: #f1f5f9;
+            color: #1e293b;
+        }
+        .container {
+            max-width: 1120px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+        }
+        h1 { margin-top: 0; font-size: 22px; color: #0f172a; }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .card {
+            background: #f8fafc;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            border: 1px solid #e2e8f0;
+        }
+        .folder-pill {
+            display: inline-block;
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: monospace;
+            margin-top: 4px;
+        }
+        .btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .btn:hover { background: #1d4ed8; }
+        .btn-green { background: #16a34a; }
+        .btn-green:hover { background: #15803d; }
+        .btn-outline {
+            background: #ffffff;
+            color: #334155;
+            border: 1px solid #cbd5e1;
+        }
+        .btn-outline:hover { background: #f1f5f9; }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            box-sizing: border-box;
+            background: #fff;
+            margin-top: 4px;
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            background: #fff;
+        }
+        th, td {
+            text-align: left;
+            padding: 9px 12px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 13px;
+        }
+        th { background: #f8fafc; color: #475569; }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-ok { background: #dcfce7; color: #15803d; }
+        .badge-warn { background: #fef3c7; color: #b45309; }
+        #live-viewer {
+            display: none;
+            margin-top: 20px;
+            border: 2px solid #2563eb;
+            border-radius: 10px;
+            padding: 16px;
+            background: #fff;
+        }
+        iframe.pdf-frame {
+            width: 100%;
+            height: 440px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+        }
+        /* Simulador de plano y botón con área circular/elíptica */
+        .plan-preview-stage {
+            position: relative;
+            width: 100%;
+            height: 240px;
+            background:
+                linear-gradient(to right, #e2e8f0 1px, transparent 1px) 0 0 / 24px 24px,
+                linear-gradient(to bottom, #e2e8f0 1px, transparent 1px) 0 0 / 24px 24px,
+                #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .demo-coverage-area {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 2.5px dashed #2563eb;
+            background: rgba(59, 130, 246, 0.24);
+            pointer-events: none;
+            transition: width 0.05s, height 0.05s;
+        }
+        .demo-marker-btn {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: #4ade80;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+            font-weight: 800;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+        pre.debug-box {
+            background: #0f172a;
+            color: #38bdf8;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            max-height: 190px;
+            overflow: auto;
+            margin: 8px 0 0;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div>
+            <h1>🛠️ Consola de Comprobación y Debug: Supabase + Google Drive</h1>
+            <p style="margin:0; font-size:14px; color:#475569;">
+                Cuenta Google Drive: <strong>Vicente Sepúlveda (vicente.shent@gmail.com)</strong> ·
+                Proyecto Supabase: <strong>App Mobile Project (<code>xhfcldlrbcuvjngznsbg</code>)</strong>
+            </p>
+        </div>
+        <div>
+            <a href="/app" class="btn btn-outline" style="text-decoration:none; margin-right:6px;">📐 Ir al Visor Completo</a>
+            <button id="btn-run-full-debug" class="btn">🔄 Ejecutar Diagnóstico Completo</button>
+        </div>
+    </div>
+
+    <!-- ESTADO DE CONEXIÓN EN TIEMPO REAL (SUPABASE + DRIVE) -->
+    <div class="grid-2">
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong>🗄️ Estado Base de Datos Supabase (Cloud)</strong>
+                <span id="sb-badge" class="badge badge-ok">Verificando...</span>
+            </div>
+            <div class="folder-pill">Host: db.xhfcldlrbcuvjngznsbg.supabase.co</div>
+            <pre id="sb-debug-output" class="debug-box">Consultando Supabase en la nube...</pre>
+        </div>
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong>☁️ Estado Google Drive API v3 (Carpetas)</strong>
+                <span id="gd-badge" class="badge badge-ok">Conectado</span>
+            </div>
+            <div class="folder-pill">pdf: 1d7sf6i8zPsi52JVQJuaPu-Vv25GHHXoX</div>
+            <div class="folder-pill">excel(xlsx-csv): 13sc_1Nt_LBWvKNlGPV42LLb6XP6Qd0-s</div>
+            <pre id="gd-debug-output" class="debug-box">Consultando carpetas en Google Drive...</pre>
+        </div>
+    </div>
+
+    <!-- PROBADOR DEL ÁREA DE COBERTURA CIRCULAR / ELÍPTICA OPCIONAL -->
+    <div class="card">
+        <h3>🎯 Comprobación de Botón con Área Circular / Elíptica Opcional (SQL)</h3>
+        <div class="grid-2">
+            <div>
+                <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer; margin-bottom:10px;">
+                    <input type="checkbox" id="demo-has-area" checked />
+                    Activar área de cobertura desde el botón (Opcional)
+                </label>
+
+                <div id="demo-area-controls">
+                    <div style="display:flex; justify-content:space-between; font-size:13px;">
+                        <span>Radio Horizontal (agrandar ancho):</span>
+                        <strong id="demo-rx-label">20%</strong>
+                    </div>
+                    <input type="range" id="demo-rx" min="5" max="48" step="1" value="20" style="width:100%;" />
+
+                    <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:6px;">
+                        <span>Radio Vertical (agrandar alto):</span>
+                        <strong id="demo-ry-label">20%</strong>
+                    </div>
+                    <input type="range" id="demo-ry" min="5" max="48" step="1" value="20" style="width:100%;" />
+
+                    <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-top:6px; cursor:pointer;">
+                        <input type="checkbox" id="demo-lock-ratio" />
+                        Mantener círculo uniforme (desmarca para estirar vertical u horizontalmente)
+                    </label>
+                </div>
+
+                <pre id="demo-sql-preview" class="debug-box" style="margin-top:10px;"></pre>
+            </div>
+
+            <div>
+                <div class="plan-preview-stage">
+                    <div id="demo-area-circle" class="demo-coverage-area" style="width: 40%; height: 40%;"></div>
+                    <div class="demo-marker-btn" title="Botón 1">1</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUBIDA Y ASOCIACIÓN AUTOMÁTICA EN CARPETAS DE DRIVE -->
+    <div class="card">
+        <h3>1. Subir Archivos al Proyecto (Asociación Automática en Carpetas de Drive)</h3>
+        <div class="grid-2">
+            <div>
+                <label>Nombre / Clave del Proyecto (une automáticamente el PDF y el XLSX/CSV):</label>
+                <input type="text" id="proj-name" placeholder="Ej: Planta_Motores_Norte" />
+                <label>Plano PDF (se sube a la carpeta "pdf"):</label>
+                <input type="file" id="pdf-input" accept=".pdf" />
+            </div>
+            <div>
+                <label>Tabla Excel o CSV (se sube a la carpeta "excel(xlsx-csv)"):</label>
+                <input type="file" id="excel-input" accept=".xlsx,.csv" />
+                <div style="margin-top: 18px;">
+                    <button id="btn-upload-project" class="btn btn-green">☁ Subir y Asociar Automáticamente</button>
+                </div>
+            </div>
+        </div>
+        <div id="upload-status" style="font-size: 13px; margin-top: 8px;"></div>
+    </div>
+
+    <!-- LISTADO Y VISUALIZACIÓN SIN DESCARGAR -->
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">2. Proyectos en Google Drive (Visualizar en Memoria sin Descargar)</h3>
+            <button id="btn-refresh" class="btn">🔄 Actualizar Carpetas</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Clave Asociación</th>
+                    <th>Plano en carpeta "pdf"</th>
+                    <th>Tabla en carpeta "excel(xlsx-csv)"</th>
+                    <th>Visualización (Sin Descargar)</th>
+                    <th>Descarga Opcional</th>
+                </tr>
+            </thead>
+            <tbody id="projects-tbody">
+                <tr><td colspan="5">Consultando carpetas de Google Drive...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- VISOR EN VIVO EN MEMORIA -->
+    <div id="live-viewer">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 id="viewer-title" style="margin:0;">👁 Visualizando Proyecto en Vivo desde Google Drive</h3>
+            <button onclick="document.getElementById('live-viewer').style.display='none'" class="btn btn-outline">Cerrar Visor</button>
+        </div>
+        <div class="grid-2">
+            <div>
+                <h4>Plano PDF (Stream en memoria RAM - Sin descarga)</h4>
+                <div id="pdf-live-container"></div>
+            </div>
+            <div>
+                <h4>Tabla Asociada (Leída en memoria RAM - Sin descarga)</h4>
+                <div id="table-live-container" style="max-height:440px; overflow:auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. Lógica del Simulador de Área Circular / Elíptica Opcional
+    const chkDemoArea = document.getElementById('demo-has-area');
+    const demoControls = document.getElementById('demo-area-controls');
+    const slDemoRx = document.getElementById('demo-rx');
+    const slDemoRy = document.getElementById('demo-ry');
+    const lblDemoRx = document.getElementById('demo-rx-label');
+    const lblDemoRy = document.getElementById('demo-ry-label');
+    const chkDemoLock = document.getElementById('demo-lock-ratio');
+    const demoCircle = document.getElementById('demo-area-circle');
+    const demoSqlPreview = document.getElementById('demo-sql-preview');
+
+    function updateDemoArea() {
+        const active = chkDemoArea.checked;
+        demoControls.style.opacity = active ? '1' : '0.4';
+        demoCircle.style.display = active ? 'block' : 'none';
+
+        const rx = Number(slDemoRx.value);
+        const ry = Number(slDemoRy.value);
+        lblDemoRx.textContent = rx + '%';
+        lblDemoRy.textContent = ry + '%';
+
+        demoCircle.style.width = (rx * 2) + '%';
+        demoCircle.style.height = (ry * 2) + '%';
+
+        const sqlObj = {
+            tabla_sql: 'public.pdf_markers',
+            has_area: active,
+            area_radius_x: active ? Number((rx / 100).toFixed(3)) : null,
+            area_radius_y: active ? Number((ry / 100).toFixed(3)) : null,
+            area_color: active ? 'rgba(59, 130, 246, 0.25)' : null
+        };
+        demoSqlPreview.textContent = '// Parámetros SQL (Opcionales en Supabase):\n' + JSON.stringify(sqlObj, null, 2);
+    }
+
+    chkDemoArea.addEventListener('change', updateDemoArea);
+    slDemoRx.addEventListener('input', () => {
+        if (chkDemoLock.checked) slDemoRy.value = slDemoRx.value;
+        updateDemoArea();
+    });
+    slDemoRy.addEventListener('input', () => {
+        if (chkDemoLock.checked) slDemoRx.value = slDemoRy.value;
+        updateDemoArea();
+    });
+    updateDemoArea();
+
+    // 2. Diagnóstico en vivo de Supabase + Google Drive
+    async function runFullDiagnostics() {
+        const sbOut = document.getElementById('sb-debug-output');
+        const gdOut = document.getElementById('gd-debug-output');
+
+        // Consultar Google Drive directamente
+        try {
+            const report = await GoogleDriveService.getLinkedProjectsFromFolders();
+            gdOut.textContent = JSON.stringify({
+                estado: 'CONECTADO A GOOGLE DRIVE API v3',
+                carpeta_pdf: report.foldersChecked.pdfFolderId,
+                archivos_pdf: report.totalPdfFiles,
+                carpeta_excel_csv: report.foldersChecked.excelFolderId,
+                archivos_excel_csv: report.totalExcelCsvFiles,
+                proyectos_vinculados: report.projects.length
+            }, null, 2);
+        } catch (err) {
+            gdOut.textContent = 'Error Drive: ' + err.message;
+        }
+
+        // Consultar endpoint local del servidor debug (conectado a Supabase CLI)
+        try {
+            const res = await fetch('/api/debug/status');
+            if (res.ok) {
+                const data = await res.json();
+                sbOut.textContent = JSON.stringify(data.supabase, null, 2);
+            } else {
+                sbOut.textContent = 'Ejecuta ejecutar_debug.bat para ver la telemetría de Supabase en vivo.';
+            }
+        } catch (e) {
+            sbOut.textContent = 'Modo archivo local: Ejecuta ejecutar_debug.bat para consultar Supabase en vivo.';
+        }
+
+        await loadProjectsTable();
+    }
+
+    // 3. Tabla de proyectos en Google Drive
+    async function loadProjectsTable() {
+        const tbody = document.getElementById('projects-tbody');
+        try {
+            const report = await GoogleDriveService.getLinkedProjectsFromFolders();
+            tbody.innerHTML = '';
+
+            if (report.projects.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5">
+                            ✅ Carpetas <strong>pdf</strong> y <strong>excel(xlsx-csv)</strong> verificadas y conectadas (actualmente con 0 archivos).
+                            Cuando subas un PDF y un XLSX/CSV aparecerán asociados aquí automáticamente.
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            report.projects.forEach(proj => {
+                const tr = document.createElement('tr');
+                const pdfInfo = proj.pdfFile
+                    ? `✅ <strong>${proj.pdfFile.name}</strong>`
+                    : `<span class="badge badge-warn">Sin PDF</span>`;
+
+                const excelInfo = proj.excelOrCsvFiles.length > 0
+                    ? proj.excelOrCsvFiles.map(e => `✅ <strong>${e.name}</strong> (${e.format.toUpperCase()})`).join('<br>')
+                    : `<span class="badge badge-warn">Sin XLSX/CSV</span>`;
+
+                let downloadButtons = '';
+                if (proj.pdfFile) {
+                    downloadButtons += `<button class="btn btn-outline" style="padding:5px 8px; font-size:12px; margin-right:4px;" onclick="GoogleDriveService.downloadFileExplicitly('${proj.pdfFile.id}', '${proj.pdfFile.name}')">⬇ PDF</button>`;
+                }
+                if (proj.excelOrCsvFiles.length > 0) {
+                    const tbl = proj.excelOrCsvFiles[0];
+                    downloadButtons += `<button class="btn btn-outline" style="padding:5px 8px; font-size:12px;" onclick="GoogleDriveService.downloadFileExplicitly('${tbl.id}', '${tbl.name}')">⬇ ${tbl.format.toUpperCase()}</button>`;
+                }
+
+                tr.innerHTML = `
+                    <td><code>${proj.associationKey}</code></td>
+                    <td>${pdfInfo}</td>
+                    <td>${excelInfo}</td>
+                    <td>
+                        <button class="btn" style="padding:6px 12px; font-size:13px;" onclick="openProjectLive('${proj.associationKey}')">
+                            👁 Ver Proyecto (Sin Descargar)
+                        </button>
+                    </td>
+                    <td>${downloadButtons || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="5" style="color:#b91c1c;">Error: ${err.message}</td></tr>`;
+        }
+    }
+
+    async function openProjectLive(associationKey) {
+        const viewer = document.getElementById('live-viewer');
+        const pdfContainer = document.getElementById('pdf-live-container');
+        const tableContainer = document.getElementById('table-live-container');
+
+        viewer.style.display = 'block';
+        pdfContainer.innerHTML = 'Cargando stream de PDF desde Google Drive en memoria RAM...';
+        tableContainer.innerHTML = 'Cargando tabla desde Google Drive en memoria RAM...';
+
+        try {
+            const session = await GoogleDriveService.loadProjectForViewingWithoutDownload(associationKey);
+            document.getElementById('viewer-title').innerText = `👁 Proyecto: ${session.projectName} (Clave: ${session.associationKey})`;
+
+            if (session.pdfViewerData) {
+                const ramBlob = new Blob([session.pdfViewerData.uint8ArrayForPdfJs], { type: 'application/pdf' });
+                const ramUrl = URL.createObjectURL(ramBlob);
+                pdfContainer.innerHTML = `
+                    <p style="margin:4px 0 8px; font-size:12px; color:#15803d;">
+                        ✓ Cargado en memoria RAM (${(session.pdfViewerData.byteLength / 1024).toFixed(1)} KB) — Sin descarga en disco
+                    </p>
+                    <iframe class="pdf-frame" src="${ramUrl}"></iframe>
+                `;
+            } else {
+                pdfContainer.innerHTML = '<p>Este proyecto no tiene un plano PDF en la carpeta "pdf".</p>';
+            }
+
+            if (session.tableViewerData) {
+                if (session.tableViewerData.format === 'csv') {
+                    let html = `<p style="margin:4px 0 8px; font-size:12px; color:#15803d;">✓ CSV leído en memoria RAM (${session.tableViewerData.fileName})</p><table><thead><tr>`;
+                    session.tableViewerData.headers.forEach(h => { html += `<th>${h}</th>`; });
+                    html += `</tr></thead><tbody>`;
+                    session.tableViewerData.rows.forEach(row => {
+                        html += `<tr>` + row.map(c => `<td>${c}</td>`).join('') + `</tr>`;
+                    });
+                    html += `</tbody></table>`;
+                    tableContainer.innerHTML = html;
+                } else {
+                    tableContainer.innerHTML = `
+                        <p style="margin:4px 0 8px; font-size:12px; color:#15803d;">
+                            ✓ Libro Excel (${session.tableViewerData.fileName}) cargado en memoria RAM (${(session.tableViewerData.byteLength / 1024).toFixed(1)} KB)
+                        </p>
+                        <iframe class="pdf-frame" src="${session.tableViewerData.embedPreviewUrl}"></iframe>
+                    `;
+                }
+            } else {
+                tableContainer.innerHTML = '<p>Este proyecto no tiene tabla asociada en la carpeta "excel(xlsx-csv)".</p>';
+            }
+        } catch (err) {
+            pdfContainer.innerHTML = `<p style="color:red;">Error al cargar en vivo: ${err.message}</p>`;
+        }
+    }
+
+    document.getElementById('btn-upload-project').addEventListener('click', async () => {
+        const statusEl = document.getElementById('upload-status');
+        const nameInput = document.getElementById('proj-name').value.trim();
+        const pdfFile = document.getElementById('pdf-input').files[0];
+        const excelFile = document.getElementById('excel-input').files[0];
+
+        if (!pdfFile && !excelFile) {
+            statusEl.innerHTML = '<span style="color:#b91c1c;">Selecciona al menos un archivo PDF o un archivo XLSX/CSV.</span>';
+            return;
+        }
+
+        statusEl.innerHTML = '⏳ Subiendo archivos a sus carpetas de Google Drive y asociándolos...';
+        try {
+            const result = await GoogleDriveService.uploadLinkedProject({
+                projectName: nameInput || (pdfFile ? pdfFile.name : excelFile.name),
+                pdfFile: pdfFile ? { name: pdfFile.name, content: pdfFile } : null,
+                excelOrCsvFile: excelFile ? { name: excelFile.name, content: excelFile } : null
+            });
+
+            statusEl.innerHTML = `<span style="color:#15803d;">✅ Proyecto subido y asociado con clave: <strong>${result.associationKey}</strong></span>`;
+            loadProjectsTable();
+        } catch (err) {
+            statusEl.innerHTML = `<span style="color:#b91c1c;">⚠ ${err.message}</span>`;
+        }
+    });
+
+    document.getElementById('btn-refresh').addEventListener('click', loadProjectsTable);
+    document.getElementById('btn-run-full-debug').addEventListener('click', runFullDiagnostics);
+    window.addEventListener('DOMContentLoaded', runFullDiagnostics);
+</script>
+</body>
+</html>

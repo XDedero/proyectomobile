@@ -38,6 +38,9 @@ def json_body(request):
 
 
 def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=None):
+    if document.plan_mode == 'source':
+        context = 'button-source'
+        sheet_name = None
     snapshot = bool(user is not None and SavedMotor.objects.filter(workbook_id=document.pk).exists())
     result = {
         'id': document.pk, 'name': document.name, 'revision': document.revision,
@@ -77,13 +80,27 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
 
 
 def marker_data(marker):
+    from .plan_workbook import source_workbook_data
+
+    assign_url = reverse('assign_marker_workbook', args=[marker.pk])
+    if marker.source_workbook_id:
+        workbook = source_workbook_data(marker, assign_url)
+    else:
+        workbook = workbook_data(marker.workbook, sheets=False, sheet_name=marker.sheet_name) if marker.workbook_id and (marker.sheet_name or not marker.workbook.plan_mode) else None
     return {
         'id': marker.pk, 'page': marker.page, 'x': marker.x, 'y': marker.y, 'label': marker.label,
         'sheet_name': marker.sheet_name,
-        'workbook': workbook_data(marker.workbook, sheets=False, sheet_name=marker.sheet_name) if marker.workbook_id and (marker.sheet_name or not marker.workbook.plan_mode) else None,
+        'category_id': marker.category_id,
+        'category_name': marker.category.name if marker.category_id else '',
+        'has_area': bool(marker.has_area),
+        'area_radius_x': marker.area_radius_x,
+        'area_radius_y': marker.area_radius_y,
+        'area_color': marker.area_color or 'rgba(59, 130, 246, 0.25)',
+        'source_sheet': marker.source_sheet,
+        'workbook': workbook,
         'update_url': reverse('update_marker', args=[marker.pk]),
         'delete_url': reverse('delete_marker', args=[marker.pk]),
-        'assign_url': reverse('assign_marker_workbook', args=[marker.pk]),
+        'assign_url': assign_url,
     }
 
 
@@ -100,7 +117,7 @@ def pdf_data(plan, *, detail=True):
         'delete_url': reverse('delete_pdf_plan', args=[plan.pk]),
     }
     if detail:
-        result['markers'] = [marker_data(marker) for marker in plan.markers.select_related('workbook').defer('workbook__content').all()]
+        result['markers'] = [marker_data(marker) for marker in plan.markers.select_related('workbook', 'category', 'source_workbook').defer('workbook__content', 'source_workbook__content')]
     from .project_views import project_plan_data
     result.update(project_plan_data('pdf', plan))
     return result
@@ -193,21 +210,46 @@ def validated_marker(plan, data, *, partial=False):
         if not isinstance(data['label'], str) or len(data['label']) > 120:
             raise ValidationError('El nombre del botón debe tener como máximo 120 caracteres.')
         values['label'] = data['label'].strip()
+    if 'has_area' in data:
+        values['has_area'] = bool(data['has_area'])
+    if 'area_radius_x' in data:
+        rx = data['area_radius_x']
+        if rx is not None and rx != '':
+            if type(rx) not in (int, float) or not math.isfinite(rx) or rx <= 0:
+                raise ValidationError('El radio horizontal debe ser un número positivo.')
+            values['area_radius_x'] = float(rx)
+        else:
+            values['area_radius_x'] = None
+    if 'area_radius_y' in data:
+        ry = data['area_radius_y']
+        if ry is not None and ry != '':
+            if type(ry) not in (int, float) or not math.isfinite(ry) or ry <= 0:
+                raise ValidationError('El radio vertical debe ser un número positivo.')
+            values['area_radius_y'] = float(ry)
+        else:
+            values['area_radius_y'] = None
+    if 'area_color' in data:
+        if data['area_color'] and isinstance(data['area_color'], str):
+            values['area_color'] = data['area_color'][:50]
+        else:
+            values['area_color'] = 'rgba(59, 130, 246, 0.25)'
     return values
 
 
 @require_POST
 @api_permissions()
 def create_marker(request, plan_id):
+    from .plan_workbook import initialize_button, new_button_options, WorkbookConflict
+
     plan = get_object_or_404(PdfPlan, pk=plan_id)
     try:
-        data = validated_marker(plan, json_body(request))
+        values, category, origin, upload = new_button_options(request)
+        data = validated_marker(plan, values)
+        with transaction.atomic():
+            marker = PdfMarker.objects.create(plan=plan, category=category, **data)
+            initialize_button(marker, request.user, origin, upload)
     except ValidationError as exc:
-        return error_response(exc)
-    with transaction.atomic():
-        marker = PdfMarker.objects.create(plan=plan, **data)
-        from .plan_workbook import initialize_marker
-        initialize_marker(marker, request.user)
+        return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
     return JsonResponse({'marker': marker_data(marker)}, status=201)
 
 
@@ -281,12 +323,12 @@ def upload_workbook(request):
 @require_POST
 @api_permissions()
 def assign_marker_workbook(request, marker_id):
-    from .plan_workbook import assign_marker, WorkbookConflict, workspace_data
+    from .plan_workbook import marker_assignment, WorkbookConflict, workspace_data
     marker = get_object_or_404(PdfMarker.objects.select_related('plan'), pk=marker_id)
     try:
-        upload = request.FILES.get('file')
-        data = json_body(request) if upload is None else {}
-        assign_marker(marker, request.user, data, upload)
+        preview = marker_assignment(request, marker)
+        if preview is not None:
+            return JsonResponse(preview)
         return JsonResponse({'marker': marker_data(marker), **workspace_data(marker.plan, request.user)})
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
@@ -348,6 +390,11 @@ def workbook_save(request, workbook_id):
             if not changed:
                 return error_response('Otro usuario modificó este Excel. Recargue el libro antes de guardar.', status=409)
         document.refresh_from_db()
+        try:
+            from .terminal_monitor import on_workbook_saved
+            on_workbook_saved(WorkbookDocument, document, created=False)
+        except Exception:
+            pass
         result = workbook_data(document, user=request.user, sheet_name=data.get('sheet'), context=data.get('context'))
         return JsonResponse(result)
     except ValidationError as exc:

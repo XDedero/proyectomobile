@@ -178,7 +178,7 @@
             this.sheetSelect = this.node('select', 'wbe-sheet-select');
             this.sheetSelect.id = 'workbookEditorSheet';
             this.sheetSelect.setAttribute('aria-label', 'Hoja del Excel');
-            this.sheetSelect.addEventListener('change', () => this.changeSheet(this.sheetSelect.value));
+            this.sheetSelect.addEventListener('change', () => this.selectWorkbookSheet(this.sheetSelect.value));
             this.saveButton = this.button('Guardar cambios', 'workbookEditorSave', () => this.save(), 'wbe-save');
             this.rowButton = this.button('+ Fila', 'workbookEditorAddRow', () => this.appendDimension('insert_row'));
             this.colButton = this.button('+ Columna', 'workbookEditorAddColumn', () => this.appendDimension('insert_column'));
@@ -311,6 +311,8 @@
             this.returnFocus = document.activeElement;
             this.metadata = metadata;
             this.context = metadata.context || 'motor';
+            this.selectSourceUrl = metadata.select_source_url || '';
+            this.sheetSelect.setAttribute('aria-label', this.selectSourceUrl ? 'Hoja que se incorporará al guardar el plano' : 'Hoja del Excel');
             this.removeMarker = metadata.removeMarker || null;
             this.visible = true;
             this.overlay.hidden = false;
@@ -343,7 +345,8 @@
                 this.filename.textContent = fresh.name;
                 this.populateSheets();
                 this.changeSheet(this.visibleSheets().find((sheet) => sheet.name === metadata.preferred_sheet)?.name || this.visibleSheets()[0]?.name);
-                this.setStatus(this.canEdit ? (this.context === 'listing' ? 'Listado del plano. Use + Fila para más motores y + Columna para ampliar sus datos. Se incluye al guardar el plano.' : 'Toque una celda para editarla. Los datos se incluyen al guardar el plano.') : 'Solo lectura. Deslice en ambas direcciones para recorrer toda la hoja y seleccione una celda para consultar su valor.');
+                if (this.selectSourceUrl) this.setStatus(`Se incorporará «${this.sheet}» al guardar el plano. Puede elegir otra hoja en el menú.`);
+                else this.setStatus(this.canEdit ? (this.context === 'listing' ? 'Listado del plano. Use + Fila para más motores y + Columna para ampliar sus datos. Se incluye al guardar el plano.' : 'Toque una celda para editarla. Los datos se incluyen al guardar el plano.') : 'Solo lectura. Deslice en ambas direcciones para recorrer toda la hoja y seleccione una celda para consultar su valor.');
                 this.viewport.focus();
                 return true;
             } catch (error) {
@@ -373,6 +376,7 @@
             this.cancelCellEditor();
             this.overlay.hidden = true;
             this.metadata = null;
+            this.selectSourceUrl = '';
             this.removeMarker = null;
             this.sheet = null;
             this.pending.clear();
@@ -467,6 +471,30 @@
             else this.setZoom(1);
             this.viewport.scrollTop = this.viewport.scrollLeft = 0;
             this.render();
+        }
+
+        async selectWorkbookSheet(name) {
+            if (!this.selectSourceUrl) { this.changeSheet(name); return; }
+            if (!name || this.busy || name === this.sheet) return;
+            const epoch = this.epoch;
+            this.setBusy(true);
+            try {
+                await this.request(this.selectSourceUrl, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'select_source', source_sheet: name, source_workbook_id: this.metadata.id }),
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (epoch !== this.epoch) return;
+                this.changeSheet(name);
+                window.planExcel?.sourceSelected(this.metadata.id, name);
+                this.setStatus(`Se incorporará «${name}» al guardar el plano.`, 'success');
+            } catch (error) {
+                if (epoch !== this.epoch) return;
+                this.sheetSelect.value = this.sheet;
+                this.setStatus(error.message, 'error');
+            } finally {
+                if (epoch === this.epoch) this.setBusy(false);
+            }
         }
 
         changeSheet(name) {
@@ -839,9 +867,10 @@
             if (!address) { this.setStatus('Escriba una celda válida, por ejemplo A1, Z155 o AA500.', 'error'); return; }
             this.selectCell(address.row, address.col);
             this.viewport.focus();
-            this.address.value = `${columnName(address.col)}${address.row}`;
+            const selected = `${columnName(this.selectedCol)}${this.selectedRow}`;
+            this.address.value = selected;
             if (this.staleRevision) this.markStale();
-            else this.setStatus(`Celda ${columnName(address.col)}${address.row}.${this.canEdit ? ' Pulse Enter o toque la celda para editar.' : ' Solo lectura.'}`);
+            else this.setStatus(`Celda ${selected}.${this.canEdit ? ' Pulse Enter o toque la celda para editar.' : ' Solo lectura.'}`);
         }
 
         async beginEdit(initialText) {
@@ -856,9 +885,11 @@
             if (revision !== this.selectionRevision || !this.canEdit || !this.visible || this.busy || this.sheet !== sheet) return;
             this.updateSelectionInputs();
             const originalText = rawText(this.cellValue(row, col).value);
-            const input = this.node('input', 'wbe-cell-editor');
+            const merge = this.mergeAt(row, col);
+            const multiline = window.workbookFields.isNotesField(merge);
+            const input = this.node(multiline ? 'textarea' : 'input', 'wbe-cell-editor');
             input.id = 'workbookEditorCellInput';
-            input.type = 'text';
+            if (!multiline) input.type = 'text';
             input.autocomplete = 'off';
             input.spellcheck = false;
             input.setAttribute('aria-label', `Editar celda ${columnName(col)}${row}`);
@@ -875,10 +906,11 @@
                     event.preventDefault();
                     this.cancelCellEditor();
                     this.viewport.focus();
-                } else if (event.key === 'Enter' || event.key === 'Tab') {
+                } else if (event.key === 'Tab' || (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey))) {
                     event.preventDefault();
                     this.commitCellEditor();
-                    this.selectCell(row + (event.key === 'Enter' ? (event.shiftKey ? -1 : 1) : 0), col + (event.key === 'Tab' ? (event.shiftKey ? -1 : 1) : 0));
+                    if (event.key === 'Tab') this.selectCell(row, event.shiftKey ? col - 1 : (merge?.max_col ?? col) + 1);
+                    else this.selectCell(event.shiftKey ? row - 1 : (merge?.max_row ?? row) + 1, col);
                     this.viewport.focus();
                 }
             });
@@ -976,7 +1008,9 @@
                 this.inflight.clear();
                 this.populateSheets();
                 this.sheetSelect.value = this.sheet;
-                this.setStatus('Cambios de Excel guardados.', 'success');
+                const plan = window.projectWorkspace?.active?.plan;
+                const savedForPlan = this.metadata.id === plan?.workbook?.id || this.context === 'button-source';
+                this.setStatus(savedForPlan ? 'Cambios de Excel guardados. Usa «Guardar plano» para publicarlos en Drive.' : 'Cambios de Excel guardados.', 'success');
                 this.updateCanvasSize();
                 this.updateSelectionInputs();
                 this.render();
@@ -1054,7 +1088,8 @@
             if (this.busy || !this.metadata) return;
             this.commitAll();
             if (this.hasUnsavedChanges && !window.confirm('Recargar descartará sus cambios sin guardar. ¿Desea continuar?')) return;
-            const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet, removeMarker: this.removeMarker };
+            const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet,
+                removeMarker: this.removeMarker, select_source_url: this.selectSourceUrl };
             this.close(true);
             await this.open(metadata);
         }
@@ -1066,9 +1101,31 @@
             const link = this.node('a');
             link.href = format === 'csv' ? `${this.metadata.csv_url || `/api/pdf/workbooks/${this.metadata.id}/export.csv`}?sheet=${encodeURIComponent(this.sheet)}` : this.metadata.download_url || `/api/pdf/workbooks/${this.metadata.id}/download/`;
             link.download = format === 'csv' ? this.metadata.name.replace(/\.xlsx$/i, '') + '.csv' : this.metadata.name;
+            const merges = this.currentSheet()?.layout?.merges || [];
+            let blobUrl;
+            if (format === 'csv' && window.workbookFields.hasCsvFields(merges) && typeof window.PlanosAndroid?.download !== 'function') {
+                const epoch = this.epoch;
+                this.setBusy(true);
+                try {
+                    const response = await fetch(link.href, { credentials: 'same-origin', cache: 'no-store' });
+                    if (response.status === 401) window.appAuth?.expire();
+                    if (!response.ok) throw new Error('No se pudo exportar la hoja a CSV.');
+                    const csv = window.workbookFields.compactCsv(await response.text(), merges);
+                    if (this.epoch !== epoch || !this.visible) return;
+                    blobUrl = URL.createObjectURL(new Blob([csv.startsWith('\uFEFF') ? csv : '\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+                    link.href = blobUrl;
+                    link.download = `${this.metadata.name.replace(/\.xlsx$/i, '')}-${this.sheet}.csv`;
+                } catch (error) {
+                    if (this.epoch === epoch) this.setStatus(error.message, 'error');
+                    return;
+                } finally {
+                    if (this.epoch === epoch) this.setBusy(false);
+                }
+            }
             document.body.append(link);
             link.click();
             link.remove();
+            if (blobUrl) setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
         }
 
         gridKeydown(event) {

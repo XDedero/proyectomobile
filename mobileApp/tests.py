@@ -229,7 +229,7 @@ class PlanWorkflowTests(TestCase):
         previous = Motor.objects.get(pk=motor['id']).excel.name
         for name in ['datos.xls', 'datos.csv', 'falso.xlsx']:
             with self.subTest(name=name):
-                response = self.client.post(motor['assign_url'], {'file': SimpleUploadedFile(name, b'bad workbook')})
+                response = self.client.post(motor['assign_url'], {'file': SimpleUploadedFile(name, b'bad\x00workbook')})
                 self.assertEqual(response.status_code, 400)
         self.assertEqual(Motor.objects.get(pk=motor['id']).excel.name, previous)
 

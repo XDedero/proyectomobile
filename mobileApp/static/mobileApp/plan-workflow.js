@@ -45,7 +45,7 @@
         if (file) {
             const token = document.cookie.split('; ').find((entry) => entry.startsWith('csrftoken='))?.slice(10);
             const body = new FormData();
-            body.append('file', file);
+            body.append('file', await window.workbookFields.normalizeUpload(file));
             options.method = 'POST';
             options.body = body;
             options.headers = { 'X-CSRFToken': decodeURIComponent(token || '') };
@@ -104,7 +104,7 @@
             } },
         } : null);
         if (!motor) return;
-        document.getElementById('selectedMotorName').textContent = motor.name;
+        document.getElementById('selectedMotorName').textContent = [motor.name, motor.category_name].filter(Boolean).join(' · ');
         const number = (value) => value.toLocaleString('es-CL', { maximumFractionDigits: 6 });
         document.getElementById('selectedMotorCoordinates').textContent = `X: ${number(motor.x)} · Y: ${number(motor.y)} · Z: ${number(motor.z)} (unidades del dibujo)`;
         document.getElementById('selectedMotorHint').textContent = motor.excel
@@ -286,13 +286,17 @@
         document.getElementById('btnDeleteCadMarker').hidden = !permissions().can_delete_cad_marker;
     }
 
+    let placementOptions = null;
     viewer.onPlace = async (svg_x, svg_y) => {
         const plan = appState.currentPlan;
         if (!plan || busy || !placing || !permissions().can_assign) return;
         const currentRevision = revision;
         setBusy(true, 'Guardando botón…');
         try {
-            const { motor } = await request(plan.markers_url, null, { svg_x, svg_y, name: `Motor ${plan.motors.length + 1}` });
+            const position = { svg_x, svg_y, name: `Botón ${plan.motors.length + 1}` };
+            const { motor } = placementOptions
+                ? await window.planExcel.createButton(plan.markers_url, position, placementOptions)
+                : await request(plan.markers_url, null, position);
             if (currentRevision !== revision || appState.currentPlan?.id !== plan.id) return;
             const previousView = { ...viewer.view };
             plan.motors.push(motor);
@@ -300,15 +304,23 @@
             viewer.view = previousView;
             viewer.update();
             selectMotor(motor.id);
-            placing = viewer.placing = false;
-            document.getElementById('btnAddCadMarker').setAttribute('aria-pressed', 'false');
-            status.textContent = 'Botón guardado. Puede asignarle un Excel.';
+            setMode('explore');
+            status.textContent = 'Botón creado.';
             window.projectWorkspace?.dirty();
+            if (motor.excel) await showPreview();
         } catch (error) { showError(error.message); }
         finally { setBusy(false); updateActions(); }
     };
-    function setMode(mode) {
+    async function setMode(mode) {
         if (mode === 'move' && !permissions().can_change_plan) return;
+        if (mode === 'add' && window.planExcel) {
+            const current = appState.currentPlan;
+            const options = await window.planExcel.newButtonOptions();
+            if (!options || current !== appState.currentPlan) return;
+            placementOptions = options;
+        } else {
+            placementOptions = null;
+        }
         placing = viewer.placing = mode === 'add';
         viewer.moving = mode === 'move';
         viewer.container.classList.toggle('moving-markers', viewer.moving);
@@ -392,8 +404,10 @@
             if (motor.excel?.id === event.detail.id) {
                 const book = event.detail;
                 const metadataUrl = motor.excel.metadata_url;
-                Object.assign(motor.excel, book, { sheets: [motor.sheet_name], preferred_sheet: motor.sheet_name,
-                    metadata_url: metadataUrl, url: book.download_url, context: 'motor' });
+                const sourceUrl = motor.excel.select_source_url;
+                Object.assign(motor.excel, book, { preferred_sheet: motor.source_sheet || motor.sheet_name,
+                    metadata_url: metadataUrl, url: book.download_url, select_source_url: sourceUrl,
+                    context: sourceUrl ? 'button-source' : 'motor' });
             }
         }
         updateMotorCard();

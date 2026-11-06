@@ -2,6 +2,7 @@
 from io import BytesIO
 import hashlib
 import json
+from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,7 +11,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from openpyxl import load_workbook
 
-from .models import Motor, PdfMarker, PlanWorkbookSheet, SavedMotor, WorkbookDocument
+from .models import ButtonCategory, Motor, PdfMarker, PlanWorkbookSheet, SavedMotor, WorkbookDocument
 from .motor_service import inspect_motor, single_sheet, template_bytes, read_origin
 from .xlsx_package import append_sheet, remove_sheet, rename_sheet, sheet_names, read_sheet_origins, write_sheet_origins
 
@@ -33,6 +34,11 @@ def store(document, content, user):
     if not changed:
         raise WorkbookConflict('Otro usuario modificó el libro. Actualice el plano e intente nuevamente.')
     document.refresh_from_db()
+    try:
+        from .terminal_monitor import on_workbook_saved
+        on_workbook_saved(WorkbookDocument, document, created=False)
+    except Exception:
+        pass
 
 
 def sheet_identity(content, name):
@@ -173,6 +179,7 @@ def workspace_data(plan, user=None):
     listing = workbook_data(document, sheets=False, sheet_name=listings[0]['name'], context='listing') if listings else None
     return {'workbook': workbook_data(document, sheets=False), 'workbook_mode': document.plan_mode,
         'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows],
+        'button_categories': list(ButtonCategory.objects.values('id', 'name')),
         'listings': listings, 'listing': listing,
         'binding_counts': {item['sheet_name']: item['count'] for item in markers(plan).values('sheet_name').annotate(count=Count('pk'))}}
 
@@ -187,25 +194,146 @@ def bind(marker, document, name):
     marker.save(update_fields=fields)
 
 
+def marker_assignment(request, marker):
+    from .button_import import inspect_button_file
+    from .pdf_views import json_body
+
+    upload = request.FILES.get('file')
+    if upload is not None:
+        data = request.POST
+        if data.get('action') == 'inspect':
+            return inspect_button_file(upload, data.get('source_sheet'), preview=True)
+    else:
+        data = json_body(request)
+    assign_marker(marker, request.user, data, upload)
+
+
+def button_category(value):
+    try:
+        return ButtonCategory.objects.get(pk=UUID(str(value)))
+    except (ValueError, ButtonCategory.DoesNotExist) as exc:
+        raise ValidationError('Seleccione una categoría disponible.') from exc
+
+
+def new_button_options(request):
+    from .pdf_views import json_body
+
+    upload = request.FILES.get('file')
+    if upload is None:
+        data = json_body(request)
+    else:
+        try:
+            data = json.loads(request.POST.get('placement', ''))
+        except ValueError as exc:
+            raise ValidationError('La ubicación del botón no es válida.') from exc
+        if not isinstance(data, dict):
+            raise ValidationError('La ubicación del botón no es válida.')
+    origin = data.get('origin')
+    if origin is None and upload is None and 'category_id' not in data:
+        return data, None, None, None
+    if origin not in ('blank', 'upload') or (origin == 'upload') != (upload is not None):
+        raise ValidationError('Elija una ficha predeterminada o un archivo para importar.')
+    return data, button_category(data.get('category_id')), origin, upload
+
+
+def initialize_button(marker, user, origin, upload):
+    if origin == 'upload':
+        stage_button_source(marker, user, upload)
+    elif origin == 'blank':
+        assign_marker(marker, user, {'blank': True})
+    else:
+        initialize_marker(marker, user)
+
+
+def stage_button_source(marker, user, upload, selected=None):
+    from pathlib import Path
+    from .button_import import inspect_button_file
+
+    content, sheet = inspect_button_file(upload, selected, allow_default=True)
+    name = upload.name if upload.name.lower().endswith('.xlsx') else Path(upload.name).stem + '.xlsx'
+    previous = marker.source_workbook_id
+    marker.source_workbook = WorkbookDocument.objects.create(
+        name=name[:255], content=content, plan_mode='source', updated_by=user,
+    )
+    marker.source_sheet = sheet
+    marker.source_revision = None
+    marker.save(update_fields=['source_workbook', 'source_sheet', 'source_revision'])
+    if previous:
+        WorkbookDocument.objects.filter(pk=previous, plan_mode='source').delete()
+
+
+def source_workbook_data(marker, assign_url):
+    from .pdf_views import workbook_data
+
+    return {
+        **workbook_data(marker.source_workbook, sheets=False, context='button-source'),
+        'preferred_sheet': marker.source_sheet,
+        'select_source_url': assign_url,
+    }
+
+
+def materialize_button_sources(plan, user):
+    """Update only the selected sheet of each source in the shared workbook."""
+    document = ensure_workbook(plan, user)
+    sources = markers(plan).select_for_update().filter(source_workbook__isnull=False).order_by('pk')
+    for marker in sources.iterator(chunk_size=32):
+        source = marker.source_workbook
+        if marker.source_revision == source.revision and marker.sheet_name == marker.source_output:
+            continue
+        name = marker.source_sheet
+        content = bytes(document.content)
+        old = marker.source_output
+        previous = None
+        if old and old == marker.sheet_name and not markers(plan).exclude(pk=marker.pk).filter(sheet_name=old).exists():
+            previous = document.plan_sheets.filter(name=old, is_listing=False).first()
+        remove_first = previous and document.plan_sheets.count() > 1
+        if remove_first:
+            content = remove_sheet(content, old)
+        content, title = append_sheet(content, source.content, name, old if remove_first and old == name else name)
+        if previous and not remove_first:
+            content = remove_sheet(content, old)
+        store(document, content, user)
+        if previous:
+            previous.delete()
+        PlanWorkbookSheet.objects.create(workbook=document, name=title, created_by=user)
+        marker.source_output = title
+        marker.source_revision = source.revision
+        marker.save(update_fields=['source_output', 'source_revision'])
+        bind(marker, document, title)
+
+
 @transaction.atomic
 def assign_marker(marker, user, data=None, upload=None):
     data = data or {}
+    if data.get('action') == 'set_category' and upload is None:
+        value = data.get('category_id')
+        marker.category = button_category(value) if value else None
+        marker.save(update_fields=['category'])
+        return None
+    if data.get('action') == 'stage' and upload is not None:
+        marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())
+        stage_button_source(marker, user, upload, data.get('source_sheet'))
+        return None
+    if data.get('action') == 'select_source' and upload is None:
+        marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())
+        name = data.get('source_sheet')
+        if not marker.source_workbook_id or data.get('source_workbook_id') != marker.source_workbook_id:
+            raise WorkbookConflict('El archivo asociado cambió. Vuelva a abrir la ficha.')
+        if name not in sheet_names(marker.source_workbook.content):
+            raise ValidationError('Elija una hoja del archivo asociado al botón.')
+        if name != marker.source_sheet:
+            marker.source_sheet = name
+            marker.source_revision = None
+            marker.save(update_fields=['source_sheet', 'source_revision'])
+        return None
     document = ensure_workbook(marker.plan, user)
     if upload:
-        from .views import validate_excel
-        names = validate_excel(upload)
-        source = upload.read()
-        # A multi-sheet upload belongs to the whole drawing; users choose a
-        # motor sheet after import. A one-sheet upload simply appends a motor.
-        if len(names) > 1:
-            import_workbook(marker.plan, upload.name, source, user)
-            document = WorkbookDocument.objects.get(pk=document.pk)
-            candidate = data.get('sheet') or next((name for name in names if name != names[0]), names[0])
-            record = document.plan_sheets.get(name=candidate)
-            if record.is_listing:
-                raise ValidationError('Elija una hoja de motor, no el listado.')
-        else:
-            record = _append(document, source, names[0], user, origin=read_origin(source))
+        from .button_import import inspect_button_file
+
+        selected = data.get('source_sheet')
+        source, name = inspect_button_file(upload, selected)
+        record = _append(document, source, name, user, origin=None if selected else read_origin(source),
+                         deduplicate=not selected)
     elif data.get('sheet'):
         record = document.plan_sheets.filter(name=data['sheet'], is_listing=False).first()
         if not record:
@@ -250,6 +378,13 @@ def assign_marker(marker, user, data=None, upload=None):
     else:
         raise ValidationError('Elija una hoja, una ficha vacía o un motor guardado.')
     bind(marker, document, record.name)
+    if marker.source_workbook_id:
+        source_id = marker.source_workbook_id
+        marker.source_workbook = None
+        marker.source_sheet = marker.source_output = ''
+        marker.source_revision = None
+        marker.save(update_fields=['source_workbook', 'source_sheet', 'source_output', 'source_revision'])
+        WorkbookDocument.objects.filter(pk=source_id, plan_mode='source').delete()
     return record
 
 

@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Motor, Plan, PdfPlan, PdfMarker, WorkbookDocument
+from .models import ButtonCategory, Motor, Plan, PdfPlan, PdfMarker, WorkbookDocument
+
+
+@admin.register(ButtonCategory)
+class ButtonCategoryAdmin(admin.ModelAdmin):
+    list_display = ('name',)
+    search_fields = ('name',)
 
 
 class ReadOnlyEquipmentAdmin(admin.ModelAdmin):

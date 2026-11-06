@@ -63,6 +63,22 @@
 .pdf-plan-marker.selected { background: #60a5fa; outline: 3px solid #1d4ed8; z-index: 3; }
 .pdf-plan-marker:focus-visible { outline: 4px solid #1d4ed8; z-index: 4; }
 .moving-markers .pdf-plan-marker { cursor: move; border-style: dashed; }
+.pdf-marker-coverage-area {
+    position: absolute;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1;
+    border: 2px dashed rgba(37, 99, 235, 0.7);
+    background: rgba(59, 130, 246, 0.22);
+    box-sizing: border-box;
+    transition: width 0.05s ease, height 0.05s ease, border-color 0.2s ease;
+}
+.pdf-marker-coverage-area.selected {
+    border: 2.5px solid #2563eb;
+    background: rgba(37, 99, 235, 0.32);
+    box-shadow: 0 0 12px rgba(37, 99, 235, 0.4);
+}
 .pdf-plan-message {
     position: absolute;
     inset: 20px;

@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 
 def plan_upload_path(instance, filename):
@@ -16,7 +17,12 @@ def pdf_upload_path(instance, filename):
     return f'pdf_plans/{uuid4().hex}.pdf'
 
 
+def new_cloud_key():
+    return f'project_{uuid4().hex}'
+
+
 class Plan(models.Model):
+    cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
     imported_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='imported_plans',
@@ -33,8 +39,33 @@ class Plan(models.Model):
         ordering = ['-imported_at']
 
 
-class Motor(models.Model):
+class ButtonCategory(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    name = models.CharField('nombre', max_length=80, unique=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'categoría de botón'
+        verbose_name_plural = 'categorías de botones'
+        constraints = [models.UniqueConstraint(Lower('name'), name='unique_button_category_name')]
+
+    def __str__(self):
+        return self.name
+
+
+class ButtonSource(models.Model):
+    source_workbook = models.ForeignKey('WorkbookDocument', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    source_sheet = models.CharField(max_length=31, blank=True)
+    source_output = models.CharField(max_length=31, blank=True)
+    source_revision = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+
+class Motor(ButtonSource):
     sheet_name = models.CharField(max_length=31, blank=True)
+    category = models.ForeignKey(ButtonCategory, null=True, blank=True, on_delete=models.SET_NULL, related_name='cad_buttons')
     plan = models.ForeignKey(Plan, related_name='motors', on_delete=models.CASCADE)
     entity_key = models.CharField(max_length=2048)
     name = models.CharField(max_length=255)
@@ -51,12 +82,20 @@ class Motor(models.Model):
         'WorkbookDocument', null=True, blank=True, related_name='motors',
         on_delete=models.SET_NULL,
     )
+    has_area = models.BooleanField(default=False)
+    area_radius_x = models.FloatField(null=True, blank=True)
+    area_radius_y = models.FloatField(null=True, blank=True)
+    area_color = models.CharField(max_length=50, blank=True, default='rgba(59, 130, 246, 0.25)')
 
     class Meta:
         ordering = ['id']
 
 
 class PdfPlan(models.Model):
+    cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
+    cloud_snapshot = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    cloud_origin = models.CharField(max_length=128, blank=True, db_index=True)
+    cloud_workbook_version = models.CharField(max_length=192, blank=True)
     name = models.CharField(max_length=255)
     source = models.FileField(upload_to=pdf_upload_path)
     size = models.PositiveIntegerField()
@@ -90,8 +129,9 @@ class WorkbookDocument(models.Model):
         ordering = ['-updated_at']
 
 
-class PdfMarker(models.Model):
+class PdfMarker(ButtonSource):
     sheet_name = models.CharField(max_length=31, blank=True)
+    category = models.ForeignKey(ButtonCategory, null=True, blank=True, on_delete=models.SET_NULL, related_name='pdf_buttons')
     plan = models.ForeignKey(PdfPlan, related_name='markers', on_delete=models.CASCADE)
     page = models.PositiveIntegerField()
     x = models.FloatField()
@@ -101,6 +141,10 @@ class PdfMarker(models.Model):
         WorkbookDocument, null=True, blank=True, related_name='markers',
         on_delete=models.SET_NULL,
     )
+    has_area = models.BooleanField(default=False)
+    area_radius_x = models.FloatField(null=True, blank=True)
+    area_radius_y = models.FloatField(null=True, blank=True)
+    area_color = models.CharField(max_length=50, blank=True, default='rgba(59, 130, 246, 0.25)')
 
     class Meta:
         ordering = ['id']
@@ -114,6 +158,8 @@ class SavedProject(models.Model):
     content = models.BinaryField(default=bytes)
     saved_at = models.DateTimeField(auto_now=True)
     saved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    cloud_status = models.CharField(max_length=16, default='local')
+    cloud_error = models.CharField(max_length=500, blank=True)
 
     class Meta:
         ordering = ['-saved_at']

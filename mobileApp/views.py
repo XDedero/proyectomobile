@@ -84,7 +84,12 @@ def auth_logout(request):
 
 def motor_data(motor):
     excel = None
-    if motor.workbook_id:
+    if motor.source_workbook_id:
+        from .plan_workbook import source_workbook_data
+
+        excel = source_workbook_data(motor, reverse('motor_excel', args=[motor.pk]))
+        excel['url'] = excel['download_url']
+    elif motor.workbook_id:
         # Imported here because the PDF API also uses validate_excel.
         from .pdf_views import workbook_data
         excel = workbook_data(motor.workbook, sheets=False, sheet_name=motor.sheet_name)
@@ -103,6 +108,9 @@ def motor_data(motor):
         }
     return {
         'id': motor.pk, 'name': motor.name, 'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
+        'source_sheet': motor.source_sheet,
+        'category_id': motor.category_id,
+        'category_name': motor.category.name if motor.category_id else '',
         'x': motor.x, 'y': motor.y, 'z': motor.z,
         'svg_x': motor.svg_x, 'svg_y': motor.svg_y, 'svg_bounds': motor.svg_bounds,
         'excel': excel,
@@ -126,7 +134,7 @@ def plan_data(plan, detail=False):
         'delete_url': reverse('delete_plan', args=[plan.pk]),
     }
     if detail:
-        data['motors'] = [motor_data(motor) for motor in plan.motors.select_related('workbook').defer('workbook__content').all()]
+        data['motors'] = [motor_data(motor) for motor in plan.motors.select_related('workbook', 'category', 'source_workbook').defer('workbook__content', 'source_workbook__content')]
     from .project_views import project_plan_data
     data.update(project_plan_data('dxf', plan))
     return data
@@ -219,12 +227,13 @@ def validate_excel(upload, *, max_bytes=None):
 @require_POST
 @api_permissions()
 def motor_excel(request, motor_id):
-    from .pdf_views import error_response, json_body
-    from .plan_workbook import assign_marker, WorkbookConflict, workspace_data
+    from .pdf_views import error_response
+    from .plan_workbook import marker_assignment, WorkbookConflict, workspace_data
     motor = get_object_or_404(Motor.objects.select_related('plan'), pk=motor_id)
     try:
-        upload = request.FILES.get('file')
-        assign_marker(motor, request.user, json_body(request) if upload is None else {}, upload)
+        preview = marker_assignment(request, motor)
+        if preview is not None:
+            return JsonResponse(preview)
         return JsonResponse({'motor': motor_data(motor), **workspace_data(motor.plan, request.user)})
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
@@ -380,11 +389,12 @@ def cad_world_position(plan, sx, sy):
 @require_POST
 @api_permissions()
 def create_cad_marker(request, plan_id):
-    from .pdf_views import json_body, error_response
+    from .pdf_views import error_response
     from .dxf_service import MAX_MOTORS
+    from .plan_workbook import initialize_button, new_button_options, WorkbookConflict
     plan = get_object_or_404(Plan, pk=plan_id)
     try:
-        data = json_body(request)
+        data, category, origin, upload = new_button_options(request)
         sx, sy = data.get('svg_x'), data.get('svg_y')
         if any(type(value) not in (float, int) or not math.isfinite(value) for value in (sx, sy)):
             raise ValidationError('Seleccione una ubicación válida dentro del plano.')
@@ -394,15 +404,14 @@ def create_cad_marker(request, plan_id):
         x, y = cad_world_position(plan, sx, sy)
         if plan.motors.count() >= MAX_MOTORS:
             raise ValidationError('El plano supera el límite de 5.000 botones.')
+        with transaction.atomic():
+            motor = Motor.objects.create(
+                plan=plan, entity_key=f'manual/{uuid4().hex}', name=name.strip(), category=category,
+                x=x, y=y, z=0, svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0],
+            )
+            initialize_button(motor, request.user, origin, upload)
     except (ValidationError, ValueError, KeyError, ZeroDivisionError, OSError, ElementTree.ParseError) as exc:
-        return error_response(exc)
-    with transaction.atomic():
-        motor = Motor.objects.create(
-            plan=plan, entity_key=f'manual/{uuid4().hex}', name=name.strip(),
-            x=x, y=y, z=0, svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0],
-        )
-        from .plan_workbook import initialize_marker
-        initialize_marker(motor, request.user)
+        return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
     return JsonResponse({'motor': motor_data(motor)}, status=201)
 
 

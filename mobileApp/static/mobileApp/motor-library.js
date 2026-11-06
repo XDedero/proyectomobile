@@ -191,7 +191,7 @@
         byId('savedMotorsStatus').textContent = 'Abriendo ficha del dispositivo…';
         try {
             const body = new FormData();
-            body.append('file', file);
+            body.append('file', await window.workbookFields.normalizeUpload(file));
             const result = await request('/api/motor-library/import/', { method: 'POST', body });
             await window.workbookEditor.open({ ...result.workbook, context: 'motor-import' });
         } catch (error) { byId('savedMotorsStatus').textContent = error.message; }

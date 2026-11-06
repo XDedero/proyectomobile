@@ -444,7 +444,28 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-muted small mb-3">Historial de planos guardados:</p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small" for="savedDeviceFilter">Copia en este PC</label>
+                            <select id="savedDeviceFilter" class="form-select form-select-sm">
+                                <option value="all">Todos</option><option value="local">En este PC</option><option value="cloud">Sin copia en este PC</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small" for="savedCloudOrder">Orden</label>
+                            <select id="savedCloudOrder" class="form-select form-select-sm">
+                                <option value="device">Este PC primero</option><option value="newest">Fecha de nube reciente</option><option value="oldest">Fecha de nube antigua</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small" for="savedCloudDate">Fecha en la nube</label>
+                            <input type="date" id="savedCloudDate" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6 d-flex align-items-end">
+                            <button type="button" id="btnCloudProjects" class="btn btn-outline-primary btn-sm w-100">Actualizar lista</button>
+                        </div>
+                    </div>
+                    <p id="cloudProjectsStatus" class="small mb-2" role="status"></p>
                     <div class="list-group gap-2 border-0" id="savedPlansContainer"></div>
                     <p id="savedPlansFeedback" class="small text-danger mt-2 mb-0" role="alert"></p>
                 </div>
@@ -465,6 +486,32 @@
             <div class="input-group mb-3">
                 <input id="pdfMarkerLabel" class="form-control" maxlength="120" placeholder="Ej. Motor 01">
                 <button type="button" id="btnPdfSaveMarkerLabel" class="btn btn-outline-primary">Guardar nombre</button>
+            </div>
+            <!-- Área de cobertura opcional (Circular / Elíptica) -->
+            <div class="border rounded-3 p-2 mb-3 bg-light">
+                <div class="form-check form-switch mb-1">
+                    <input class="form-check-input" type="checkbox" id="pdfMarkerHasArea">
+                    <label class="form-check-label small fw-semibold" for="pdfMarkerHasArea">Área de cobertura circular</label>
+                </div>
+                <div id="pdfMarkerAreaSection" class="pt-2 border-top mt-2" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label for="pdfMarkerRadiusX" class="small text-muted mb-0">Ajuste horizontal (ancho):</label>
+                        <span id="pdfMarkerRadiusXVal" class="badge bg-secondary">5%</span>
+                    </div>
+                    <input type="range" class="form-range mb-2" id="pdfMarkerRadiusX" min="1" max="50" step="0.5" value="5">
+
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label for="pdfMarkerRadiusY" class="small text-muted mb-0">Ajuste vertical (alto):</label>
+                        <span id="pdfMarkerRadiusYVal" class="badge bg-secondary">5%</span>
+                    </div>
+                    <input type="range" class="form-range mb-2" id="pdfMarkerRadiusY" min="1" max="50" step="0.5" value="5">
+
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="pdfMarkerLockRadius" checked>
+                        <label class="form-check-label small text-muted" for="pdfMarkerLockRadius">Mantener forma circular (1:1)</label>
+                    </div>
+                    <button type="button" id="btnPdfSaveMarkerArea" class="btn btn-outline-primary btn-sm w-100">Guardar área de cobertura</button>
+                </div>
             </div>
             <div id="pdfMarkerCurrentWorkbook" class="small text-success mb-3"></div>
             <label for="pdfWorkbookLibrary" class="small fw-semibold mb-1">Importar motor guardado</label>
@@ -487,6 +534,8 @@
     <script src="{% static 'mobileApp/mobile-runtime.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-state.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/dxf-viewer.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/vendor/jszip.min.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/workbook-fields.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-workflow.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pdf-viewer.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/workbook-editor.js' %}?v={{ asset_version }}"></script>
