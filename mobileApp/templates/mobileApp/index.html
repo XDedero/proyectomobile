@@ -114,7 +114,7 @@
                                 </a>
                             </li>
                             <li id="menuItemAdminister" hidden>
-                                <a class="dropdown-item" href="/admin/"><i class="bi bi-gear"></i> Administrar</a>
+                                <a class="dropdown-item" href="/administracion/"><i class="bi bi-gear"></i> Administrar</a>
                             </li>
                             <li><hr class="dropdown-divider my-1"></li>
                             <!-- Ítem 3: Cerrar sesión -->
@@ -141,7 +141,7 @@
                     </div>
 
                     <p id="appAuthError" class="small text-danger" role="alert"></p>
-                    <a id="btnAdminister" class="btn btn-outline-primary w-100 mb-3 rounded-3" href="/admin/" hidden>
+                    <a id="btnAdminister" class="btn btn-outline-primary w-100 mb-3 rounded-3" href="/administracion/" hidden>
                         <i class="bi bi-gear me-1"></i> Administrar
                     </a>
                     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white text-center">
@@ -537,6 +537,7 @@
     <script src="{% static 'mobileApp/button-details.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-excel.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/motor-library.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/plan-versions.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/auth.js' %}?v={{ asset_version }}"></script>
 </body>
 </html>

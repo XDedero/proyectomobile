@@ -101,26 +101,19 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(client.get(reverse('auth_login')).status_code, 405)
         self.assertEqual(client.get(reverse('auth_logout')).status_code, 405)
 
-    def test_reader_can_import_and_assign_but_cannot_edit_excel_content(self):
+    def test_reader_can_import_assign_and_edit_own_plan_excel(self):
         user = self.login('lector', 'clave-lector').json()['user']
-        self.assertEqual(user['permissions'], {
-            'can_view': True, 'can_import': True, 'can_assign': True,
-            'can_change_excel': False, 'can_change_plan': False, 'can_delete_plan': False,
-            'can_change_pdf_plan': False, 'can_delete_pdf_plan': False, 'can_administer': False,
-            'can_save_plan': False, 'can_save_pdf_plan': False,
-            'can_delete_cad_marker': False, 'can_delete_pdf_marker': False,
-        })
+        self.assertTrue(user['permissions']['can_import'])
+        self.assertFalse(user['permissions']['can_administer'])
         self.assertFalse(self.reader.has_perm('mobileApp.add_plan'))
         plan = self.import_plan(self.reader)
         self.assertEqual(Plan.objects.get(pk=plan['id']).imported_by_id, self.reader.pk)
-        self.assertEqual(self.client.get(plan['detail_url']).status_code, 200)
-        self.assertEqual(self.client.get(plan['svg_url']).status_code, 200)
         motor = self.assign_excel(plan)
         metadata = self.client.get(motor['excel']['metadata_url']).json()
-        self.assertFalse(metadata['can_edit'])
+        self.assertTrue(metadata['can_edit'])
         self.assertEqual(self.client.post(metadata['save_url'], {
             'revision': metadata['revision'], 'edits': [], 'operations': [],
-        }, content_type='application/json').status_code, 403)
+        }, content_type='application/json').status_code, 200)
 
     def test_editor_can_assign_and_reader_can_view_same_excel(self):
         plan = self.import_plan()
@@ -138,50 +131,40 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(download.status_code, 200)
         download.close()
 
-    def test_reader_can_replace_attachment_but_cannot_modify_saved_cells(self):
+    def test_reader_cannot_replace_attachment_or_modify_another_creators_cells(self):
         plan = self.import_plan()
-        self.assign_excel(plan)
-        motor_id = plan['motors'][0]['id']
-        previous_document = Motor.objects.get(pk=motor_id).workbook_id
+        motor = self.assign_excel(plan)
+        document = Motor.objects.get(pk=motor['id']).workbook
+        before, revision = bytes(document.content), document.revision
         self.client.force_login(self.reader)
-        response = self.client.post(plan['motors'][0]['assign_url'], {'file': xlsx_file('nuevo.xlsx')})
-        self.assertEqual(response.status_code, 200)
-        document = Motor.objects.get(pk=motor_id).workbook
-        self.assertEqual(document.pk, previous_document)
-        self.assertTrue(WorkbookDocument.objects.filter(pk=previous_document).exists())
-        before = bytes(document.content)
-        revision = document.revision
-        save_url = response.json()['motor']['excel']['save_url']
-        denied = self.client.post(save_url, {
-            'revision': document.revision,
-            'edits': [{'sheet': 'Motor', 'row': 2, 'col': 1, 'value': 999}],
-            'operations': [],
+        response = self.client.post(motor['assign_url'], {'file': xlsx_file('nuevo.xlsx')})
+        self.assertEqual(response.status_code, 403)
+        denied = self.client.post(motor['excel']['save_url'], {
+            'revision': revision, 'edits': [{'sheet': 'Motor', 'row': 2, 'col': 1, 'value': 999}], 'operations': [],
         }, content_type='application/json')
         self.assertEqual(denied.status_code, 403)
         document.refresh_from_db()
         self.assertEqual(bytes(document.content), before)
         self.assertEqual(document.revision, revision)
 
-    def test_staff_flag_alone_does_not_allow_excel_changes(self):
+    def test_staff_creator_can_edit_own_excel_but_cannot_administer(self):
         self.reader.is_staff = True
         self.reader.save()
         plan = self.import_plan(self.reader)
         motor = self.assign_excel(plan)
-        self.assertFalse(self.client.get(motor['excel']['metadata_url']).json()['can_edit'])
+        self.assertTrue(self.client.get(motor['excel']['metadata_url']).json()['can_edit'])
         self.assertFalse(self.client.get(reverse('auth_session')).json()['user']['permissions']['can_administer'])
 
-    def test_permission_revocation_takes_effect_on_next_request(self):
+    def test_legacy_permission_revocation_keeps_creators_rights(self):
         plan = self.import_plan()
         motor = self.assign_excel(plan)
         self.editor.groups.clear()
-        self.assertEqual(self.client.get(plan['svg_url']).status_code, 200)
-        self.assertEqual(self.client.post(plan['motors'][0]['assign_url'], {'file': xlsx_file()}).status_code, 200)
+        metadata = self.client.get(motor['excel']['metadata_url']).json()
+        self.assertTrue(metadata['can_edit'])
         self.assertEqual(self.client.post(motor['excel']['save_url'], {
-            'revision': 1, 'edits': [], 'operations': [],
-        }, content_type='application/json').status_code, 403)
-        permissions = self.client.get(reverse('auth_session')).json()['user']['permissions']
-        self.assertTrue(permissions['can_view'])
-        self.assertFalse(permissions['can_change_excel'])
+            'revision': metadata['revision'], 'edits': [], 'operations': [],
+        }, content_type='application/json').status_code, 200)
+        self.assertEqual(self.client.post(plan['save_project_url']).status_code, 200)
 
     def test_deactivated_users_cannot_keep_using_existing_sessions(self):
         self.client.force_login(self.reader)
@@ -195,7 +178,7 @@ class AuthenticationPermissionTests(TestCase):
         plan = self.import_plan(self.no_permissions)
         motor = self.assign_excel(plan)
         self.assertEqual(Plan.objects.count(), 1)
-        self.assertFalse(self.client.get(motor['excel']['metadata_url']).json()['can_edit'])
+        self.assertTrue(self.client.get(motor['excel']['metadata_url']).json()['can_edit'])
 
     def test_change_permission_allows_excel_editing_for_registered_user(self):
         self.no_permissions.user_permissions.add(Permission.objects.get(codename='change_motor', content_type__app_label='mobileApp'))
@@ -246,22 +229,12 @@ class AuthenticationPermissionTests(TestCase):
             with self.subTest(url=url):
                 self.assertEqual(client.post(url, {}, content_type='application/json').status_code, 401)
 
-    def test_plan_owner_requires_separate_change_and_delete_permissions(self):
+    def test_plan_owner_can_rename_save_and_delete_without_legacy_permissions(self):
         plan = self.import_plan(self.no_permissions)
-        for url in (plan['update_url'], plan['delete_url']):
-            self.assertEqual(self.client.post(url, {'name': 'Cambiado'}, content_type='application/json').status_code, 403)
-        self.no_permissions.user_permissions.add(Permission.objects.get(
-            codename='change_plan', content_type__app_label='mobileApp',
-        ))
         renamed = self.client.post(plan['update_url'], {'name': 'Sala de bombas'}, content_type='application/json')
         self.assertEqual(renamed.status_code, 200)
         self.assertEqual(self.client.get(plan['detail_url']).json()['name'], 'Sala de bombas')
-        self.assertEqual(self.client.post(plan['delete_url']).status_code, 403)
-        self.no_permissions.user_permissions.clear()
-        self.no_permissions.user_permissions.add(Permission.objects.get(
-            codename='delete_plan', content_type__app_label='mobileApp',
-        ))
-        self.assertEqual(self.client.post(plan['update_url'], {'name': 'Otra sala'}, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.post(plan['save_project_url']).status_code, 200)
         self.assertEqual(self.client.post(plan['delete_url']).status_code, 200)
         self.assertFalse(Plan.objects.filter(pk=plan['id']).exists())
 
@@ -371,7 +344,7 @@ class AuthenticationPermissionTests(TestCase):
         saved.workbook.delete()
         response = self.client.get(reverse('motor_workbook_metadata', args=[saved.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()['can_edit'])
+        self.assertTrue(response.json()['can_edit'])
         saved.refresh_from_db()
         self.assertIsNotNone(saved.workbook_id)
         with saved.excel.open('rb') as source:

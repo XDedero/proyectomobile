@@ -4,7 +4,7 @@ from django.http import JsonResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
-from .access import api_permissions, capabilities
+from .access import api_permissions, can_edit_plan
 from .button_descriptions import TemplateReader, clean_color, clean_rows, effective_descriptions
 from .models import Motor, PdfMarker
 from .pdf_views import error_response, json_body, marker_data
@@ -20,11 +20,8 @@ def button_details(request, kind, button_id):
     model = PdfMarker if kind == 'pdf' else Motor
     queryset = model.objects.select_for_update() if request.method == 'POST' else model.objects.all()
     button = get_object_or_404(queryset, pk=button_id)
-    rights = capabilities(request.user)
     name_field = 'label' if kind == 'pdf' else 'name'
-    can_edit = (rights['can_change_pdf_plan' if kind == 'pdf' else 'can_change_plan']
-                or request.user.has_perm(f'mobileApp.change_{model._meta.model_name}')
-                or (rights['can_assign'] and button.plan.imported_by_id == request.user.pk))
+    can_edit = can_edit_plan(request.user, button.plan)
     if request.method == 'POST' and not can_edit:
         return error_response('No tienes permiso para editar este botón.', status=403)
     with TemplateReader() as reader:

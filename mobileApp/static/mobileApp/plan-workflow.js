@@ -15,7 +15,7 @@
         openSelectedButton();
     });
     const activeKey = () => `dxf.activePlan.${appState.user?.id || 'anonymous'}`;
-    const permissions = () => appState.user?.permissions || {};
+    const permissions = () => ({...appState.user?.permissions, ...appState.currentPlan?.permissions});
     let placing = false;
 
     function remember(id) {
@@ -162,6 +162,8 @@
     }
 
     async function openPlan(plan, currentRevision) {
+        plan = await window.planVersions.beforeOpen(plan);
+        if (!plan || currentRevision !== revision) return false;
         const response = await fetch(plan.svg_url, { credentials: 'same-origin' });
         if (!response.ok) throw new Error('No se pudo cargar la vista del plano. Puede volver a abrirlo desde Planos guardados.');
         const drawing = await response.text();
@@ -182,6 +184,7 @@
         activateProject();
         status.textContent = plan.motors.length ? `Plano listo. Toque uno de los ${plan.motors.length} motores para consultar su Excel.` : 'Plano listo. Puede desplazarse y ampliar el dibujo.';
         errorNoPlanAlert.style.display = 'none';
+        return true;
     }
 
     function close() {
@@ -309,7 +312,9 @@
         const plan = appState.currentPlan;
         document.getElementById('btnRenameCadPlan').hidden = !plan || !permissions().can_change_plan;
         document.getElementById('btnDeleteCadPlan').hidden = !plan || !permissions().can_delete_plan;
+        document.getElementById('btnAddCadMarker').hidden = !permissions().can_assign;
         document.getElementById('btnAddCadMarker').disabled = busy || !permissions().can_assign;
+        btnAssignExcelCorner.hidden = assignMotor.hidden = !permissions().can_assign;
         document.getElementById('btnMoveCadMarker').hidden = !permissions().can_change_plan;
         document.getElementById('btnDeleteCadMarker').hidden = !permissions().can_delete_cad_marker;
     }
@@ -471,7 +476,7 @@
         },
         async open(plan) {
             switchView(viewImportAutoCAD);
-            await openPlan(plan, ++revision);
+            return openPlan(plan, ++revision);
         },
     };
     window.updatePlanCardUI = updatePlanCardUI;

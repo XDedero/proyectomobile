@@ -8,6 +8,7 @@
     const markerList = byId('pdfMarkerList');
     const library = byId('pdfWorkbookLibrary');
     let plan = null;
+    const getPermissions = () => ({...appState.user?.permissions, ...plan?.permissions});
     let selectedId = null;
     let dialogMarkerId = null;
     let page = 1;
@@ -142,7 +143,7 @@
     function updateSelection() {
         const marker = selectedMarker();
         if (areaMarkerId !== marker?.id) closeAreaControls();
-        const canAdjust = marker?.page === page && appState.user?.permissions.can_change_pdf_plan;
+        const canAdjust = marker?.page === page && getPermissions().can_change_pdf_plan;
         areaToggle.hidden = !canAdjust;
         areaToggle.disabled = busy;
         byId('pdfSelectedMarker').hidden = !marker;
@@ -157,7 +158,7 @@
                 activateProject();
                 updateMarkers();
                 window.projectWorkspace.dirty();
-                return { ...result.marker.workbook, removeMarker: appState.user?.permissions.can_delete_pdf_marker ? deleteSelectedMarker : null };
+                return { ...result.marker.workbook, removeMarker: getPermissions().can_delete_pdf_marker ? deleteSelectedMarker : null };
             } },
         } : null);
         if (!marker) return;
@@ -196,7 +197,7 @@
             kind: 'pdf', name: markerName(marker), edit,
             defaultName: `Botón ${plan.markers.findIndex(item => item.id === marker.id) + 1}`,
             openExcel: marker.workbook ? () => openWorkbook(marker.workbook) : null,
-            assign: appState.user?.permissions.can_assign ? configureMarker : null,
+            assign: getPermissions().can_assign ? configureMarker : null,
             onSaved(updated) {
                 if (plan !== currentPlan) return;
                 Object.assign(marker, updated);
@@ -209,7 +210,7 @@
     async function openWorkbook(workbook) {
         closeAreaControls();
         hideDialog();
-        try { await editor.open({ ...workbook, removeMarker: appState.user?.permissions.can_delete_pdf_marker ? deleteSelectedMarker : null }); }
+        try { await editor.open({ ...workbook, removeMarker: getPermissions().can_delete_pdf_marker ? deleteSelectedMarker : null }); }
         catch (error) { showError(error); }
     }
 
@@ -313,6 +314,8 @@
     }
 
     async function openPlan(nextPlan, currentRevision) {
+        nextPlan = await window.planVersions.beforeOpen(nextPlan);
+        if (!nextPlan) return false;
         if (currentRevision !== revision || !appState.user) return;
         closeAreaControls();
         hideDialog();
@@ -335,6 +338,7 @@
             activateProject();
             status('Plano listo. Puede recorrer sus páginas y añadir botones.');
             clearError();
+            return true;
         } finally { if (currentRevision === revision) setBusy(false); }
     }
 
@@ -427,7 +431,7 @@
 
     function openAreaControls() {
         const marker = selectedMarker();
-        if (!marker || marker.page !== page || busy || !appState.user?.permissions.can_change_pdf_plan) return;
+        if (!marker || marker.page !== page || busy || !getPermissions().can_change_pdf_plan) return;
         if (!areaPanel.hidden) { closeAreaControls(); return; }
         areaMarkerId = marker.id;
         radiusX.value = Math.round((marker.area_radius_x || .05) * 1000) / 10;
@@ -443,7 +447,7 @@
 
     async function saveAreaControls() {
         if (areaPanel.hidden) return true;
-        if (areaMarkerId !== selectedId || busy || !appState.user?.permissions.can_change_pdf_plan) return false;
+        if (areaMarkerId !== selectedId || busy || !getPermissions().can_change_pdf_plan) return false;
         const saved = await markerAction(marker => post(marker.update_url, {
             has_area: areaEnabled.checked, area_radius_x: Number(radiusX.value) / 100, area_radius_y: Number(radiusY.value) / 100,
         }), 'Radio actualizado en el plano.');
@@ -489,7 +493,7 @@
     ));
     async function deleteSelectedMarker() {
         const marker = selectedMarker();
-        if (!marker || busy || !appState.user?.permissions.can_delete_pdf_marker) return;
+        if (!marker || busy || !getPermissions().can_delete_pdf_marker) return;
         if (!window.confirm(`¿Eliminar el botón «${markerName(marker)}» del plano?`)) return;
         if (!(await editor.requestClose())) return;
         await markerAction(() => post(marker.delete_url, {}), 'Botón eliminado.');
@@ -498,9 +502,10 @@
     byId('btnPdfDeleteMarker').addEventListener('click', deleteSelectedMarker);
     byId('btnPdfDeleteSelectedMarker').addEventListener('click', deleteSelectedMarker);
     function updatePermissions() {
-        const permissions = appState.user?.permissions || {};
+        const permissions = getPermissions();
         byId('btnGoToPdfSection').hidden = !appState.user;
         byId('btnPdfMoveMarker').hidden = !permissions.can_change_pdf_plan;
+        byId('btnPdfAddMarker').hidden = !permissions.can_assign;
         byId('btnPdfDeleteMarker').hidden = !permissions.can_delete_pdf_marker;
         byId('btnPdfDeleteSelectedMarker').hidden = !permissions.can_delete_pdf_marker;
         byId('btnRenamePdfPlan').hidden = !plan || !permissions.can_change_pdf_plan;
@@ -544,7 +549,7 @@
         canLeave() { return editor.requestClose(); },
         async open(nextPlan) {
             switchView(view);
-            await openPlan(nextPlan, ++revision);
+            return openPlan(nextPlan, ++revision);
         },
     };
 

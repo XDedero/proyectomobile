@@ -195,8 +195,8 @@ class ProjectTests(TestCase):
             patch.object(monitor, 'is_monitor_enabled', return_value=True),
             patch.object(monitor, '_log_line'),
             patch.object(monitor, 'enqueue_sync_task') as queue,
-            patch.object(monitor, '_sync_pdf_plan_worker') as upload_pdf,
-            patch.object(monitor, '_sync_workbook_worker') as upload_excel,
+            patch.object(monitor, '_sync_pdf_plan_worker', return_value={'drive_file_id': 'pdf1', 'modified_time': '2026-11-07T22:00:00Z', 'supabase_ok': True}) as upload_pdf,
+            patch.object(monitor, '_sync_workbook_worker', return_value={'drive_file_id': 'xlsx1', 'modified_time': '2026-11-07T22:00:01Z', 'supabase_ok': True}) as upload_excel,
             patch.object(monitor, '_sync_marker_snapshot', return_value=True),
             patch.object(monitor, '_delete_drive_copy') as delete_copy,
         ):
@@ -282,8 +282,9 @@ class ProjectTests(TestCase):
             patch.object(monitor, 'is_monitor_enabled', return_value=True),
             patch.object(monitor, '_log_line'),
             patch.object(monitor, 'enqueue_sync_task') as queue,
-            patch.object(monitor, '_sync_pdf_plan_worker', return_value={'drive_file_id': 'pdf1', 'supabase_ok': False}),
-            patch.object(monitor, '_sync_workbook_worker', return_value={'drive_file_id': 'xlsx1', 'supabase_ok': False}) as book,
+            patch('mobileApp.cloud_projects.shared_publish_target', return_value={'id':'pdf1', 'excelId':'xlsx1', 'projectKey':'project_test', 'pdfVersion':'2026-11-07T22:00:00Z', 'date':'2026-11-07T22:00:01Z'}),
+            patch.object(monitor, '_sync_pdf_plan_worker', return_value={'drive_file_id': 'pdf1', 'modified_time': '2026-11-07T22:00:00Z', 'supabase_ok': False}),
+            patch.object(monitor, '_sync_workbook_worker', return_value={'drive_file_id': 'xlsx1', 'modified_time': '2026-11-07T22:00:01Z', 'supabase_ok': False}) as book,
         ):
             for _ in range(2):
                 with self.captureOnCommitCallbacks(execute=True):
@@ -533,14 +534,14 @@ class ProjectTests(TestCase):
         self.assertIn('F19:H19', str(sheet.merged_cells))
         book.close()
 
-    def test_registered_reader_can_assign_listing_and_save_but_cannot_edit_its_cells(self):
+    def test_creator_can_assign_listing_save_and_edit_its_cells(self):
         plan = self.plan('dxf')
         response = self.post(plan['assign_listing_url'], {'create_template': True})
         listing = response.json()['listing']
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
         metadata = self.client.get(listing['metadata_url']).json()
-        self.assertFalse(metadata['can_edit'])
-        self.assertEqual(self.post(listing['save_url'], {'revision': 1, 'edits': [{'sheet': 'Listado', 'row': 8, 'col': 3, 'value': 'No permitido'}]}).status_code, 403)
+        self.assertTrue(metadata['can_edit'])
+        self.assertEqual(self.post(listing['save_url'], {'revision': metadata['revision'], 'edits': [{'sheet': 'Listado', 'row': 8, 'col': 3, 'value': 'Permitido'}]}).status_code, 200)
 
     def test_adding_listing_columns_and_motors_keeps_logical_merged_columns_styles_and_logo(self):
         plan = self.plan('pdf')
@@ -585,12 +586,12 @@ class ProjectTests(TestCase):
         self.assertEqual(self.client.get(url, {'sheet': 'No existe'}).status_code, 400)
         self.assertTrue(self.download(url + '?sheet=Equipos'))
 
-    def test_cad_marker_drag_requires_modification_permission_and_keeps_excel(self):
+    def test_cad_marker_drag_by_creator_keeps_excel(self):
         plan, _ = self.bundle('dxf')
         motor = Motor.objects.get(pk=plan['motors'][0]['id'])
         url = reverse('move_cad_marker', args=[motor.pk])
         target = {'svg_x': motor.svg_x + 50, 'svg_y': motor.svg_y + 50}
-        self.assertEqual(self.post(url, target).status_code, 403)
+        self.assertEqual(self.post(url, target).status_code, 200)
         self.client.force_login(self.admin)
         response = self.post(url, target)
         self.assertEqual(response.status_code, 200, response.content[:400])

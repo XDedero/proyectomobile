@@ -64,10 +64,11 @@
         byId('fullscreenPlanStatus').textContent = message;
         byId('fullscreenPlanStatus').classList.toggle('has-error', error);
     }
-    function canMove() { return Boolean(appState.user?.permissions?.[active?.kind === 'pdf' ? 'can_change_pdf_plan' : 'can_change_plan']); }
-    function canSave(kind = active?.kind) { return Boolean(appState.user?.permissions?.[kind === 'pdf' ? 'can_save_pdf_plan' : 'can_save_plan']); }
-    function canDelete(kind = active?.kind) { return Boolean(appState.user?.permissions?.[kind === 'pdf' ? 'can_delete_pdf_plan' : 'can_delete_plan']); }
-    function canDeleteMarker() { return Boolean(appState.user?.permissions?.[active?.kind === 'pdf' ? 'can_delete_pdf_marker' : 'can_delete_cad_marker']); }
+    function rights(kind = active?.kind, plan = null) { return plan?.permissions || (active && active.kind === kind ? active.plan.permissions : null) || {}; }
+    function canMove() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_change_pdf_plan' : 'can_change_plan']); }
+    function canSave(kind = active?.kind) { return Boolean(rights(kind)[kind === 'pdf' ? 'can_save_pdf_plan' : 'can_save_plan']); }
+    function canDelete(kind = active?.kind, plan = null) { return Boolean(rights(kind, plan)[kind === 'pdf' ? 'can_delete_pdf_plan' : 'can_delete_plan'] || appState.user?.permissions?.can_administer); }
+    function canDeleteMarker() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_delete_pdf_marker' : 'can_delete_cad_marker']); }
     function isBusy() { return saving || deleting || Boolean(active?.isBusy?.()); }
     function update() {
         byId('cadProjectActions').hidden = !appState.currentPlan;
@@ -78,6 +79,17 @@
             byId(`btn${prefix}SavePlan`).hidden = !canSave(kind);
             byId(`btn${prefix}SavePlan`).disabled = isBusy();
             byId(`btnDelete${prefix}Plan`).disabled = isBusy();
+        }
+        const editable = Boolean(rights().can_assign);
+        byId('fullscreenAddMarker').hidden = !editable;
+        if (byId('fullscreenManageWorkbook')) byId('fullscreenManageWorkbook').hidden = !editable;
+        fullMenu.querySelector('[data-project-action="export"]').hidden = rights().can_export === false;
+        for (const action of ['add', 'saved-motors', 'assign-listing']) fullMenu.querySelector(`[data-project-action="${action}"]`).hidden = !editable;
+        for (const prefix of ['Pdf', 'Cad']) {
+            const kind = prefix === 'Pdf' ? 'pdf' : 'dxf';
+            byId(`btn${prefix}AssignListing`).hidden = !rights(kind).can_assign;
+            if (byId(`btn${prefix}Workbook`)) byId(`btn${prefix}Workbook`).hidden = !rights(kind).can_assign;
+            byId(`btn${prefix}ExportProject`).hidden = rights(kind).can_export === false;
         }
         byId('fullscreenSavePlan').hidden = byId('fullscreenSaveMenu').hidden = !active || !canSave();
         byId('fullscreenDeletePlan').hidden = !active || !canDelete();
@@ -143,6 +155,8 @@
                 current.refresh?.();
             }
             current.plan.saved_at = data.saved_at;
+            current.plan.project_version = data.saved_at;
+            window.planVersions?.remember(current.plan);
             current.plan._projectDirty = false;
             if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(data.saved.cloud_status));
             return true;
@@ -169,7 +183,7 @@
     }
 
     async function deletePlan(target = active) {
-        if (!target || isBusy() || !canDelete(target.kind)) return;
+        if (!target || isBusy() || !canDelete(target.kind, target.plan)) return;
         const { kind, plan } = target;
         if (!window.confirm(`¿Eliminar «${plan.name}» de la aplicación? Se quitarán sus botones y desaparecerá de Planos guardados.`)) return;
         if (!(await window.workbookEditor.requestClose())) return;
@@ -244,6 +258,7 @@
         byId('fullscreenDeleteMarker').hidden = !configuration?.remove || !canDeleteMarker();
         if (!configuration) return;
         byId('fullscreenSelectionName').textContent = configuration.name;
+        byId('fullscreenAssignExcel').hidden = !configuration.assign;
         byId('fullscreenAssignExcel').onclick = configuration.assign;
         byId('fullscreenOpenExcel').hidden = !configuration.workbook;
         byId('fullscreenOpenExcel').onclick = configuration.open;
@@ -350,13 +365,13 @@
             open.addEventListener('click', () => openLibraryEntry(entry, !local));
             row.append(open);
             if (cloud && local) row.append(libraryAction('Abrir versión de la nube', 'bi-cloud-arrow-down', 'primary', () => openLibraryEntry(entry, true)));
-            if (local?.export_url) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
+            if (local?.export_url && local.permissions?.can_export !== false) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
             if (copies.length && copies.every(copy => copy.clear_url)) {
                 const clear = libraryAction('Limpiar copia de este PC', 'bi-pc-display', 'secondary', () => removeLibraryEntry(entry, true));
                 clear.dataset.deletePlan = local.plan_id;
                 row.append(clear);
             }
-            if (canDelete(kind) && (cloud?.delete_url || local?.delete_url)) {
+            if (canDelete(kind, local) && (cloud?.delete_url || local?.delete_url)) {
                 const remove = libraryAction('Eliminar proyecto completo', 'bi-trash', 'danger', () => removeLibraryEntry(entry, false));
                 remove.dataset.deletePlan = local?.plan_id || cloud.id;
                 row.append(remove);
@@ -376,8 +391,9 @@
             const result = remote ? await post(entry.cloud.open_url) : { plan: await request(local.detail_url) };
             if (appState.user?.id !== user) return;
             exitFullscreen();
+            const opened = await openPlan(remote ? 'pdf' : local.kind, result.plan);
+            if (opened === false) return;
             modalSavedPlans.hide();
-            await openPlan(remote ? 'pdf' : local.kind, result.plan);
             if (remote) status(result.warning || 'Plano y Excel abiertos desde la nube.', Boolean(result.warning));
         } catch (error) {
             feedback.textContent = error.message;
@@ -458,8 +474,8 @@
         if (window.pdfWorkflow?.currentPlan || window.planWorkflow?.currentPlan || byId('modalSavedPlans').classList.contains('show')) synchronize();
     }, 5000);
     async function openPlan(kind, plan) {
-        if (kind === 'pdf') await window.pdfWorkflow.open(plan);
-        else await window.planWorkflow.open(plan);
+        if (kind === 'pdf') return window.pdfWorkflow.open(plan);
+        return window.planWorkflow.open(plan);
     }
 
     byId('btnPlanFullscreenMenu').addEventListener('click', () => setMenu(fullMenu.hidden));

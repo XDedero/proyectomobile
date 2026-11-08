@@ -4,8 +4,14 @@ from . import pdf_views
 from . import project_views
 from . import motor_views
 from . import button_views
+from . import management_views
 
 urlpatterns = [
+    path('administracion/', management_views.management_panel, name='management_panel'),
+    path('api/administration/', management_views.management_data, name='management_data'),
+    path('api/administration/roles/', management_views.manage_role, name='manage_role'),
+    path('api/administration/groups/', management_views.manage_role_group, name='manage_role_group'),
+    path('api/administration/categories/', management_views.manage_category, name='manage_category'),
     path('', views.index, name='index'),
     path('api/auth/session/', views.auth_session, name='auth_session'),
     path('api/auth/login/', views.auth_login, name='auth_login'),
@@ -49,6 +55,8 @@ urlpatterns = [
     path('api/projects/import/', project_views.upload_project, name='upload_project'),
     path('api/projects/saved/<int:saved_id>/download/', project_views.download_saved_project, name='download_saved_project'),
     path('api/projects/<str:kind>/<int:plan_id>/save/', project_views.save_project, name='save_project'),
+    path('api/projects/<str:kind>/<int:plan_id>/version/', project_views.project_version, name='project_version'),
+    path('api/projects/<str:kind>/<int:plan_id>/refresh/', project_views.refresh_project, name='refresh_project'),
     path('api/projects/<str:kind>/<int:plan_id>/download/', project_views.download_project, name='download_project'),
     path('api/projects/<str:kind>/<int:plan_id>/listing/', project_views.assign_plan_listing, name='assign_plan_listing'),
     path('api/projects/<str:kind>/<int:plan_id>/workbook/', project_views.plan_workbook, name='plan_workbook'),

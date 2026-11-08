@@ -541,7 +541,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     plan_pk, plan_name = plan.pk, plan.name
     document = plan.workbook
     assoc_key = plan.cloud_key
-    shared = bool(getattr(plan, 'cloud_snapshot', None))
+    shared = bool(getattr(plan, 'cloud_origin', ''))
     pdf_id = getattr(plan, 'cloud_origin', '')
     timestamp = timezone.localtime(saved_at).strftime('%Y-%m-%d_%H-%M-%S')
     title = re.sub(r'\.(pdf|dxf|xlsx|csv)$', '', plan_name, flags=re.IGNORECASE).strip() or 'Plano'
@@ -575,13 +575,16 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                     f'{basename}.xlsx', manifest, source, **workbook_options)
                 if not book:
                     raise RuntimeError('No se pudo subir el Excel.')
-                if shared:
+                if kind == 'pdf':
+                    if not shared:
+                        remote = {'id': pdf['drive_file_id'], 'excelId': book['drive_file_id'], 'projectKey': key}
                     remote.update(name=f'{basename}.pdf', pdfVersion=pdf['modified_time'],
                                   excelName=f'{basename}.xlsx', date=book['modified_time'])
                     identity = snapshot_identity(remote, manifest_metadata(manifest), manifest)
                     local = PdfPlan.objects.filter(pk=plan_pk)
-                    local.update(cloud_workbook_version=workbook_version(remote))
-                    if not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
+                    local.update(cloud_origin=pdf['drive_file_id'], cloud_workbook_version=workbook_version(remote),
+                                 owner_username=manifest.get('owner_username', ''))
+                    if plan.cloud_snapshot and not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
                         local.update(cloud_snapshot=identity)
                 database_ok = book.get('supabase_ok') and (kind != 'pdf' or pdf.get('supabase_ok'))
                 if database_ok and kind == 'pdf':

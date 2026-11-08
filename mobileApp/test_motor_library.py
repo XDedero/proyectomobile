@@ -197,7 +197,7 @@ class SavedMotorTests(TestCase):
         self.client.force_login(self.reader)
         response = self.client.post(reverse('import_motor_document'), {'file': SimpleUploadedFile('motor_lector.xlsx', content)})
         book = response.json()['workbook']
-        self.assertFalse(book['can_edit'])
+        self.assertTrue(book['can_edit'])
         self.assertTrue(book['motor_registration']['can_register'])
         saved = self.register(book, 'Motor del lector')['motor']
         self.assertEqual(SavedMotor.objects.get(pk=saved['id']).created_by_id, self.reader.pk)

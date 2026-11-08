@@ -86,6 +86,7 @@ def export_project(kind, plan):
                        for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
+        'owner_username': plan.owner_username or (plan.imported_by.get_username() if plan.imported_by_id else ''),
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
         'workbook_mode': document.plan_mode,
         'listing': 'w1' if any(row.is_listing for row in rows) else None,

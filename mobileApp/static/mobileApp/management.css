@@ -1,0 +1,30 @@
+:root { color-scheme: light; }
+body { background: #f3f6fb; color: #1d2c44; }
+.management-shell { max-width: 1220px; }
+h1 { font-weight: 750; letter-spacing: -.04em; }
+h2 { font-size: 1.35rem; font-weight: 700; }
+h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 1.25rem; }
+.back-link { color: #476480; text-decoration: none; }
+.management-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.summary-item { background: white; border: 1px solid #e1e8f1; border-radius: 16px; padding: 1rem 1.25rem; }
+.summary-item strong { display: block; font-size: 1.8rem; color: #2455aa; }
+.summary-item span { color: #64748b; font-size: .9rem; }
+.management-tabs { display: flex; gap: .5rem; flex-wrap: wrap; }
+.management-tabs button { border: 0; border-radius: 10px; padding: .85rem 1rem; color: #42536d; background: #e8eef7; font-weight: 600; }
+.management-tabs button.active { background: #2455aa; color: white; }
+.management-tabs i { margin-right: .4rem; }
+.section-intro { max-width: 820px; margin-bottom: 1.5rem; }
+.section-intro p { color: #64748b; }
+.management-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 1.5rem; align-items: start; }
+.management-card { background: white; border: 1px solid #e1e8f1; border-radius: 18px; padding: 1.5rem; box-shadow: 0 4px 16px #102c4b04; }
+.management-rows { display: grid; gap: .75rem; }
+.management-row { border: 1px solid #e1e8f1; border-radius: 12px; padding: 1rem; }
+.management-row strong { overflow-wrap: anywhere; }
+.management-row p { color: #64748b; font-size: .85rem; margin: .4rem 0 .8rem; }
+.permission-option { display: flex; align-items: center; gap: .7rem; padding: .6rem 0; }
+input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: #2455aa; flex-shrink: 0; }
+.check-list { max-height: 220px; overflow: auto; border: 1px solid #e1e8f1; border-radius: 10px; padding: .4rem .8rem; }
+.check-list .permission-option { font-size: .9rem; }
+.btn-primary { background: #2455aa; border-color: #2455aa; }
+[hidden] { display: none !important; }
+@media (max-width: 760px) { .management-grid { grid-template-columns: 1fr; } .management-summary { grid-template-columns: repeat(2, 1fr); } .management-card { padding: 1rem; } .management-tabs button { flex: 1; font-size: .85rem; } }

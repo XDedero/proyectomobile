@@ -194,7 +194,7 @@ def can_delete_listing(record, user, plan=None):
     if not plan:
         return False
     permission = 'can_delete_pdf_plan' if plan._meta.model_name == 'pdfplan' else 'can_delete_plan'
-    return capabilities(user)[permission] or (not record.is_protected and record.created_by_id == user.pk)
+    return capabilities(user, plan)[permission]
 
 
 def workspace_data(plan, user=None):
@@ -211,7 +211,9 @@ def workspace_data(plan, user=None):
     return {'workbook': workbook_data(document, sheets=False), 'workbook_mode': document.plan_mode,
         'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows
                           if not (row.name == EMPTY_SHEET and not row.is_listing and document.plan_mode == 'template')],
-        'button_categories': list(ButtonCategory.objects.values('id', 'name')),
+        'button_categories': [{'id': category.pk, 'name': category.name, 'templates': [
+            {'id': item.pk, 'name': item.name, 'sheet': item.sheet} for item in category.templates.all()]}
+            for category in ButtonCategory.objects.prefetch_related('templates')],
         'listings': listings, 'listing': listing,
         'binding_counts': {item['sheet_name']: item['count'] for item in markers(plan).values('sheet_name').annotate(count=Count('pk'))}}
 
@@ -265,13 +267,24 @@ def new_button_options(request):
         raise ValidationError('Indica si el botón mostrará su descripción.')
     if origin is None and upload is None and 'category_id' not in data:
         return data, None, None, None
-    if origin not in ('blank', 'upload') or (origin == 'upload') != (upload is not None):
+    if origin not in ('blank', 'upload', 'category') or (origin == 'upload') != (upload is not None):
         raise ValidationError('Elija una ficha predeterminada o un archivo para importar.')
-    return data, button_category(data.get('category_id')), origin, upload
+    category = button_category(data.get('category_id'))
+    if origin == 'category':
+        from .models import CategoryWorkbook
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        template = CategoryWorkbook.objects.filter(pk=data.get('template_id'), category=category).first()
+        if template is None:
+            raise ValidationError('Elija un Excel permanente de esta categoría.')
+        upload = SimpleUploadedFile(template.name, bytes(template.content))
+        origin = ('category', template.sheet)
+    return data, category, origin, upload
 
 
 def initialize_button(marker, user, origin, upload):
-    if origin == 'upload':
+    if isinstance(origin, tuple) and origin[0] == 'category':
+        stage_button_source(marker, user, upload, selected=origin[1])
+    elif origin == 'upload':
         stage_button_source(marker, user, upload)
     elif origin == 'blank':
         assign_marker(marker, user, {'blank': True})

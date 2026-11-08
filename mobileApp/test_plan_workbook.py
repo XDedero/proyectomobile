@@ -226,21 +226,19 @@ class SharedPlanWorkbookTests(TestCase):
         finally:
             workbook.close()
 
-    def test_additional_listings_are_numbered_and_only_author_or_deleter_can_remove(self):
+    def test_additional_listings_are_numbered_and_only_creator_or_admin_can_remove(self):
+        self.client.force_login(self.author)
         plan = self.plan()
         self.imported(plan, as_listing=True)
-        self.client.force_login(self.author)
         original = self.client.get(plan['workbook_url']).json()['listings'][0]
-        denied = self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': original['id']})
-        self.assertEqual(denied.status_code, 403)
         added = self.post(plan['assign_listing_url'], {'action': 'add'})
         self.assertEqual(added.status_code, 200, added.content[:500])
         extra = added.json()['listings'][-1]
         self.assertEqual(extra['name'], 'Listado motores 2')
         self.assertTrue(extra['can_delete'])
         self.client.force_login(self.other)
-        denied = self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': extra['id']})
-        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': extra['id']}).status_code, 403)
+        self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'add'}).status_code, 403)
         self.client.force_login(self.author)
         self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': extra['id']}).status_code, 200)
         self.client.force_login(self.admin)
@@ -292,7 +290,8 @@ class SharedPlanWorkbookTests(TestCase):
         result = response.json()
         previous = result['listings'][-1]
         self.assertTrue(previous['is_protected'])
-        self.assertFalse(previous['can_delete'])
+        self.assertTrue(previous['can_delete'])
+        self.client.force_login(self.other)
         self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': previous['id']}).status_code, 403)
 
     def test_tab_order_and_category_rename_keep_cross_sheet_formulas_and_print_areas(self):

@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import load_workbook
 
-from .access import api_permissions, capabilities
+from .access import api_permissions, capabilities, can_access_plan, can_edit_plan, is_administrator
 from .models import Motor, PdfPlan, Plan, SavedProject, WorkbookDocument
 from .pdf_views import error_response, json_body, pdf_data, uploaded_document, workbook_data
 from .project_service import export_project, import_project, plan_model
@@ -36,6 +36,10 @@ def project_plan_data(kind, plan):
         saved = None
     return {
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,
+        'project_version': saved.saved_at.isoformat() if saved else '',
+        'version_url': reverse('project_version', args=[kind, plan.pk]),
+        'refresh_url': reverse('refresh_project', args=[kind, plan.pk]),
+        'cloud_key': plan.cloud_key,
         'save_project_url': reverse('save_project', args=[kind, plan.pk]),
         'export_project_url': reverse('download_project', args=[kind, plan.pk]),
         'assign_listing_url': reverse('assign_plan_listing', args=[kind, plan.pk]),
@@ -47,6 +51,7 @@ def project_plan_data(kind, plan):
 def local_copy_data(kind, plan, user):
     return {
         'plan_id': plan.pk, 'kind': kind, 'name': plan.name,
+        'permissions': capabilities(user, plan),
         'cloud_key': plan.cloud_key, 'cloud_origin': getattr(plan, 'cloud_origin', ''),
         'detail_url': reverse('detail_pdf' if kind == 'pdf' else 'plan_detail', args=[plan.pk]),
         'clear_url': reverse('clear_local_project', args=[kind, plan.pk]) if can_clear_local(kind, plan, user) else None,
@@ -87,7 +92,8 @@ def saved_projects(request):
         return error_response(exc)
     # Check working plans as well as saved copies: a newly imported plan is
     # intentionally absent from the library until the user saves it.
-    return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects],
+    return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects
+                                  if can_access_plan(request.user, saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan)],
                          'cached': cached_projects(request.user), 'availability': availability})
 
 
@@ -95,11 +101,11 @@ def cached_projects(user):
     plans = PdfPlan.objects.exclude(cloud_origin='').filter(saved_project__isnull=True).only(
         'id', 'name', 'cloud_key', 'cloud_origin', 'imported_by_id', 'imported_at')
     return [{**local_copy_data('pdf', plan, user), 'date': plan.imported_at.isoformat(),
-             'export_url': reverse('download_project', args=['pdf', plan.pk])} for plan in plans]
+             'export_url': reverse('download_project', args=['pdf', plan.pk])} for plan in plans if can_access_plan(user, plan)]
 
 
 def can_clear_local(kind, plan, user):
-    return capabilities(user)['can_delete_pdf_plan' if kind == 'pdf' else 'can_delete_plan'] or (
+    return can_edit_plan(user, plan) or (
         kind == 'pdf' and bool(plan.cloud_origin) and plan.imported_by_id == user.pk and not hasattr(plan, 'saved_project')
     )
 
@@ -140,19 +146,44 @@ def cloud_projects(request):
             {'id': project['id'], 'name': project['name'], 'title': project_title(project['name']), 'date': project['date'],
              'cloud_key': project.get('projectKey'), 'open_url': reverse('open_cloud_project', args=[project['id']]),
              'delete_url': reverse('delete_cloud_project', args=[project['id']])}
-            for project in list_cloud_projects()
+            for project in list_cloud_projects() if can_open_cloud(request.user, project)
         ]})
     except CloudUnavailable as exc:
         return error_response(exc, status=503)
 
 
+def can_open_cloud(user, project):
+    from .authorization import roles_for, has_role_configuration
+    if is_administrator(user):
+        return True
+    roles = roles_for(user)
+    if not has_role_configuration(user) or roles.filter(can_view=True, all_plans=True).exists():
+        return True
+    from django.db.models import Q
+    copies = PdfPlan.objects.filter(Q(cloud_origin=project['id']) | Q(cloud_key=project.get('projectKey')))
+    return any(can_access_plan(user, plan) for plan in copies)
+
+
 @require_POST
 @api_permissions()
 def open_cloud_project(request, pdf_id):
-    from .cloud_projects import CloudUnavailable, open_cloud_project as restore
+    from .cloud_projects import CloudUnavailable, open_cloud_project as restore, list_cloud_projects
 
     try:
-        plan, warning = restore(pdf_id, request.user)
+        from .authorization import roles_for, has_role_configuration
+        roles = roles_for(request.user)
+        if has_role_configuration(request.user) and not is_administrator(request.user) and not roles.filter(can_view=True, all_plans=True).exists():
+            project = next((p for p in list_cloud_projects() if p['id'] == pdf_id), None)
+            if not project or not can_open_cloud(request.user, project):
+                return error_response('Su rol no permite abrir este plano de la nube.', 403)
+        cached = next((p for p in PdfPlan.objects.filter(cloud_origin=pdf_id)
+                       if can_access_plan(request.user, p)), None)
+        if cached:
+            plan, warning = restore(pdf_id, request.user, replace_plan=cached)
+        else:
+            plan, warning = restore(pdf_id, request.user)
+        if not can_access_plan(request.user, plan):
+            return error_response('Su rol no permite abrir este plano.', 403)
         return JsonResponse({'plan': pdf_data(plan), 'warning': warning})
     except CloudUnavailable as exc:
         return error_response(exc, status=503)
@@ -165,7 +196,7 @@ def open_cloud_project(request, pdf_id):
 def delete_cloud_project(request, pdf_id):
     from .cloud_projects import CloudUnavailable, drive_command, list_cloud_projects, project_title, supabase_query
 
-    if not capabilities(request.user)['can_delete_pdf_plan']:
+    if not is_administrator(request.user):
         return error_response('No tiene permiso para eliminar el proyecto de la nube.', status=403)
     try:
         project = next((item for item in list_cloud_projects() if item['id'] == pdf_id), None)
@@ -244,6 +275,9 @@ def download_project(request, kind, plan_id):
 @api_permissions()
 def download_saved_project(request, saved_id):
     saved = get_object_or_404(SavedProject.objects.select_related('cad_plan', 'pdf_plan'), pk=saved_id)
+    plan = saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan
+    if not can_access_plan(request.user, plan) or not can_access_plan(request.user, plan, 'can_export'):
+        return error_response('Su rol no permite exportar este plano.', 403)
     try:
         content = bytes(saved.content)
         if not content:
@@ -387,3 +421,41 @@ def workbook_csv(request, workbook_id):
         return FileResponse(BytesIO(stream.getvalue().encode('utf-8-sig')), as_attachment=True, filename=f'{Path(document.name).stem}-{name}.csv', content_type='text/csv; charset=utf-8')
     finally:
         workbook.close()
+
+
+@require_GET
+@api_permissions()
+def project_version(request, kind, plan_id):
+    from .cloud_projects import CloudUnavailable, list_cloud_projects, workbook_version
+    plan = get_plan(kind, plan_id)
+    current = project_plan_data(kind, plan)['project_version']
+    known = request.GET.get('version', current)
+    stale = bool(known and current and known != current)
+    result = {'stale': stale, 'remote': False, 'latest_version': current,
+              'refresh_url': reverse('refresh_project', args=[kind, plan.pk]), 'verified': True}
+    if kind == 'pdf' and plan.cloud_origin and plan.cloud_workbook_version:
+        try:
+            remote = next((p for p in list_cloud_projects() if p['id'] == plan.cloud_origin), None)
+            if remote:
+                result['remote'] = workbook_version(remote) != plan.cloud_workbook_version
+                result['stale'] = stale or result['remote']
+        except CloudUnavailable:
+            result.update(verified=False, warning='No se pudo comprobar la versión en la nube. Se conserva la última copia descargada.')
+    return JsonResponse(result)
+
+
+@require_POST
+@api_permissions()
+def refresh_project(request, kind, plan_id):
+    from .cloud_projects import CloudUnavailable, open_cloud_project as restore
+    from .views import plan_data
+    plan = get_plan(kind, plan_id)
+    try:
+        warning = ''
+        if kind == 'pdf' and plan.cloud_origin:
+            plan, warning = restore(plan.cloud_origin, request.user, replace_plan=plan)
+        return JsonResponse({'plan': pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True), 'warning': warning})
+    except CloudUnavailable as exc:
+        return error_response(exc, 503)
+    except (ValidationError, OSError) as exc:
+        return error_response(exc)

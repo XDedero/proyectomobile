@@ -1,4 +1,8 @@
 from django.contrib import admin
+from .access import is_administrator
+
+# Django's own user/group pages must obey the same administrator boundary.
+admin.site.has_permission = lambda request: is_administrator(request.user)
 
 from .models import ButtonCategory, Motor, Plan, PdfPlan, PdfMarker, WorkbookDocument
 

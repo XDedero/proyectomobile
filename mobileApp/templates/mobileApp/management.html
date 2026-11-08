@@ -1,0 +1,63 @@
+{% load static %}
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administración · Planos</title>
+<link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+<link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap-icons.css' %}">
+<link rel="stylesheet" href="{% static 'mobileApp/management.css' %}">
+</head><body>
+<main class="container management-shell py-4 py-lg-5">
+  <header class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+    <div><a class="back-link" href="/">← Volver a los planos</a><h1 class="mt-3 mb-1">Administración</h1><p class="text-secondary mb-0">Organiza el acceso y los recursos de tu equipo.</p></div>
+    <a class="btn btn-outline-secondary" href="/admin/auth/user/">Cuentas de usuarios <i class="bi bi-arrow-up-right"></i></a>
+  </header>
+  <div class="management-summary mb-4" id="managementSummary"></div>
+  <nav class="management-tabs mb-4" aria-label="Secciones de administración">
+    <button type="button" data-tab="roles" class="active" aria-pressed="true"><i class="bi bi-shield-check"></i> Roles de planos</button>
+    <button type="button" data-tab="groups" aria-pressed="false"><i class="bi bi-people"></i> Grupos de usuarios</button>
+    <button type="button" data-tab="categories" aria-pressed="false"><i class="bi bi-grid"></i> Categorías y Excel</button>
+  </nav>
+  <p id="managementStatus" role="status" aria-live="polite"></p>
+  <section class="management-section" id="rolesPanel">
+    <div class="section-intro"><h2>Roles de planos</h2><p>Define qué planos puede consultar cada rol. El creador siempre puede editar y guardar sus propios planos; los administradores pueden gestionar todos.</p></div>
+    <div class="management-grid"><div class="management-card"><div class="d-flex justify-content-between align-items-center mb-3"><h3>Roles disponibles</h3><button class="btn btn-sm btn-outline-primary" id="newRole" type="button">+ Crear rol</button></div><div id="roleRows" class="management-rows"></div></div>
+      <form class="management-card" id="roleForm"><h3 id="roleFormTitle">Crear rol</h3>
+        <label class="form-label" for="roleName">Nombre del rol</label><input id="roleName" class="form-control mb-3" required maxlength="80" placeholder="Ej. Supervisores de planta">
+        <label class="form-label" for="roleDescription">Descripción</label><input id="roleDescription" class="form-control mb-3" maxlength="255" placeholder="Para qué se utiliza este rol">
+        <fieldset class="mb-3"><legend class="fs-6 fw-semibold">Funciones permitidas</legend>
+          <label class="permission-option"><input type="checkbox" id="roleView" checked> Consultar planos compartidos</label>
+          <label class="permission-option"><input type="checkbox" id="roleExport" checked> Descargar y exportar planos</label>
+          <label class="permission-option"><input type="checkbox" id="roleCreate" checked> Importar y crear planos propios</label>
+        </fieldset>
+        <label class="permission-option mb-2"><input type="checkbox" id="roleAll" checked> Acceso a todos los planos compartidos</label>
+        <div id="rolePlanSelection" hidden><p class="small text-secondary">Selecciona los planos de este rol.</p><div id="rolePlans" class="check-list mb-3"></div></div>
+        <fieldset class="mb-3"><legend class="fs-6 fw-semibold">Asignar directamente a usuarios</legend><div id="roleUsers" class="check-list"></div></fieldset>
+        <p class="small text-secondary">Los permisos de varios roles se suman. Ningún rol concede edición de planos ajenos ni administración de usuarios.</p>
+        <button class="btn btn-primary" type="submit">Guardar rol</button><button id="cancelRole" class="btn btn-link" type="button">Limpiar</button>
+      </form></div>
+  </section>
+  <section class="management-section" id="groupsPanel" hidden>
+    <div class="section-intro"><h2>Grupos de usuarios</h2><p>Reúne usuarios y asígnales uno o más roles. Los cambios se aplican a todos los miembros del grupo.</p></div>
+    <div class="management-grid"><div class="management-card"><div class="d-flex justify-content-between align-items-center mb-3"><h3>Grupos disponibles</h3><button id="newGroup" class="btn btn-sm btn-outline-primary" type="button">+ Crear grupo</button></div><div id="groupRows" class="management-rows"></div></div>
+      <form class="management-card" id="groupForm"><h3 id="groupFormTitle">Crear grupo</h3>
+        <label class="form-label" for="groupName">Nombre del grupo</label><input id="groupName" class="form-control mb-3" required maxlength="80" placeholder="Ej. Mantenimiento turno A">
+        <fieldset class="mb-3"><legend class="fs-6 fw-semibold">Roles del grupo</legend><div id="groupRoles" class="check-list"></div></fieldset>
+        <fieldset class="mb-3"><legend class="fs-6 fw-semibold">Miembros</legend><div id="groupUsers" class="check-list"></div></fieldset>
+        <button class="btn btn-primary" type="submit">Guardar grupo</button><button id="cancelGroup" class="btn btn-link" type="button">Limpiar</button>
+      </form></div>
+  </section>
+  <section class="management-section" id="categoriesPanel" hidden>
+    <div class="section-intro"><h2>Categorías y Excel permanentes</h2><p>Crea categorías como Motores, Válvulas o Sensores. Sus Excel quedan disponibles para todos los botones de esa categoría.</p></div>
+    <div class="management-grid"><div class="management-card"><div class="d-flex justify-content-between align-items-center mb-3"><h3>Categorías disponibles</h3><button id="newCategory" class="btn btn-sm btn-outline-primary" type="button">+ Crear categoría</button></div><div id="categoryRows" class="management-rows"></div></div>
+      <form class="management-card" id="categoryForm"><h3 id="categoryFormTitle">Crear categoría</h3>
+        <label class="form-label" for="categoryName">Nombre de la categoría</label><input id="categoryName" class="form-control mb-3" required maxlength="80" placeholder="Ej. Válvulas">
+        <label class="form-label" for="categoryFile">Añadir Excel permanente <span class="text-secondary">(opcional)</span></label><input id="categoryFile" class="form-control mb-3" type="file" accept=".xlsx">
+        <label class="form-label" for="categorySheet">Hoja que usarán los botones</label><input id="categorySheet" class="form-control mb-2" maxlength="31" placeholder="Vacío: primera hoja visible">
+        <p class="small text-secondary">Cada botón recibe una copia editable. La plantilla de la categoría se conserva.</p>
+        <div id="categoryTemplates" class="mb-3"></div>
+        <button class="btn btn-primary" type="submit">Guardar categoría</button><button id="cancelCategory" class="btn btn-link" type="button">Limpiar</button>
+      </form></div>
+  </section>
+</main>
+<script src="{% static 'mobileApp/management.js' %}"></script>
+</body></html>

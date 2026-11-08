@@ -34,7 +34,7 @@ Abra http://127.0.0.1:8000/ e inicie sesión con una cuenta activa de Django. Pa
 
 **Pantalla completa** amplía el visor al dispositivo. El menú **⋮** contiene Explorar, Agregar botón, Mover botón, Importar motor guardado, Asignar listado, Ver listado, Guardar plano, Exportar proyecto y zoom. Los PDF tienen también un selector de página. Las fichas y los diálogos de asignación funcionan sobre el visor completo; **Volver** recupera la vista normal. Los navegadores sin la API nativa usan la misma vista que ocupa toda la ventana.
 
-Mover botones requiere permiso para modificar el formato correspondiente. Las coordenadas se conservan al cambiar el zoom, la orientación o el tamaño del visor.
+Mover botones requiere ser el creador del plano o administrador. Las coordenadas se conservan al cambiar el zoom, la orientación o el tamaño del visor.
 
 El visor PDF mantiene una vista general de **1280 píxeles en el lado mayor**, con las proporciones del plano. Al ampliar o desplazar, dibuja nuevamente solo la zona visible, también con un máximo de 1280 píxeles en su lado mayor. Durante el gesto reutiliza la imagen existente y recupera el detalle al detenerse, tras una pausa de 160 ms. No aumenta el tamaño del lienzo con el zoom ni con la densidad de píxeles del dispositivo. El zoom llega hasta 32 veces el ajuste inicial y los botones conservan sus coordenadas.
 
@@ -48,13 +48,13 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 ## Guardar y abrir
 
-**Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Solo aparece para usuarios con permisos de agregar o modificar planos, proyectos, motores o fichas. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
+**Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Aparece para el creador del plano y para los administradores. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
 
 **Ver planos guardados** en el menú principal, el menú de usuario y el módulo PDF abre una biblioteca común. Cada registro muestra **PDF** o **DXF** en pequeño. Volver a guardar el mismo plano actualiza su registro; no crea otra copia. Los planos existentes antes de esta actualización se conservan mediante la migración `0006`.
 
 Las modificaciones y asignaciones del trabajo abierto se mantienen en el servidor. El botón Guardar plano registra o actualiza la copia completa de la biblioteca y su archivo de proyecto. Un plano nuevo no aparece en esa biblioteca hasta guardarlo.
 
-**Eliminar plano** aparece junto a Guardar plano, en pantalla completa y como papelera en la biblioteca, exclusivamente para usuarios con permiso de eliminar el formato correspondiente. Tras confirmar, elimina el plano original, sus botones y su copia guardada; también cierra cualquier copia abierta de ese plano y descarta su restauración automática. No vuelve a la biblioteca hasta importarlo y guardarlo de nuevo. Los motores guardados y las fichas independientes se conservan.
+**Eliminar plano** aparece junto a Guardar plano, en pantalla completa y como papelera en la biblioteca, exclusivamente para el creador del plano y los administradores. Tras confirmar, elimina el plano original, sus botones y su copia guardada; también cierra cualquier copia abierta de ese plano y descarta su restauración automática. No vuelve a la biblioteca hasta importarlo y guardarlo de nuevo. Los motores guardados y las fichas independientes se conservan.
 
 Las sesiones conectadas a la misma instalación comprueban los planos abiertos y la biblioteca visible cada cinco segundos, al volver a la aplicación y al recuperar la conexión. Un plano eliminado se retira también de esos visores y se cierra su ficha abierta. Los fallos de conexión conservan el último estado confirmado; una respuesta antigua no puede reemplazar una consulta más reciente. Los planos recién importados siguen disponibles aunque aún no estén guardados.
 
@@ -85,7 +85,7 @@ Al importar otro libro se conservan en el libro resultante las fichas anteriores
 
 **Ver listados** abre los listados en el editor; su selector de hojas contiene todos los listados del plano. El botón **Listados** del editor permite administrarlos. **+ Fila** y **+ Columna** conservan la estructura y los estilos de las plantillas. Se eliminó la opción Reutilizar un Excel asignado: los listados pertenecen al propio libro del plano.
 
-El listado original requiere permiso de eliminación del plano PDF/DXF. Los listados adicionales pueden ser eliminados por su creador o por una cuenta con ese permiso. La protección de un original se conserva si se importa otro libro y el listado anterior queda como hoja adicional.
+Los listados del plano pueden ser modificados y eliminados por el creador del plano o por un administrador. La protección de un original se conserva si se importa otro libro y el listado anterior queda como hoja adicional.
 
 ## Motores guardados
 
@@ -106,25 +106,25 @@ El formato actual es la **versión 3**: incluye el plano, un único XLSX, las ho
 
 En otra instalación, use **Importar PDF configurable → Importar proyecto**. Se admiten PDF y DXF; el visor elige el formato automáticamente. **Guardar plano** añade la copia importada a la biblioteca. La importación valida el manifiesto, los nombres de hojas y los archivos y no extrae rutas arbitrarias del ZIP. Límites: proyecto de 100 MB, contenido de 250 MB y hasta 5.000 botones. La importación normal de XLSX admite 20 MB; el libro reunido puede alcanzar 100 MB.
 
-## Usuarios y permisos
+## Usuarios, roles y categorías
 
-Todos los usuarios registrados y activos pueden importar, añadir botones, asignar fichas o listados, registrar motores con fichas ya rellenadas y exportar proyectos. Guardar un plano requiere permisos de agregar o modificar. Los permisos de modificación y eliminación se mantienen independientes:
+El creador de un plano puede guardarlo y modificar sus botones, fichas, listados y Excel sin necesitar permisos globales adicionales. Un administrador puede hacerlo en cualquier plano. Los demás usuarios solo pueden consultar los planos compartidos autorizados; el servidor bloquea también las solicitudes directas de modificación, asignación, guardado y eliminación.
 
-| Acción | Permiso |
-| --- | --- |
-| Guardar un plano DXF | Cualquier permiso `add` o `change` de `plan`, `motor`, `workbookdocument` o `savedproject` |
-| Guardar un plano PDF | Los anteriores, o `add`/`change` de `pdfplan` o `pdfmarker` |
-| Editar datos y agregar filas/columnas de Excel | `mobileApp.change_workbookdocument` o `mobileApp.change_motor` |
-| Cambiar nombre o mover botones de un DXF | `mobileApp.change_plan` |
-| Eliminar un DXF | `mobileApp.delete_plan` |
-| Cambiar nombre o mover/eliminar botones de un PDF | `mobileApp.change_pdfplan` o `mobileApp.change_plan` |
-| Eliminar un PDF | `mobileApp.delete_pdfplan` o `mobileApp.delete_plan` |
-| Eliminar un botón DXF | `change_plan`, `delete_plan` o `delete_motor` |
-| Eliminar el listado original o un listado protegido | Permiso de eliminar el plano PDF/DXF correspondiente |
-| Eliminar un listado adicional | Su creador o una cuenta con permiso de eliminar el plano |
-| Eliminar un botón PDF | `change_pdfplan`, `change_plan`, `delete_pdfplan`, `delete_plan`, `delete_pdfmarker` o `delete_motor` |
+**Administrar** abre `/administracion/`, un panel adaptable a celulares con tres secciones:
 
-Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor rechaza cambios de contenido y movimientos sin permiso. Todas las modificaciones requieren CSRF. No se cambian cuentas, contraseñas o permisos existentes.
+- **Roles de planos:** crear y editar roles, permitir consultar, exportar o crear planos y limitar el acceso a planos específicos. También permite asignar usuarios directamente.
+- **Grupos de usuarios:** reunir usuarios y asignar uno o más roles al grupo. Los permisos de sus roles se suman.
+- **Categorías y Excel:** crear categorías adicionales a Motores y conservar varios Excel permanentes por categoría, con una hoja seleccionada. Al añadir un botón aparece la opción de utilizar esos Excel; cada botón recibe una copia y conserva intacta la plantilla.
+
+Un usuario sin roles configurados conserva el acceso de consulta e importación de la instalación. Un grupo sin roles no concede acceso compartido ni creación. El creador siempre conserva el control de sus propios planos. Los roles nunca conceden edición de planos ajenos ni administración de usuarios. Solo son administradores las cuentas activas de superusuario o las cuentas de personal con el permiso `mobileApp.administer_application`; marcar únicamente «personal» no basta. El panel y las páginas de usuarios y grupos de Django aplican la misma restricción.
+
+## Actualizaciones pendientes de planos
+
+Antes de abrir un plano, la aplicación compara la versión conocida por ese dispositivo con el último guardado. En las copias descargadas de Drive también consulta la versión publicada del Excel y la configuración del plano.
+
+Si está desactualizado, aparece una advertencia roja con **Actualizar** y **Cancelar**. Actualizar obtiene el último plano, con sus botones y Excel. Una descarga de nube se valida antes de retirar el registro, el archivo y el libro antiguos; conserva las asignaciones de roles. Si falla la descarga o la validación, se mantiene la copia anterior. Cancelar vuelve a la biblioteca. Una actualización conocida pendiente continúa bloqueando la apertura si no se puede verificar la nube.
+
+La detección entre navegadores de la misma instalación funciona tanto con PDF como con DXF. Las instalaciones separadas utilizan el flujo de nube PDF/Excel existente y requieren la conexión de Drive para comprobar y descargar las versiones publicadas. El autor se conserva en el manifiesto del proyecto publicado: descargar un plano ajeno no convierte al lector en su creador. Las publicaciones antiguas sin autor identificable se abren para consulta y su gestión queda a cargo de un administrador.
 
 ## Actualizar la instalación y verificar
 
@@ -134,6 +134,7 @@ Los lectores ven los mismos documentos y pueden exportarlos, pero el servidor re
 .\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run
 .\.venv\Scripts\python.exe manage.py test mobileApp --noinput
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe scripts/management_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/multi_device_deletion_browser_smoke.py
@@ -150,3 +151,5 @@ Las pruebas usan bases de datos y archivos temporales. Cubren PDF/DXF, libros co
 `multi_device_deletion_browser_smoke.py` abre sesiones independientes, elimina PDF y DXF y comprueba su retirada de los visores, fichas y bibliotecas del otro dispositivo, incluida la recarga. También cubre consultas que llegan fuera de orden y fallos de conexión.
 
 `pdf_compatibility_browser_smoke.py` comprueba Chromium y WebKit con sesiones independientes, funciones JavaScript ausentes en la página y el worker y un PDF cuyo archivo en `media/` se ha eliminado. Abre la copia guardada, páginas giradas y escaneadas y verifica el zoom a 1280 píxeles. También comprueba el mensaje de archivo inaccesible y la reapertura posterior.
+
+La migración `0020` incorpora los roles, sus grupos, las plantillas permanentes de categorías y la identidad del autor de las copias de nube. `management_browser_smoke.py` verifica sesiones independientes, avisos de actualización PDF/DXF, el bloqueo de modificaciones ajenas y el panel administrativo en escritorio y móvil.

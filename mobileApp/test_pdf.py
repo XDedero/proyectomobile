@@ -312,54 +312,31 @@ class PdfModuleTests(TestCase):
         self.assertEqual(saved.revision, 1)
         self.assertEqual(bytes(saved.content), original)
 
-    def test_reader_can_import_place_and_assign_but_cannot_move_or_delete_saved_buttons(self):
+    def test_creator_can_move_and_delete_own_pdf_buttons(self):
         self.client.force_login(self.other)
         plan = self.import_plan()
         marker = self.create_marker(plan)
-        document = self.upload_excel()
-        assigned = self.client.post(marker['assign_url'], {
-            'workbook_id': document['id'],
-        }, content_type='application/json')
+        assigned = self.client.post(marker['assign_url'], {'file': excel_upload(), 'source_sheet': 'Equipos'})
         self.assertEqual(assigned.status_code, 200)
         copied_id = assigned.json()['marker']['workbook']['id']
-        self.assertNotEqual(copied_id, document['id'])
-        content = bytes(WorkbookDocument.objects.get(pk=copied_id).content)
-        copied = load_workbook(BytesIO(content))
-        try:
-            self.assertEqual(copied[assigned.json()['marker']['sheet_name']]['B2'].value, 15)
-        finally:
-            copied.close()
-        renamed = self.client.post(marker['update_url'], {'label': 'Motor asignado'}, content_type='application/json')
-        self.assertEqual(renamed.status_code, 200)
-        for data in ({'x': .8}, {'y': .2}, {'page': 1}):
-            self.assertEqual(self.client.post(marker['update_url'], data, content_type='application/json').status_code, 403)
-        self.assertEqual(self.client.post(marker['delete_url']).status_code, 403)
+        for data in ({'x': .8}, {'y': .2}, {'page': 1}, {'label': 'Motor asignado'}):
+            self.assertEqual(self.client.post(marker['update_url'], data, content_type='application/json').status_code, 200)
         saved = PdfMarker.objects.get(pk=marker['id'])
-        self.assertEqual((saved.page, saved.x, saved.y), (2, .25, .75))
-        self.assertEqual(saved.label, 'Motor asignado')
+        self.assertEqual((saved.page, saved.x, saved.y), (1, .8, .2))
         self.assertEqual(saved.workbook_id, copied_id)
+        self.assertEqual(self.client.post(marker['delete_url']).status_code, 200)
+        self.assertTrue(WorkbookDocument.objects.filter(pk=copied_id).exists())
 
-    def test_pdf_rename_and_delete_require_independent_permissions_even_for_importer(self):
+    def test_pdf_creator_can_rename_and_delete_without_legacy_permissions(self):
         self.client.force_login(self.other)
         plan = self.import_plan()
         marker = self.create_marker(plan)
         assigned = self.client.post(marker['assign_url'], {'file': excel_upload(), 'source_sheet': 'Equipos'})
         document_id = assigned.json()['marker']['workbook']['id']
         source_path = Path(PdfPlan.objects.get(pk=plan['id']).source.path)
-        self.assertEqual(self.client.post(plan['update_url'], {'name': 'Sala A'}, content_type='application/json').status_code, 403)
-        self.assertEqual(self.client.post(plan['delete_url']).status_code, 403)
-        self.other.user_permissions.add(Permission.objects.get(
-            content_type__app_label='mobileApp', codename='change_pdfplan',
-        ))
         renamed = self.client.post(plan['update_url'], {'name': 'Sala A'}, content_type='application/json')
         self.assertEqual(renamed.status_code, 200)
         self.assertEqual(self.client.get(plan['detail_url']).json()['name'], 'Sala A')
-        self.assertEqual(self.client.post(plan['delete_url']).status_code, 403)
-        self.other.user_permissions.clear()
-        self.other.user_permissions.add(Permission.objects.get(
-            content_type__app_label='mobileApp', codename='delete_pdfplan',
-        ))
-        self.assertEqual(self.client.post(plan['update_url'], {'name': 'Sala B'}, content_type='application/json').status_code, 403)
         with self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(self.client.post(plan['delete_url']).status_code, 200)
         self.assertFalse(PdfPlan.objects.filter(pk=plan['id']).exists())

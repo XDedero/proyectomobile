@@ -22,6 +22,7 @@ def new_cloud_key():
 
 
 class Plan(models.Model):
+    owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
     imported_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -51,6 +52,42 @@ class ButtonCategory(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CategoryWorkbook(models.Model):
+    category = models.ForeignKey(ButtonCategory, on_delete=models.CASCADE, related_name='templates')
+    name = models.CharField(max_length=255)
+    content = models.BinaryField()
+    sheet = models.CharField(max_length=31)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name', 'id']
+
+
+class PlanRole(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    description = models.CharField(max_length=255, blank=True)
+    can_view = models.BooleanField(default=True)
+    can_export = models.BooleanField(default=True)
+    can_create = models.BooleanField(default=True)
+    all_plans = models.BooleanField(default=True)
+    cad_plans = models.ManyToManyField(Plan, blank=True)
+    pdf_plans = models.ManyToManyField('PdfPlan', blank=True)
+    users = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='plan_roles')
+
+    class Meta:
+        ordering = ['name']
+        permissions = [('administer_application', 'Administrar usuarios, roles y categorías')]
+
+
+class PlanRoleGroup(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    roles = models.ManyToManyField(PlanRole, blank=True, related_name='role_groups')
+    users = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='plan_role_groups')
+
+    class Meta:
+        ordering = ['name']
 
 
 class ButtonSource(models.Model):
@@ -95,6 +132,7 @@ class Motor(ButtonSource):
 
 
 class PdfPlan(models.Model):
+    owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
     cloud_snapshot = models.CharField(max_length=64, unique=True, null=True, blank=True)
     cloud_origin = models.CharField(max_length=128, blank=True, db_index=True)

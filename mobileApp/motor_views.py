@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from .access import api_permissions
+from .access import api_permissions, can_edit_workbook
 from .models import SavedMotor, WorkbookDocument
 from .motor_service import inspect_motor, known_motor, motor_name, read_origin, stamp_origin
 from .pdf_views import error_response, json_body, workbook_data
@@ -65,6 +65,8 @@ def register_motor(request):
         else:
             data = json_body(request)
             document = get_object_or_404(WorkbookDocument, pk=positive_integer(data.get('workbook_id'), 'Ficha del motor'))
+            if not can_edit_workbook(request.user, document):
+                return error_response('Solo el creador del plano o un administrador puede registrar cambios en sus fichas.', 403)
             revision = positive_integer(data.get('revision'), 'Versión de la ficha')
             if revision != document.revision:
                 raise RegistrationConflict('La ficha cambió. Recárguela antes de registrar el motor.')

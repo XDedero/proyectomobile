@@ -27,40 +27,19 @@
         if (previousId && previousId !== user?.id) {
             window.planWorkflow?.close?.();
             window.pdfWorkflow?.reset?.();
+            window.planVersions?.reset();
             window.projectWorkspace?.reset();
             window.motorLibrary?.reset();
         }
         appState.user = user;
         const permissions = user?.permissions || {};
-        const canManagePlan = permissions.can_change_plan || permissions.can_change_pdf_plan
-            || permissions.can_save_plan || permissions.can_save_pdf_plan
-            || permissions.can_delete_plan || permissions.can_delete_pdf_plan;
-        const role = permissions.can_administer ? 'Administrador' : permissions.can_change_excel ? 'Editor de Excel' : canManagePlan ? 'Gestor de planos' : 'Consulta';
+        const role = permissions.can_administer ? 'Administrador' : 'Usuario de planos';
         document.getElementById('dropdownUserName').textContent = user?.username || '';
         document.getElementById('dropdownUserRole').textContent = role;
         document.getElementById('welcomeUserText').textContent = user ? `Bienvenido, ${user.display_name}` : '';
-        const permissionsSummary = [];
-        if (permissions.can_import) permissionsSummary.push('importar planos');
-        if (permissions.can_administer) {
-            document.getElementById('permissionSummary').textContent = 'Puede administrar la aplicación y gestionar planos y motores.';
-        } else if (!permissions.can_change_excel && !permissions.can_save_plan && !permissions.can_save_pdf_plan
-            && !permissions.can_change_plan && !permissions.can_change_pdf_plan
-            && !permissions.can_delete_plan && !permissions.can_delete_pdf_plan) {
-            document.getElementById('permissionSummary').textContent = 'Puede importar planos y verlos junto con los Excel de sus motores.';
-        } else {
-            if (permissions.can_import) permissionsSummary.push('importar planos');
-            if (permissions.can_assign && permissions.can_change_excel) permissionsSummary.push('asignar y editar Excel');
-            else if (permissions.can_assign) permissionsSummary.push('agregar botones y asignar Excel');
-            else if (permissions.can_change_excel) permissionsSummary.push('editar Excel');
-            const canChangePlan = permissions.can_change_plan || permissions.can_change_pdf_plan;
-            const canSavePlan = permissions.can_save_plan || permissions.can_save_pdf_plan;
-            if (canChangePlan && canSavePlan) permissionsSummary.push('modificar y guardar planos');
-            else if (canChangePlan) permissionsSummary.push('modificar planos');
-            else if (canSavePlan) permissionsSummary.push('guardar planos');
-            if (permissions.can_delete_plan || permissions.can_delete_pdf_plan) permissionsSummary.push('eliminar planos');
-            document.getElementById('permissionSummary').textContent = permissionsSummary.length
-                ? `Puede ${permissionsSummary.join(', ')}.` : '';
-        }
+        document.getElementById('permissionSummary').textContent = permissions.can_administer
+            ? 'Puede administrar usuarios, roles, grupos, categorías y todos los planos.'
+            : 'Puede guardar y modificar sus propios planos. El acceso a planos compartidos depende de sus roles.';
         btnGoToImportSection.hidden = !permissions.can_view;
         menuItemPlanos.hidden = !permissions.can_view;
         document.getElementById('btnAdminister').hidden = !permissions.can_administer;

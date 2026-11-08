@@ -21,7 +21,7 @@ from django.views.decorators.http import require_GET, require_POST
 from openpyxl import load_workbook
 
 from .dxf_service import import_dxf
-from .access import api_permissions, capabilities
+from .access import api_permissions, capabilities, visible_plans
 from .models import Motor, Plan, WorkbookDocument, SavedMotor
 
 
@@ -146,7 +146,7 @@ def plan_data(plan, detail=False):
 @require_GET
 @api_permissions()
 def plans(request):
-    return JsonResponse({'plans': [plan_data(plan) for plan in Plan.objects.all()]})
+    return JsonResponse({'plans': [plan_data(plan) for plan in visible_plans(request.user, Plan.objects.all())]})
 
 
 @require_POST

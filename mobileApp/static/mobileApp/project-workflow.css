@@ -57,3 +57,9 @@
 .fullscreen-plan-status.has-error { color: #fecaca; }
 .dxf-viewport.moving-markers .motor-target { cursor: grab; }
 .dxf-viewport.moving-markers .motor-target:active { cursor: grabbing; }
+.plan-update-overlay { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 1rem; background: #12223bcc; }
+.plan-update-overlay[hidden] { display: none; }
+.plan-update-card { width: min(100%, 520px); max-height: 92dvh; overflow: auto; padding: 1.5rem; border-radius: 18px; background: white; box-shadow: 0 20px 70px #0005; }
+.plan-update-warning { color: #ac1827; border: 1px solid #f0a9b1; background: #fff0f2; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+.plan-update-warning h2 { font-size: 1.25rem; margin: .5rem 0; }
+.plan-update-warning p { margin: 0; }

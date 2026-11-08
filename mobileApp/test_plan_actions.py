@@ -40,29 +40,24 @@ class PlanActionTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content[:300])
         return response.json()
 
-    def test_project_save_requires_add_or_change_permissions_including_motor_editors(self):
+    def test_creator_can_save_both_formats_without_legacy_permissions(self):
         for kind in ('pdf', 'dxf'):
             plan = self.import_plan(kind)
-            self.assertEqual(self.post(plan['save_project_url']).status_code, 403)
+            self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
             self.assertEqual(self.client.get(plan['export_project_url']).status_code, 200)
-            self.assertEqual(SavedProject.objects.count(), 0)
-            for permission in ('add_plan', 'change_plan', 'add_motor', 'change_motor', 'change_workbookdocument', 'add_savedproject'):
-                with self.subTest(kind=kind, permission=permission):
-                    self.grant(permission)
-                    capabilities = self.client.get(reverse('auth_session')).json()['user']['permissions']
-                    self.assertTrue(capabilities['can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'])
-                    self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+            self.assertTrue(SavedProject.objects.exists())
+            self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+            self.assertEqual(SavedProject.objects.count(), 1)
             SavedProject.objects.all().delete()
-            self.grant()
 
-    def test_pdf_specific_add_and_change_permissions_do_not_allow_saving_dxf(self):
+    def test_legacy_format_permissions_do_not_limit_creator_save_rights(self):
         pdf, cad = self.import_plan('pdf'), self.import_plan('dxf')
         for permission in ('add_pdfplan', 'change_pdfplan', 'add_pdfmarker', 'change_pdfmarker'):
             self.grant(permission)
             self.assertEqual(self.post(pdf['save_project_url']).status_code, 200)
-            self.assertEqual(self.post(cad['save_project_url']).status_code, 403)
+            self.assertEqual(self.post(cad['save_project_url']).status_code, 200)
 
-    def test_plan_deletion_requires_delete_permission_and_removes_saved_copy_and_file(self):
+    def test_plan_deletion_by_creator_removes_saved_copy_and_file(self):
         for kind, model, children in (('pdf', PdfPlan, PdfMarker), ('dxf', Plan, Motor)):
             with self.subTest(kind=kind):
                 self.client.force_login(self.reader)
@@ -73,10 +68,9 @@ class PlanActionTests(TestCase):
                 self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
                 source = Path(model.objects.get(pk=plan['id']).source.path)
                 self.grant('change_plan')
-                self.assertEqual(self.post(plan['delete_url']).status_code, 403)
                 self.assertTrue(source.exists())
                 self.grant('delete_pdfplan' if kind == 'pdf' else 'delete_plan')
-                self.assertEqual(self.post(plan['save_project_url']).status_code, 403)
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
                 saved = self.client.get(reverse('saved_projects')).json()['plans'][0]
                 self.assertEqual(saved['delete_url'], plan['delete_url'])
                 with self.captureOnCommitCallbacks(execute=True):
@@ -107,7 +101,6 @@ class PlanActionTests(TestCase):
                 marker = plan['motors'][0]
                 model, workbook_id = Motor, marker['excel']['id']
             count = model.objects.filter(plan_id=plan['id']).count()
-            self.assertEqual(self.post(marker['delete_url']).status_code, 403)
             self.grant('delete_pdfmarker' if kind == 'pdf' else 'delete_motor')
             self.assertEqual(self.post(marker['delete_url']).status_code, 200)
             self.assertFalse(model.objects.filter(pk=marker['id']).exists())

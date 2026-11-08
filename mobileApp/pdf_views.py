@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from pypdf import PdfReader
 
-from .access import api_permissions, capabilities
+from .access import api_permissions, capabilities, can_edit_workbook, visible_plans
 from .models import Motor, PdfMarker, PdfPlan, WorkbookDocument, SavedMotor
 from .views import validate_excel
 from .workbook_service import document_sheets, edited_document, positive_integer, read_cells
@@ -49,7 +49,7 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
         'save_url': reverse('workbook_save', args=[document.pk]),
         'download_url': reverse('workbook_download', args=[document.pk]),
         'csv_url': reverse('workbook_csv', args=[document.pk]),
-        'can_edit': bool(user is not None and not snapshot and capabilities(user)['can_change_excel']),
+        'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document)),
         'is_motor': bool(document.is_motor or (document.plan_mode and sheet_name and context != 'listing')),
     }
     if sheets:
@@ -128,7 +128,7 @@ def pdf_data(plan, *, detail=True):
 @require_GET
 @api_permissions()
 def list_pdf_plans(request):
-    return JsonResponse({'plans': [pdf_data(plan, detail=False) for plan in PdfPlan.objects.order_by('-imported_at')]})
+    return JsonResponse({'plans': [pdf_data(plan, detail=False) for plan in visible_plans(request.user, PdfPlan.objects.order_by('-imported_at'))]})
 
 
 @require_POST

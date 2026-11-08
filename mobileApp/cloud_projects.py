@@ -14,7 +14,7 @@ from zipfile import BadZipFile, ZipFile
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 from .models import PdfPlan, SavedProject
 from .project_service import MAX_PROJECT_BYTES, finite, import_shared_project, validate_pdf_source
@@ -185,13 +185,16 @@ def shared_publish_target(plan_id, pdf_id, source):
     return project
 
 
-def open_cloud_project(pdf_id, user):
+def open_cloud_project(pdf_id, user, replace_plan=None):
     from .views import validate_excel
 
     project, source, content, metadata, portable, warning = read_cloud_snapshot(pdf_id)
     version = workbook_version(project)
     identity = snapshot_identity(project, metadata, portable)
     previous = PdfPlan.objects.filter(cloud_snapshot=identity).first()
+    if replace_plan and previous and previous.pk != replace_plan.pk:
+        # Reuse an already validated download, preserving role assignments.
+        _replace_cached_plan(replace_plan, previous)
     if previous:
         if not previous.cloud_workbook_version:
             PdfPlan.objects.filter(pk=previous.pk).update(cloud_origin=pdf_id, cloud_workbook_version=version)
@@ -233,19 +236,47 @@ def open_cloud_project(pdf_id, user):
     ]}
     if portable is not None:
         manifest = portable
-    plan = PdfPlan(name=name[:255], size=len(source), pages=pages, imported_by=user, cloud_snapshot=identity,
+    owner = (portable or {}).get('owner_username', '')
+    if not isinstance(owner, str) or len(owner) > 150:
+        raise ValidationError('El creador del plano publicado no es válido.')
+    plan = PdfPlan(name=name[:255], size=len(source), pages=pages, imported_by=user, owner_username=owner, cloud_snapshot=identity,
                    cloud_origin=pdf_id, cloud_workbook_version=version)
     if hasattr(plan, 'source_content'):
         plan.source_content = source
     try:
-        import_shared_project(plan, 'pdf', source, None, markers,
-                              {'w1': {'name': excel_name, 'content': content, 'sheets': sheets}}, manifest, user)
+        with transaction.atomic():
+            import_shared_project(plan, 'pdf', source, None, markers,
+                                  {'w1': {'name': excel_name, 'content': content, 'sheets': sheets}}, manifest, user)
+            if replace_plan and replace_plan.pk != plan.pk:
+                _replace_cached_plan(replace_plan, plan)
     except Exception as exc:
         if plan.source:
             plan.source.delete(save=False)
         if isinstance(exc, IntegrityError):
             previous = PdfPlan.objects.filter(cloud_snapshot=identity).first()
             if previous:
+                if replace_plan and previous.pk != replace_plan.pk:
+                    _replace_cached_plan(replace_plan, previous)
                 return previous, warning
         raise
     return plan, warning
+
+
+@transaction.atomic
+def _replace_cached_plan(old, new):
+    from .models import PlanRole
+    from .project_views import clear_plan_files
+    from .project_service import export_project
+    if old.pk == new.pk or not PdfPlan.objects.filter(pk=old.pk).exists():
+        return
+    for role in PlanRole.objects.filter(pdf_plans=old):
+        role.pdf_plans.add(new)
+    saved = SavedProject.objects.filter(pdf_plan=old).first()
+    if saved:
+        SavedProject.objects.update_or_create(pdf_plan=new, defaults={
+            'name': new.name, 'content': export_project('pdf', new), 'saved_by': saved.saved_by,
+            'cloud_status': 'synced', 'cloud_error': ''})
+    original_key = old.cloud_key
+    clear_plan_files('pdf', old)
+    PdfPlan.objects.filter(pk=new.pk).update(cloud_key=original_key)
+    new.cloud_key = original_key

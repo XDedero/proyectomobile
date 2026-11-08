@@ -106,6 +106,11 @@
             <button type="button" id="btnNewButtonBlank" class="btn btn-outline-success">Formato predeterminado</button>
             <button type="button" id="btnNewButtonImport" class="btn btn-success">Importar Excel o CSV</button>
           </div>
+          <div id="newButtonCategoryTemplates" class="mt-3" hidden>
+            <label for="newButtonTemplate" class="form-label">Excel permanente de la categoría</label>
+            <select id="newButtonTemplate" class="form-select mb-2"></select>
+            <button type="button" id="btnNewButtonCategoryTemplate" class="btn btn-outline-primary">Usar Excel de esta categoría</button>
+          </div>
           <input type="file" id="newButtonFile" accept=".xlsx,.csv" hidden>
           <button type="button" id="btnNewButtonBack" class="btn btn-link px-0 mt-2">Volver a descripción</button>
         </div>`);
@@ -181,6 +186,7 @@
         try {
             const data = await load(context);
             if (newButton?.context === context) {
+                newButton.categories = data.button_categories;
                 for (const item of data.button_categories) byId('newButtonCategory').append(new Option(item.name, item.id));
                 if (!data.button_categories.length) message(newButtonModal, 'Un administrador debe crear una categoría primero.', true);
             }
@@ -199,7 +205,7 @@
         try {
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
-            draft.result = { origin, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
+            draft.result = { origin, template_id: Number(byId('newButtonTemplate').value) || undefined, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
             await hide(newButtonModal);
         } catch (error) {
             if (newButton === draft) message(newButtonModal, error.message, true);
@@ -438,6 +444,10 @@
             return;
         }
         message(newButtonModal, '');
+        const category = newButton?.categories?.find(item => item.id === byId('newButtonCategory').value);
+        byId('newButtonTemplate').replaceChildren();
+        for (const item of category?.templates || []) byId('newButtonTemplate').append(new Option(`${item.name} · ${item.sheet}`, item.id));
+        byId('newButtonCategoryTemplates').hidden = !category?.templates?.length;
         byId('newButtonCategoryStep').hidden = true;
         byId('newButtonDescriptionStep').hidden = false;
     };
@@ -457,6 +467,7 @@
         byId('newButtonSourceStep').hidden = true;
         byId('newButtonDescriptionStep').hidden = false;
     };
+    byId('btnNewButtonCategoryTemplate').onclick = () => chooseNewButtonSource('category');
     byId('btnNewButtonBlank').onclick = () => chooseNewButtonSource('blank');
     byId('btnNewButtonImport').onclick = () => byId('newButtonFile').click();
     byId('newButtonFile').onchange = event => {
