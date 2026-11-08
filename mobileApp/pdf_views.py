@@ -89,6 +89,8 @@ def marker_data(marker):
         workbook = workbook_data(marker.workbook, sheets=False, sheet_name=marker.sheet_name) if marker.workbook_id and (marker.sheet_name or not marker.workbook.plan_mode) else None
     return {
         'id': marker.pk, 'page': marker.page, 'x': marker.x, 'y': marker.y, 'label': marker.label,
+        'button_color': marker.button_color, 'show_description': marker.show_description,
+        'details_url': reverse('button_details', args=['pdf', marker.pk]),
         'sheet_name': marker.sheet_name,
         'category_id': marker.category_id,
         'category_name': marker.category.name if marker.category_id else '',
@@ -246,7 +248,7 @@ def create_marker(request, plan_id):
         values, category, origin, upload = new_button_options(request)
         data = validated_marker(plan, values)
         with transaction.atomic():
-            marker = PdfMarker.objects.create(plan=plan, category=category, **data)
+            marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False), **data)
             initialize_button(marker, request.user, origin, upload)
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
@@ -389,6 +391,9 @@ def workbook_save(request, workbook_id):
             )
             if not changed:
                 return error_response('Otro usuario modificó este Excel. Recargue el libro antes de guardar.', status=409)
+            from .button_descriptions import refresh_linked_descriptions
+            document.content, document.revision = content, revision + 1
+            refresh_linked_descriptions(document)
         document.refresh_from_db()
         try:
             from .terminal_monitor import on_workbook_saved

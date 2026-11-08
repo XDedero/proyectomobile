@@ -199,7 +199,7 @@ def delete_cloud_project(request, pdf_id):
 @require_POST
 @api_permissions()
 def save_project(request, kind, plan_id):
-    from .plan_workbook import materialize_button_sources
+    from .plan_workbook import materialize_button_sources, organize_project_sheets
     from .terminal_monitor import queue_saved_project_sync
 
     permission = 'can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'
@@ -208,7 +208,8 @@ def save_project(request, kind, plan_id):
     plan = get_plan(kind, plan_id)
     try:
         with transaction.atomic():
-            materialize_button_sources(plan, request.user)
+            layout_changed = materialize_button_sources(plan, request.user)
+            layout_changed = organize_project_sheets(plan, request.user) or layout_changed
             content = export_project(kind, plan)
             saved, _ = SavedProject.objects.update_or_create(
                 **{'pdf_plan' if kind == 'pdf' else 'cad_plan': plan},
@@ -218,7 +219,11 @@ def save_project(request, kind, plan_id):
     except (ValidationError, OSError) as exc:
         return error_response(exc)
     saved.refresh_from_db(fields=['cloud_status', 'cloud_error'])
-    return JsonResponse({'saved': saved_data(saved, request.user), 'saved_at': saved.saved_at.isoformat()})
+    result = {'saved': saved_data(saved, request.user), 'saved_at': saved.saved_at.isoformat()}
+    if layout_changed:
+        from .views import plan_data
+        result['plan'] = pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True)
+    return JsonResponse(result)
 
 
 def project_file(content, name):
@@ -295,7 +300,10 @@ def assign_plan_listing(request, kind, plan_id):
     try:
         upload = request.FILES.get('file')
         if upload is not None:
-            add_listing(plan, request.user, upload)
+            if request.POST.get('action') == 'inspect':
+                from .button_import import inspect_button_file
+                return JsonResponse(inspect_button_file(upload, request.POST.get('source_sheet'), preview=True))
+            add_listing(plan, request.user, upload, request.POST.get('source_sheet'))
         else:
             data = json_body(request)
             if data.get('action') == 'delete':
@@ -317,7 +325,7 @@ def assign_plan_listing(request, kind, plan_id):
 
 @api_permissions()
 def plan_workbook(request, kind, plan_id):
-    from .plan_workbook import ensure_workbook, import_workbook, initialize_marker, markers, workspace_data, WorkbookConflict
+    from .plan_workbook import empty_workbook, ensure_workbook, import_workbook, initialize_marker, markers, workspace_data, WorkbookConflict
     from .views import validate_excel, plan_data
     if request.method not in ('GET', 'POST'):
         from django.http import HttpResponseNotAllowed
@@ -329,10 +337,11 @@ def plan_workbook(request, kind, plan_id):
             upload = request.FILES.get('file')
             if upload is not None:
                 validate_excel(upload)
-                import_workbook(plan, upload.name, upload.read(), request.user)
+                import_workbook(plan, upload.name, upload.read(), request.user,
+                                first_as_listing=request.POST.get('first_as_listing') == 'true')
             elif json_body(request).get('action') == 'template':
                 if document.plan_mode != 'template':
-                    import_workbook(plan, 'Excel del plano.xlsx', listing_template(9), request.user)
+                    import_workbook(plan, 'Excel del plano.xlsx', empty_workbook(), request.user)
                     document.refresh_from_db()
                     document.plan_mode = 'template'
                     document.save(update_fields=['plan_mode'])

@@ -1,0 +1,7 @@
+.button-details .modal-body { max-height: min(57dvh, 26rem); overflow-y: auto; }
+.button-details .modal-footer { flex: 0 0 auto; }
+.button-details-list > div { display: grid; grid-template-columns: minmax(6rem, 36%) 1fr; gap: .75rem; padding: .45rem 0; border-bottom: 1px solid #e5eaf0; }
+.button-details-list > div:last-child { border-bottom: 0; }
+.button-details-list dt, .button-details-list dd { overflow-wrap: anywhere; }
+.button-details-list dd { margin: 0; white-space: pre-wrap; }
+.button-details-edit-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; align-items: start; gap: .4rem; margin-bottom: .45rem; }

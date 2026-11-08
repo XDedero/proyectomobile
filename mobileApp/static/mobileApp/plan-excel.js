@@ -24,10 +24,21 @@
           <button type="button" id="btnPlanExcelImport" class="btn btn-success"><i class="bi bi-folder2-open" aria-hidden="true"></i> Importar Excel completo</button>
         </div>
         <input type="file" id="planWorkbookInput" accept=".xlsx" hidden>
-        <p class="small text-muted mt-2">La primera hoja será el listado. Los campos de las fichas estándar se ajustan cuando se pueden combinar sin perder datos.</p>
+        <p class="small text-muted mt-2">Puedes elegir una hoja como listado desde «Añadir listado».</p>
         <a id="downloadPlanWorkbook" class="btn btn-outline-secondary w-100" download>Exportar Excel completo</a>`);
     const sheetModal = modal('excelSheetAssignment', 'Configurar botón', `
         <p id="sheetAssignmentName" class="small fw-semibold text-break"></p>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" id="btnButtonNameOptions" class="btn btn-outline-secondary btn-sm">Cambiar nombre</button>
+          <button type="button" id="btnButtonAppearanceOptions" class="btn btn-outline-secondary btn-sm">Apariencia</button>
+        </div>
+        <div class="border rounded p-2 mb-3">
+          <div class="form-check form-switch mb-2">
+            <input type="checkbox" class="form-check-input" id="sheetButtonDescriptionEnabled">
+            <label class="form-check-label" for="sheetButtonDescriptionEnabled">Mostrar descripción (opcional)</label>
+          </div>
+          <button type="button" id="btnButtonDetailsOptions" class="btn btn-outline-secondary btn-sm">Editar descripciones</button>
+        </div>
         <label class="form-label small" for="sheetButtonCategory">Categoría del botón</label>
         <div class="input-group mb-3">
           <select id="sheetButtonCategory" class="form-select"></select>
@@ -54,30 +65,23 @@
           <button type="button" id="btnConfirmButtonWorkbook" class="btn btn-success">Incorporar y vincular hoja</button>
         </div>
         <p id="sharedMotorSheetHint" class="small text-muted mt-2"></p>
-        <div id="sheetMarkerRename" class="border-top pt-3 mt-3" hidden>
-          <label class="form-label small" for="sheetMarkerLabel">Nombre del botón</label>
-          <div class="input-group mb-2"><input id="sheetMarkerLabel" class="form-control" maxlength="120"><button type="button" id="btnSheetMarkerRename" class="btn btn-outline-secondary">Cambiar</button></div>
-          <div class="border rounded-2 p-2 bg-light">
-            <div class="form-check form-switch mb-1">
-              <input class="form-check-input" type="checkbox" id="sheetMarkerHasArea">
-              <label class="form-check-label small fw-semibold" for="sheetMarkerHasArea">Área de cobertura circular</label>
-            </div>
-            <div id="sheetMarkerAreaControls" class="pt-2 border-top mt-1" style="display:none;">
-              <div class="d-flex justify-content-between small text-muted"><span>Ancho (horizontal):</span><span id="sheetValRx" class="fw-bold">5%</span></div>
-              <input type="range" class="form-range mb-1" id="sheetRadiusX" min="1" max="50" step="0.5" value="5">
-              <div class="d-flex justify-content-between small text-muted"><span>Alto (vertical):</span><span id="sheetValRy" class="fw-bold">5%</span></div>
-              <input type="range" class="form-range mb-2" id="sheetRadiusY" min="1" max="50" step="0.5" value="5">
-              <button type="button" id="btnSaveSheetArea" class="btn btn-sm btn-outline-primary w-100">Guardar área</button>
-            </div>
-          </div>
-        </div>`);
+        `);
     const listingsModal = modal('excelListingManager', 'Listados de motores', `
         <div id="planListingsRows" class="excel-listing-rows mb-3"></div>
-        <div class="excel-choice-actions mb-3">
-          <button type="button" id="btnAddPlanListing" class="btn btn-success">Agregar listado</button>
-          <button type="button" id="btnImportPlanListing" class="btn btn-outline-success">Importar listado</button>
+        <button type="button" id="btnAddPlanListing" class="btn btn-success mb-3">Añadir listado</button>
+        <div id="planListingOptions" class="mb-3" hidden>
+          <p class="small fw-semibold mb-2">Origen del listado</p>
+          <div class="excel-choice-actions">
+            <button type="button" id="btnDefaultPlanListing" class="btn btn-outline-success">Formato predeterminado</button>
+            <button type="button" id="btnImportPlanListing" class="btn btn-success">Importar Excel o CSV</button>
+          </div>
+          <input type="file" id="planListingFileInput" accept=".xlsx,.csv" hidden>
+          <div id="planListingImport" class="mt-3" hidden>
+            <label class="form-label small" for="planListingSourceSheet">Hoja que se añadirá como listado</label>
+            <select id="planListingSourceSheet" class="form-select mb-2"></select>
+            <button type="button" id="btnConfirmPlanListing" class="btn btn-success">Añadir hoja</button>
+          </div>
         </div>
-        <input type="file" id="planListingFileInput" accept=".xlsx" hidden>
         <label class="form-label small" for="planAdditionalListingSheet">Otra hoja del libro como listado</label>
         <div class="input-group mb-3"><select id="planAdditionalListingSheet" class="form-select"></select><button type="button" id="btnAddExistingListing" class="btn btn-outline-success">Agregar hoja</button></div>
         <label class="form-label small" for="planPrimaryListingSheet">Hoja del listado original</label>
@@ -88,6 +92,14 @@
           <select id="newButtonCategory" class="form-select mb-3"></select>
           <button type="button" id="btnNewButtonNext" class="btn btn-success">Continuar</button>
         </div>
+        <div id="newButtonDescriptionStep" hidden>
+          <p class="form-label">¿Añadir una descripción al botón?</p>
+          <div class="excel-choice-actions">
+            <button type="button" id="btnNewButtonWithDescription" class="btn btn-success">Con descripción</button>
+            <button type="button" id="btnNewButtonWithoutDescription" class="btn btn-outline-secondary">Sin descripción</button>
+          </div>
+          <button type="button" id="btnNewButtonBackCategory" class="btn btn-link px-0 mt-2">Volver a categoría</button>
+        </div>
         <div id="newButtonSourceStep" hidden>
           <p class="form-label">Origen de la ficha</p>
           <div class="excel-choice-actions">
@@ -95,7 +107,7 @@
             <button type="button" id="btnNewButtonImport" class="btn btn-success">Importar Excel o CSV</button>
           </div>
           <input type="file" id="newButtonFile" accept=".xlsx,.csv" hidden>
-          <button type="button" id="btnNewButtonBack" class="btn btn-link px-0 mt-2">Volver a categoría</button>
+          <button type="button" id="btnNewButtonBack" class="btn btn-link px-0 mt-2">Volver a descripción</button>
         </div>`);
     let newButton = null;
 
@@ -160,6 +172,7 @@
         if (!context) return null;
         const selection = new Promise(resolve => { newButton = { context, resolve, result: null }; });
         byId('newButtonCategoryStep').hidden = false;
+        byId('newButtonDescriptionStep').hidden = true;
         byId('newButtonSourceStep').hidden = true;
         byId('newButtonCategory').replaceChildren(new Option('Elija una categoría', ''));
         message(newButtonModal, '');
@@ -186,7 +199,7 @@
         try {
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
-            draft.result = { origin, category_id: byId('newButtonCategory').value, file: upload };
+            draft.result = { origin, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
             await hide(newButtonModal);
         } catch (error) {
             if (newButton === draft) message(newButtonModal, error.message, true);
@@ -251,25 +264,8 @@
         byId('buttonWorkbookImport').hidden = true;
         message(sheetModal, ''); sheetModal.controller.show(); busy(sheetModal, true);
         byId('sheetAssignmentName').textContent = marker.label || marker.name || `Botón ${marker.id}`;
-        byId('sheetMarkerRename').hidden = kind !== 'pdf';
-        byId('sheetMarkerLabel').value = marker.label || '';
+        byId('sheetButtonDescriptionEnabled').checked = marker.show_description === true;
 
-        // Cargar parámetros de área en el modal
-        const hasArea = Boolean(marker.has_area);
-        const rx = marker.area_radius_x ? Math.round(marker.area_radius_x * 1000) / 10 : 5;
-        const ry = marker.area_radius_y ? Math.round(marker.area_radius_y * 1000) / 10 : rx;
-        const chk = byId('sheetMarkerHasArea');
-        const sec = byId('sheetMarkerAreaControls');
-        const slX = byId('sheetRadiusX');
-        const slY = byId('sheetRadiusY');
-        const valX = byId('sheetValRx');
-        const valY = byId('sheetValRy');
-        if (chk) {
-            chk.checked = hasArea;
-            if (sec) sec.style.display = hasArea ? 'block' : 'none';
-            if (slX) { slX.value = rx; if (valX) valX.textContent = `${rx}%`; }
-            if (slY) { slY.value = ry; if (valY) valY.textContent = `${ry}%`; }
-        }
         try {
             const data = await load(assignment);
             const select = byId('planMotorSheet');
@@ -368,9 +364,28 @@
     async function listings() {
         if (!(await window.workbookEditor.requestClose())) return;
         listingTarget = target(); if (!listingTarget) return;
+        const context = listingTarget;
+        byId('planListingImport').hidden = true;
+        byId('planListingOptions').hidden = Boolean(context.plan.listings?.length);
+        byId('btnAddPlanListing').hidden = !byId('planListingOptions').hidden;
         message(listingsModal, ''); listingsModal.controller.show(); busy(listingsModal, true);
-        try { renderListings(listingTarget, await load(listingTarget)); }
+        try { renderListings(context, await load(context)); }
         catch (error) { message(listingsModal, error.message, true); }
+        finally { busy(listingsModal, false); }
+    }
+    async function previewListing(file) {
+        const context = listingTarget;
+        if (!valid(context)) return;
+        busy(listingsModal, true);
+        byId('planListingImport').hidden = true;
+        try {
+            const result = await request(context.plan.assign_listing_url, { action: 'inspect' }, file);
+            if (context !== listingTarget || !valid(context)) return;
+            context.upload = file;
+            byId('planListingSourceSheet').replaceChildren(...result.sheets.map(name => new Option(name, name)));
+            byId('planListingImport').hidden = false;
+            message(listingsModal, '');
+        } catch (error) { message(listingsModal, error.message, true); }
         finally { busy(listingsModal, false); }
     }
     async function changeListing(values, file) {
@@ -424,11 +439,23 @@
         }
         message(newButtonModal, '');
         byId('newButtonCategoryStep').hidden = true;
-        byId('newButtonSourceStep').hidden = false;
+        byId('newButtonDescriptionStep').hidden = false;
+    };
+    for (const [id, enabled] of [['btnNewButtonWithDescription', true], ['btnNewButtonWithoutDescription', false]]) {
+        byId(id).onclick = () => {
+            if (!newButton) return;
+            newButton.showDescription = enabled;
+            byId('newButtonDescriptionStep').hidden = true;
+            byId('newButtonSourceStep').hidden = false;
+        };
+    }
+    byId('btnNewButtonBackCategory').onclick = () => {
+        byId('newButtonDescriptionStep').hidden = true;
+        byId('newButtonCategoryStep').hidden = false;
     };
     byId('btnNewButtonBack').onclick = () => {
         byId('newButtonSourceStep').hidden = true;
-        byId('newButtonCategoryStep').hidden = false;
+        byId('newButtonDescriptionStep').hidden = false;
     };
     byId('btnNewButtonBlank').onclick = () => chooseNewButtonSource('blank');
     byId('btnNewButtonImport').onclick = () => byId('newButtonFile').click();
@@ -449,51 +476,49 @@
     byId('btnConfirmButtonWorkbook').onclick = () => {
         if (assignment?.upload) linkSheet({ action: 'stage', source_sheet: byId('buttonWorkbookSheet').value }, assignment.upload);
     };
-    byId('btnSheetMarkerRename').onclick = async () => {
-        if (!valid(assignment)) return;
+    byId('sheetButtonDescriptionEnabled').onchange = async event => {
+        const context = assignment;
+        if (!valid(context)) return;
+        const enabled = event.target.checked;
+        busy(sheetModal, true);
         try {
-            const result = await request(assignment.marker.update_url, { label: byId('sheetMarkerLabel').value });
-            Object.assign(assignment.marker, result.marker);
-            await window.pdfWorkflow.select(assignment.marker.id);
-            window.projectWorkspace.dirty(); message(sheetModal, 'Nombre actualizado.');
-        } catch (error) { message(sheetModal, error.message, true); }
-    };
-    byId('sheetMarkerHasArea').onchange = () => {
-        const active = byId('sheetMarkerHasArea').checked;
-        byId('sheetMarkerAreaControls').style.display = active ? 'block' : 'none';
-        if (assignment && window.pdfWorkflow?.viewer) {
-            window.pdfWorkflow.viewer.previewMarkerArea(assignment.marker.id, active, Number(byId('sheetRadiusX').value) / 100, Number(byId('sheetRadiusY').value) / 100);
-        }
-    };
-    byId('sheetRadiusX').oninput = () => {
-        byId('sheetValRx').textContent = `${byId('sheetRadiusX').value}%`;
-        if (assignment && window.pdfWorkflow?.viewer) {
-            window.pdfWorkflow.viewer.previewMarkerArea(assignment.marker.id, true, Number(byId('sheetRadiusX').value) / 100, Number(byId('sheetRadiusY').value) / 100);
-        }
-    };
-    byId('sheetRadiusY').oninput = () => {
-        byId('sheetValRy').textContent = `${byId('sheetRadiusY').value}%`;
-        if (assignment && window.pdfWorkflow?.viewer) {
-            window.pdfWorkflow.viewer.previewMarkerArea(assignment.marker.id, true, Number(byId('sheetRadiusX').value) / 100, Number(byId('sheetRadiusY').value) / 100);
-        }
-    };
-    byId('btnSaveSheetArea').onclick = async () => {
-        if (!valid(assignment)) return;
-        try {
-            const active = byId('sheetMarkerHasArea').checked;
-            const rx = Number(byId('sheetRadiusX').value) / 100;
-            const ry = Number(byId('sheetRadiusY').value) / 100;
-            const result = await request(assignment.marker.update_url, { has_area: active, area_radius_x: rx, area_radius_y: ry });
-            Object.assign(assignment.marker, result.marker);
-            if (window.pdfWorkflow?.viewer) {
-                window.pdfWorkflow.viewer.previewMarkerArea(assignment.marker.id, active, rx, ry);
+            const previous = await request(context.marker.details_url);
+            if (!valid(context)) return;
+            const result = await request(context.marker.details_url, {
+                name: previous.name, color: previous.color, show_description: enabled,
+            });
+            if (!valid(context)) return;
+            Object.assign(context.marker, result.button);
+            window.projectWorkspace.dirty();
+            message(sheetModal, (enabled ? 'Descripción activada.' : 'Descripción desactivada. Sus datos se conservan.') + ' Pulsa «Guardar plano» para publicarlo.');
+        } catch (error) {
+            if (valid(context)) {
+                event.target.checked = context.marker.show_description === true;
+                message(sheetModal, error.message, true);
             }
-            window.projectWorkspace.dirty(); message(sheetModal, 'Área de cobertura guardada.');
-        } catch (error) { message(sheetModal, error.message, true); }
+        } finally { if (valid(context)) busy(sheetModal, false); }
     };
-    byId('btnAddPlanListing').onclick = () => changeListing({ action: 'add' });
+    async function editButtonOption(mode) {
+        const context = assignment;
+        if (!valid(context)) return;
+        await hide(sheetModal);
+        if (!valid(context)) return;
+        if (context.kind === 'pdf') window.pdfWorkflow.editButtonDetails(context.marker, mode);
+        else window.planWorkflow.editButtonDetails(mode);
+    }
+    byId('btnButtonNameOptions').onclick = () => editButtonOption('name');
+    byId('btnButtonAppearanceOptions').onclick = () => editButtonOption('appearance');
+    byId('btnButtonDetailsOptions').onclick = () => editButtonOption('description');
+    byId('btnAddPlanListing').onclick = () => {
+        byId('planListingOptions').hidden = false;
+        byId('btnAddPlanListing').hidden = true;
+    };
+    byId('btnDefaultPlanListing').onclick = () => changeListing({ action: 'add' });
     byId('btnImportPlanListing').onclick = () => byId('planListingFileInput').click();
-    byId('planListingFileInput').onchange = event => { const file = event.target.files[0]; event.target.value = ''; if (file) changeListing(undefined, file); };
+    byId('planListingFileInput').onchange = event => { const file = event.target.files[0]; event.target.value = ''; if (file) previewListing(file); };
+    byId('btnConfirmPlanListing').onclick = () => {
+        if (listingTarget?.upload) changeListing({ action: 'import', source_sheet: byId('planListingSourceSheet').value }, listingTarget.upload);
+    };
     byId('btnChangePrimaryListing').onclick = () => { const sheet = byId('planPrimaryListingSheet').value; if (sheet) changeListing({ action: 'set_primary', sheet }); };
     byId('btnAddExistingListing').onclick = () => { const sheet = byId('planAdditionalListingSheet').value; if (sheet) changeListing({ action: 'add_sheet', sheet }); };
     for (const prefix of ['Cad', 'Pdf']) {
@@ -506,7 +531,7 @@
         view.id = `btn${prefix}WorkbookSheets`;
         view.textContent = 'Ver hojas de Excel'; view.onclick = openWorkbook;
         button.before(view);
-        byId(`btn${prefix}AssignListing`).textContent = 'Gestionar listados';
+        byId(`btn${prefix}AssignListing`).textContent = 'Añadir listado';
         byId(`btn${prefix}OpenListing`).textContent = 'Ver listados';
     }
     const fullButton = document.createElement('button'); fullButton.type = 'button'; fullButton.textContent = 'Excel del plano'; fullButton.id = 'fullscreenManageWorkbook';

@@ -76,8 +76,18 @@ class DxfViewer {
             group.append(title, bounds, circle, label);
             layer.append(group);
             this.pins.set(motor.id, { group, circle, label, motor });
+            this.updateButtonAppearance(motor);
         }
         this.update();
+    }
+
+    updateButtonAppearance(motor) {
+        const pin = this.pins.get(motor.id);
+        if (!pin) return;
+        pin.group.querySelector('title').textContent = `${motor.name} · X: ${motor.x} · Y: ${motor.y}`;
+        pin.group.setAttribute('aria-label', `${motor.name}, X ${motor.x}, Y ${motor.y}`);
+        if (motor.button_color) pin.circle.style.fill = motor.button_color;
+        else pin.circle.style.removeProperty('fill');
     }
 
     element(name, attributes = {}) {

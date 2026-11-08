@@ -78,3 +78,11 @@
 .pdf-dialog .border-top > .btn { flex: 1; }
 .pdf-dialog .btn-excel { box-shadow: 0 3px 8px #15803d16; }
 #pdfPlanName { overflow-wrap: anywhere; }
+
+.pdf-area-panel { flex: 0 0 auto; padding: .5rem .75rem; margin-bottom: .5rem; background: #f1f6fb; border: 1px solid #cad8e6; border-radius: .6rem; color: #162638; font-size: .85rem; }
+.pdf-area-panel[hidden], .pdf-area-ranges[hidden] { display: none; }
+.pdf-area-ranges { display: flex; align-items: center; gap: .35rem .8rem; flex-wrap: wrap; margin-top: .35rem; }
+.pdf-area-ranges > label:has(input[type=range]) { flex: 1 1 130px; min-width: 0; max-width: 280px; }
+.pdf-area-ranges output { font-weight: 600; }
+.pdf-area-ranges input[type=range] { display: block; margin-bottom: 0; }
+.plan-fullscreen > .pdf-area-panel { margin: 0; border-radius: 0; }

@@ -235,7 +235,7 @@ async function main() {
         let content = fs.readFileSync(filePath);
         if (args.manifest) {
             content = await attachMetadata(content, JSON.parse(fs.readFileSync(args.manifest, 'utf8')),
-                fs.readFileSync(args['pdf-source']), associationKey);
+                fs.readFileSync(args['project-source'] || args['pdf-source']), associationKey);
         }
         const record = await GoogleDriveService.upsertFileToProjectFolder({
             fileName,

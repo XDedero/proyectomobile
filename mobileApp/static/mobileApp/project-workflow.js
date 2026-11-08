@@ -25,7 +25,7 @@
           <button type="button" data-project-action="add">Agregar botón</button>
           <button type="button" data-project-action="move" id="fullscreenMoveMarker">Mover botón</button>
           <button type="button" data-project-action="saved-motors">Importar motor guardado</button>
-          <button type="button" data-project-action="assign-listing">Gestionar listados</button>
+          <button type="button" data-project-action="assign-listing">Añadir listado</button>
           <button type="button" data-project-action="open-listing" id="fullscreenOpenListing">Ver listados</button>
           <button type="button" data-project-action="save" id="fullscreenSaveMenu" hidden>Guardar plano</button>
           <button type="button" data-project-action="export">Exportar proyecto</button>
@@ -38,7 +38,7 @@
           <button type="button" id="fullscreenSavePlan" class="quick-save" hidden><i class="bi bi-floppy" aria-hidden="true"></i><span>Guardar plano</span></button>
           <button type="button" id="fullscreenDeletePlan" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i><span>Eliminar plano</span></button>
         </div>
-        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAssignExcel">Asignar hoja</button><button type="button" id="fullscreenOpenExcel">Ver ficha</button><button type="button" id="fullscreenDeleteMarker" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button></div>
+        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAssignExcel">Opciones del botón</button><button type="button" id="fullscreenOpenExcel">Ver ficha</button><button type="button" id="fullscreenAdjustArea" hidden>Ajustar radio</button><button type="button" id="fullscreenDeleteMarker" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button></div>
         <p id="fullscreenPlanStatus" class="fullscreen-plan-status" role="status"></p>`;
     document.body.append(overlay);
     const fullMenu = byId('fullscreenPlanMenu');
@@ -135,7 +135,13 @@
                     return false;
                 }
             }
+            if (current.applyArea && !(await current.applyArea())) return false;
             const data = await post(current.plan.save_project_url);
+            if (data.plan && active === current) {
+                if (editor?.visible) editor.close(true);
+                Object.assign(current.plan, data.plan);
+                current.refresh?.();
+            }
             current.plan.saved_at = data.saved_at;
             current.plan._projectDirty = false;
             if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(data.saved.cloud_status));
@@ -198,6 +204,7 @@
         placeholder = document.createComment('plan-viewport');
         originalViewport.before(placeholder);
         byId('fullscreenPlanViewport').append(originalViewport);
+        if (active.areaPanel) byId('fullscreenPlanViewport').before(active.areaPanel);
         previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         overlay.hidden = false;
@@ -215,7 +222,11 @@
         if (!full) return;
         full = false;
         setMenu(false);
-        if (placeholder?.parentNode && originalViewport) placeholder.replaceWith(originalViewport);
+        if (placeholder?.parentNode && originalViewport) {
+            const areaPanel = overlay.querySelector('#pdfAreaPanel');
+            if (areaPanel) placeholder.before(areaPanel);
+            placeholder.replaceWith(originalViewport);
+        }
         placeholder = originalViewport = null;
         overlay.hidden = true;
         if (window.workbookEditor?.visible) {
@@ -237,6 +248,8 @@
         byId('fullscreenOpenExcel').hidden = !configuration.workbook;
         byId('fullscreenOpenExcel').onclick = configuration.open;
         byId('fullscreenDeleteMarker').onclick = configuration.remove;
+        byId('fullscreenAdjustArea').hidden = !configuration.adjustArea;
+        byId('fullscreenAdjustArea').onclick = configuration.adjustArea;
     }
 
     async function openListing() { await window.planExcel?.openListings(); }

@@ -107,7 +107,10 @@ def motor_data(motor):
             'metadata_url': reverse('motor_workbook_metadata', args=[motor.pk]),
         }
     return {
-        'id': motor.pk, 'name': motor.name, 'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
+        'id': motor.pk, 'name': motor.name or f'Botón {motor.plan.motors.filter(pk__lt=motor.pk).count() + 1}',
+        'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
+        'button_color': motor.button_color, 'show_description': motor.show_description,
+        'details_url': reverse('button_details', args=['dxf', motor.pk]),
         'source_sheet': motor.source_sheet,
         'category_id': motor.category_id,
         'category_name': motor.category.name if motor.category_id else '',
@@ -407,6 +410,7 @@ def create_cad_marker(request, plan_id):
         with transaction.atomic():
             motor = Motor.objects.create(
                 plan=plan, entity_key=f'manual/{uuid4().hex}', name=name.strip(), category=category,
+                show_description=data.get('show_description', False),
                 x=x, y=y, z=0, svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0],
             )
             initialize_button(motor, request.user, origin, upload)

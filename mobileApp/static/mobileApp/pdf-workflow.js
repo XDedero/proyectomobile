@@ -65,6 +65,7 @@
         onSelect: (id) => selectMarker(id),
         onMove: moveMarker,
         onPageChange(detail) {
+            if (page !== detail.page) closeAreaControls();
             page = detail.page;
             pageSelect.value = String(page);
             byId('btnPdfPreviousPage').disabled = page <= 1;
@@ -84,7 +85,9 @@
     function clearError() { byId('pdfError').hidden = true; }
     function setBusy(value) {
         busy = value;
+        areaToggle.disabled = value;
         for (const id of ['btnImportPdf', 'btnPdfClosePlan', 'btnPdfAddMarker', 'btnPdfMoveMarker']) byId(id).disabled = value;
+        for (const control of areaPanel.querySelectorAll('button,input')) control.disabled = value;
         for (const button of dialog.querySelectorAll('button')) button.disabled = value;
         updatePermissions();
         byId('btnPdfDeleteSelectedMarker').disabled = value;
@@ -123,7 +126,7 @@
             const button = document.createElement('button');
             button.type = 'button';
             button.dataset.markerId = marker.id;
-            button.textContent = [markerName(marker), marker.category_name, marker.source_sheet || marker.sheet_name || 'Sin hoja'].filter(Boolean).join(' · ');
+            button.textContent = [markerName(marker), marker.category_name, marker.sheet_name || marker.source_sheet || 'Sin hoja'].filter(Boolean).join(' · ');
             button.setAttribute('aria-pressed', String(marker.id === selectedId));
             button.addEventListener('click', () => selectMarker(marker.id));
             markerList.append(button);
@@ -138,9 +141,13 @@
 
     function updateSelection() {
         const marker = selectedMarker();
+        if (areaMarkerId !== marker?.id) closeAreaControls();
+        const canAdjust = marker?.page === page && appState.user?.permissions.can_change_pdf_plan;
+        areaToggle.hidden = !canAdjust;
+        areaToggle.disabled = busy;
         byId('pdfSelectedMarker').hidden = !marker;
         if (window.projectWorkspace?.active?.kind === 'pdf') window.projectWorkspace.selection(marker ? {
-            name: markerName(marker), workbook: marker.workbook, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
+            name: markerName(marker), workbook: marker.workbook, adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
             target: { name: markerName(marker), assign_url: marker.assign_url, apply(result) {
                 const index = plan.markers.findIndex((item) => item.id === result.marker.id);
                 if (index < 0) return null;
@@ -155,7 +162,7 @@
         } : null);
         if (!marker) return;
         byId('pdfSelectedMarkerName').textContent = markerName(marker);
-        byId('pdfSelectedWorkbookName').textContent = marker.source_sheet || marker.sheet_name || 'Elija una hoja del Excel del plano.';
+        byId('pdfSelectedWorkbookName').textContent = marker.sheet_name || marker.source_sheet || 'Elija una hoja del Excel del plano.';
         byId('btnPdfOpenWorkbook').hidden = !marker.workbook;
     }
 
@@ -173,42 +180,47 @@
         selectedId = marker.id;
         updateMarkers();
         if (!open || mode === 'move') return;
-        if (marker.workbook) await openWorkbook(marker.workbook);
+        await openSelectedButton(marker);
+    }
+
+    async function openSelectedButton(marker) {
+        if (marker.show_description) await showButtonDetails(marker);
+        else if (marker.workbook) await openWorkbook(marker.workbook);
         else await configureMarker();
     }
 
+    async function showButtonDetails(marker, edit = false) {
+        closeAreaControls();
+        const currentPlan = plan;
+        await window.buttonDetails.open(marker, {
+            kind: 'pdf', name: markerName(marker), edit,
+            defaultName: `Botón ${plan.markers.findIndex(item => item.id === marker.id) + 1}`,
+            openExcel: marker.workbook ? () => openWorkbook(marker.workbook) : null,
+            assign: appState.user?.permissions.can_assign ? configureMarker : null,
+            onSaved(updated) {
+                if (plan !== currentPlan) return;
+                Object.assign(marker, updated);
+                updateMarkers();
+                window.projectWorkspace?.dirty();
+            },
+        });
+    }
+
     async function openWorkbook(workbook) {
+        closeAreaControls();
         hideDialog();
         try { await editor.open({ ...workbook, removeMarker: appState.user?.permissions.can_delete_pdf_marker ? deleteSelectedMarker : null }); }
         catch (error) { showError(error); }
     }
 
     async function configureMarker() {
+        closeAreaControls();
         const marker = selectedMarker();
         if (!marker) return;
         if (window.planExcel) { await window.planExcel.assign('pdf', plan, marker); return; }
         focusBeforeDialog = document.activeElement;
         dialogMarkerId = marker.id;
         byId('pdfMarkerLabel').value = marker.label;
-
-        // Cargar parámetros del área de cobertura circular / elíptica
-        const hasArea = Boolean(marker.has_area);
-        const rx = marker.area_radius_x ? Math.round(marker.area_radius_x * 1000) / 10 : 5;
-        const ry = marker.area_radius_y ? Math.round(marker.area_radius_y * 1000) / 10 : rx;
-        const chkArea = byId('pdfMarkerHasArea');
-        const secArea = byId('pdfMarkerAreaSection');
-        const slX = byId('pdfMarkerRadiusX');
-        const slY = byId('pdfMarkerRadiusY');
-        const valX = byId('pdfMarkerRadiusXVal');
-        const valY = byId('pdfMarkerRadiusYVal');
-        const lock = byId('pdfMarkerLockRadius');
-        if (chkArea) {
-            chkArea.checked = hasArea;
-            if (secArea) secArea.style.display = hasArea ? 'block' : 'none';
-            if (slX) { slX.value = rx; if (valX) valX.textContent = `${rx}%`; }
-            if (slY) { slY.value = ry; if (valY) valY.textContent = `${ry}%`; }
-            if (lock) lock.checked = (rx === ry);
-        }
 
         byId('pdfMarkerCurrentWorkbook').textContent = marker.workbook ? `Excel actual: ${marker.workbook.name}` : 'Este botón todavía no tiene un Excel.';
         byId('btnPdfUnlinkWorkbook').hidden = !marker.workbook;
@@ -256,6 +268,7 @@
             status(success);
             window.projectWorkspace?.dirty();
             if (openExcel && result.marker?.workbook) await openWorkbook(result.marker.workbook);
+            return true;
         } catch (error) {
             byId('pdfMarkerDialogStatus').textContent = error.message;
             showError(error);
@@ -278,8 +291,7 @@
             setMode('explore');
             status(marker.source_sheet ? 'Botón creado. Elija la hoja que se incorporará al guardar.' : 'Botón creado.');
             window.projectWorkspace?.dirty();
-            if (marker.workbook) await openWorkbook(marker.workbook);
-            else await configureMarker();
+            await openSelectedButton(marker);
         } catch (error) { showError(error); }
         finally { setBusy(false); }
     }
@@ -302,6 +314,7 @@
 
     async function openPlan(nextPlan, currentRevision) {
         if (currentRevision !== revision || !appState.user) return;
+        closeAreaControls();
         hideDialog();
         editor.close(true);
         plan = nextPlan;
@@ -328,6 +341,7 @@
     function reset({ closeEditor = true } = {}) {
         window.projectWorkspace?.deactivate('pdf');
         revision += 1;
+        closeAreaControls();
         hideDialog();
         if (closeEditor) editor.close(true);
         viewer.clear();
@@ -386,60 +400,71 @@
         (marker) => post(marker.update_url, { label: byId('pdfMarkerLabel').value }), 'Nombre del botón guardado.',
     ));
 
-    // Control dinámico del área de cobertura
-    const chkArea = byId('pdfMarkerHasArea');
-    const secArea = byId('pdfMarkerAreaSection');
-    const slX = byId('pdfMarkerRadiusX');
-    const slY = byId('pdfMarkerRadiusY');
-    const valX = byId('pdfMarkerRadiusXVal');
-    const valY = byId('pdfMarkerRadiusYVal');
-    const lockRad = byId('pdfMarkerLockRadius');
+    const areaPanel = byId('pdfAreaPanel');
+    const areaToggle = byId('btnPdfAdjustArea');
+    const areaEnabled = byId('pdfMarkerHasArea');
+    const radiusFields = byId('pdfMarkerAreaSection');
+    const radiusX = byId('pdfMarkerRadiusX'), radiusY = byId('pdfMarkerRadiusY');
+    const lockRadius = byId('pdfMarkerLockRadius');
+    let areaMarkerId = null;
 
-    function syncAreaPreview() {
+    function closeAreaControls() {
+        if (areaPanel.hidden) return;
+        viewer.setMarkers(plan?.markers || []);
+        viewer.select(selectedId);
+        areaMarkerId = null;
+        areaPanel.hidden = true;
+        areaToggle.setAttribute('aria-expanded', 'false');
+    }
+
+    function previewArea() {
+        if (areaPanel.hidden) return;
+        radiusFields.hidden = !areaEnabled.checked;
+        byId('pdfMarkerRadiusXVal').textContent = radiusX.value + '%';
+        byId('pdfMarkerRadiusYVal').textContent = radiusY.value + '%';
+        viewer.previewMarkerArea(areaMarkerId, areaEnabled.checked, Number(radiusX.value) / 100, Number(radiusY.value) / 100);
+    }
+
+    function openAreaControls() {
         const marker = selectedMarker();
-        if (!marker || !chkArea) return;
-        const active = chkArea.checked;
-        const rx = Number(slX.value) / 100;
-        const ry = Number(slY.value) / 100;
-        viewer.previewMarkerArea(marker.id, active, rx, ry);
+        if (!marker || marker.page !== page || busy || !appState.user?.permissions.can_change_pdf_plan) return;
+        if (!areaPanel.hidden) { closeAreaControls(); return; }
+        areaMarkerId = marker.id;
+        radiusX.value = Math.round((marker.area_radius_x || .05) * 1000) / 10;
+        radiusY.value = Math.round((marker.area_radius_y || marker.area_radius_x || .05) * 1000) / 10;
+        lockRadius.checked = radiusX.value === radiusY.value;
+        areaEnabled.checked = true;
+        byId('pdfAreaMarkerName').textContent = markerName(marker);
+        areaPanel.hidden = false;
+        areaToggle.setAttribute('aria-expanded', 'true');
+        previewArea();
+        areaPanel.scrollIntoView({ block: 'nearest' });
     }
 
-    if (chkArea) {
-        chkArea.addEventListener('change', () => {
-            if (secArea) secArea.style.display = chkArea.checked ? 'block' : 'none';
-            syncAreaPreview();
+    async function saveAreaControls() {
+        if (areaPanel.hidden) return true;
+        if (areaMarkerId !== selectedId || busy || !appState.user?.permissions.can_change_pdf_plan) return false;
+        const saved = await markerAction(marker => post(marker.update_url, {
+            has_area: areaEnabled.checked, area_radius_x: Number(radiusX.value) / 100, area_radius_y: Number(radiusY.value) / 100,
+        }), 'Radio actualizado en el plano.');
+        if (saved) closeAreaControls();
+        return Boolean(saved);
+    }
+
+    areaToggle.addEventListener('click', openAreaControls);
+    areaEnabled.addEventListener('change', previewArea);
+    lockRadius.addEventListener('change', () => {
+        if (lockRadius.checked) radiusY.value = radiusX.value;
+        previewArea();
+    });
+    for (const [input, other] of [[radiusX, radiusY], [radiusY, radiusX]]) {
+        input.addEventListener('input', () => {
+            if (lockRadius.checked) other.value = input.value;
+            previewArea();
         });
     }
-    if (slX) {
-        slX.addEventListener('input', () => {
-            if (valX) valX.textContent = `${slX.value}%`;
-            if (lockRad && lockRad.checked && slY) {
-                slY.value = slX.value;
-                if (valY) valY.textContent = `${slY.value}%`;
-            }
-            syncAreaPreview();
-        });
-    }
-    if (slY) {
-        slY.addEventListener('input', () => {
-            if (valY) valY.textContent = `${slY.value}%`;
-            if (lockRad && lockRad.checked && slX) {
-                slX.value = slY.value;
-                if (valX) valX.textContent = `${slX.value}%`;
-            }
-            syncAreaPreview();
-        });
-    }
-    const btnSaveArea = byId('btnPdfSaveMarkerArea');
-    if (btnSaveArea) {
-        btnSaveArea.addEventListener('click', () => markerAction(
-            (marker) => post(marker.update_url, {
-                has_area: chkArea.checked,
-                area_radius_x: Number(slX.value) / 100,
-                area_radius_y: Number(slY.value) / 100
-            }), 'Área de cobertura guardada con éxito.'
-        ));
-    }
+    byId('btnPdfCancelMarkerArea').addEventListener('click', closeAreaControls);
+    byId('btnPdfSaveMarkerArea').addEventListener('click', saveAreaControls);
     byId('btnPdfAssignLibrary').addEventListener('click', () => {
         const id = library.value;
         if (!id) { byId('pdfMarkerDialogStatus').textContent = 'Seleccione un Excel de la biblioteca.'; return; }
@@ -508,6 +533,7 @@
         reset,
         get currentPlan() { return plan; },
         select(id) { return selectMarker(id, false); },
+        editButtonDetails(marker, mode = 'description') { return showButtonDetails(marker, mode); },
         removeDeleted(id) {
             if (plan?.id !== id) return;
             const documentId = editor.metadata?.id;
@@ -524,7 +550,7 @@
 
     function activateProject() {
         if (plan && view.classList.contains('active')) {
-            window.projectWorkspace?.activate({ kind: 'pdf', plan, viewport, viewer, setMode, isBusy: () => busy });
+            window.projectWorkspace?.activate({ kind: 'pdf', plan, viewport, viewer, setMode, areaPanel, applyArea: saveAreaControls, refresh: updateMarkers, isBusy: () => busy });
             updateSelection();
         }
     }

@@ -142,36 +142,76 @@ def recalculate(parts):
 
 
 def rename_sheet(content, old, requested):
-    parts = package(content)
     names = sheet_names(content)
     if old not in names:
         raise ValidationError('La hoja seleccionada no existe.')
     name = unique_name([value for value in names if value != old], requested)
-    quoted = "'" + old.replace("'", "''") + "'!"
-    replacement = "'" + name.replace("'", "''") + "'!"
+    return arrange_sheets(content, {old: name}, names), name
+
+
+def arrange_sheets(content, renames, order):
+    """Change tab names and positions without rebuilding individual sheets."""
+    parts = package(content)
+    book_path = 'xl/workbook.xml'
+    book = ET.fromstring(parts[book_path])
+    sheets = book.find('{' + S + '}sheets')
+    original_order = [item.get('name') for item in sheets]
+    nodes = dict(zip(original_order, list(sheets)))
+    if len(order) != len(nodes) or set(order) != set(nodes):
+        raise ValidationError('El orden del Excel no coincide con sus hojas.')
+    if not renames and order == original_order:
+        return bytes(content)
+    quotes = {"'" + old.replace("'", "''") + "'" : new for old, new in renames.items()}
+    unquoted = {old: new for old, new in renames.items() if re.fullmatch(r'[\w.]+', old)}
+    references = {value.casefold(): name for value, name in {**quotes, **unquoted}.items()}
+    pattern = (re.compile(r'"(?:[^"]|"")*"|(?<![\w.\]])(' + '|'.join(map(re.escape, references)) + r')!', re.IGNORECASE)
+               if references else None)
+
+    def rewrite(value):
+        if not pattern or not value:
+            return value
+        def substitute(match):
+            name = references.get(match[1].casefold()) if match[1] else None
+            return "'" + name.replace("'", "''") + "'!" if name else match[0]
+        return pattern.sub(substitute, value)
+
     for part, original in list(parts.items()):
-        if not part.endswith('.xml') or not (part == 'xl/workbook.xml' or part.startswith(('xl/worksheets/', 'xl/charts/'))):
+        if not part.endswith('.xml') or not (part == book_path or (renames and part.startswith(('xl/worksheets/', 'xl/charts/', 'xl/tables/')))):
             continue
-        root, changed = ET.fromstring(original), False
+        root, changed = (book if part == book_path else ET.fromstring(original)), False
         for item in root.iter():
             local = item.tag.split('}')[-1]
-            if part == 'xl/workbook.xml' and local == 'sheet' and item.get('name') == old:
-                item.set('name', name)
-                changed = True
-            if local in ('f', 'formula', 'formula1', 'formula2', 'definedName') and item.text:
-                text = item.text.replace(quoted, replacement)
-                text = re.sub(r'(?<![\w\]])' + re.escape(old) + r'!', lambda _: replacement, text)
+            if local in ('f', 'formula', 'formula1', 'formula2', 'definedName', 'calculatedColumnFormula', 'totalsRowFormula') and item.text:
+                text = rewrite(item.text)
                 if text != item.text:
                     item.text, changed = text, True
             if local == 'hyperlink' and item.get('location'):
-                location = item.get('location').replace(quoted, replacement)
+                location = rewrite(item.get('location'))
                 if location != item.get('location'):
                     item.set('location', location)
                     changed = True
-        if changed:
+        if changed and part != book_path:
             parts[part] = xml(root, original)
+    for old in order:
+        nodes[old].set('name', renames.get(old, old))
+    sheets[:] = [nodes[old] for old in order]
+    positions = {name: index for index, name in enumerate(order)}
+    definitions = book.find('{' + S + '}definedNames')
+    if definitions is not None:
+        for definition in definitions:
+            if definition.get('localSheetId') is not None:
+                index = int(definition.get('localSheetId'))
+                if 0 <= index < len(original_order):
+                    definition.set('localSheetId', str(positions[original_order[index]]))
+    first = next((i for i, sheet in enumerate(sheets) if sheet.get('state', 'visible') == 'visible'), 0)
+    for view in book.findall('.//{' + S + '}workbookView'):
+        view.set('activeTab', str(first))
+        view.set('firstSheet', str(first))
+    parts[book_path] = xml(book, parts[book_path])
     recalculate(parts)
-    return packed(parts), name
+    result = packed(parts)
+    origins = read_sheet_origins(content) if renames else {}
+    return write_sheet_origins(result, {renames.get(name, name): origin for name, origin in origins.items()}) if origins else result
 
 
 def _styles(target, source):

@@ -54,6 +54,9 @@ class ButtonCategory(models.Model):
 
 
 class ButtonSource(models.Model):
+    descriptions = models.JSONField(null=True, blank=True)
+    button_color = models.CharField(max_length=7, blank=True)
+    show_description = models.BooleanField(default=False)
     source_workbook = models.ForeignKey('WorkbookDocument', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     source_sheet = models.CharField(max_length=31, blank=True)
     source_output = models.CharField(max_length=31, blank=True)

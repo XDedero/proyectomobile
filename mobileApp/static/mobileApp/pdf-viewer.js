@@ -416,6 +416,15 @@ class PdfPlanViewer {
             button.className = `pdf-plan-marker${marker.workbook ? ' has-workbook' : ''}`;
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
+            if (marker.button_color) {
+                button.style.backgroundColor = marker.button_color;
+                const rgb = marker.button_color.slice(1).match(/../g).map(value => parseInt(value, 16));
+                const luminance = rgb.reduce((sum, value, channel) => {
+                    const normalized = value / 255;
+                    return sum + [.2126, .7152, .0722][channel] * (normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4);
+                }, 0);
+                button.style.color = luminance > .179 ? '#111' : '#fff';
+            }
             const label = marker.label || `Botón ${index + 1}`;
             button.title = `${label} · ${marker.workbook ? marker.workbook.name : 'Sin Excel asignado'}`;
             button.setAttribute('aria-label', button.title);

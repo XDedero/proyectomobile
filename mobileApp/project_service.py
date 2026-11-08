@@ -63,23 +63,27 @@ def open_plan_source(kind, plan):
 
 
 def export_project(kind, plan):
+    from .button_descriptions import TemplateReader, snapshot_details
     from .plan_workbook import ensure_workbook
+    from .xlsx_package import sheet_names
     document = ensure_workbook(plan)
-    rows = list(document.plan_sheets.all())
-    if kind == 'pdf':
-        markers = [{'page': item.page, 'x': item.x, 'y': item.y, 'label': item.label,
+    indexed = {row.name: row for row in document.plan_sheets.all()}
+    rows = [indexed[name] for name in sheet_names(document.content) if name in indexed]
+    with TemplateReader(document) as reader:
+        if kind == 'pdf':
+            markers = [{'page': item.page, 'x': item.x, 'y': item.y, 'label': item.label,
                     'has_area': getattr(item, 'has_area', False),
                     'area_radius_x': getattr(item, 'area_radius_x', None),
                     'area_radius_y': getattr(item, 'area_radius_y', None),
                     'area_color': getattr(item, 'area_color', 'rgba(59, 130, 246, 0.25)'),
                     'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
-                    **category_data(item)}
-                   for item in plan.markers.select_related('category')]
-    else:
-        markers = [{'entity_key': item.entity_key, 'name': item.name, 'x': item.x, 'y': item.y, 'z': item.z,
+                    **category_data(item), **snapshot_details(item, reader)}
+                       for item in plan.markers.select_related('category')]
+        else:
+            markers = [{'entity_key': item.entity_key, 'name': item.name, 'x': item.x, 'y': item.y, 'z': item.z,
                     'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
-                    **category_data(item)}
-                   for item in plan.motors.select_related('category')]
+                    **category_data(item), **snapshot_details(item, reader)}
+                       for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
@@ -139,6 +143,7 @@ def finite(value):
 
 @transaction.atomic
 def import_shared_project(plan, kind, source, svg, markers, books, manifest, user):
+    from .button_descriptions import imported_details
     key = manifest.get('workbook')
     if not isinstance(key, str) or key not in books or len(books) != 1:
         raise ValidationError('El proyecto debe contener un único Excel del plano.')
@@ -174,10 +179,12 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
         # Importing a project can use categories that an admin has already created.
         return category_ids.get(item.get('category_id')) or category_names.get((item.get('category_name') or '').casefold())
 
+    details = []
     for item in markers:
         sheet = item.get('sheet')
         if not isinstance(sheet, str) or (sheet and (sheet not in motor_names or item.get('workbook') != key)) or (not sheet and item.get('workbook') is not None):
             raise ValidationError('Un botón apunta a una hoja de motor inexistente.')
+        details.append(imported_details(item))
     document = WorkbookDocument.objects.create(name=info['name'], content=info['content'], plan_mode=manifest['workbook_mode'], updated_by=user)
     PlanWorkbookSheet.objects.bulk_create([PlanWorkbookSheet(workbook=document, name=row['name'],
         is_listing=row['is_listing'], is_primary=row['is_primary'], listing_order=row['listing_order'],
@@ -192,14 +199,14 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
             area_radius_x=item.get('area_radius_x'),
             area_radius_y=item.get('area_radius_y'),
             area_color=item.get('area_color', 'rgba(59, 130, 246, 0.25)'),
-            workbook=document, sheet_name=item['sheet'], category_id=category_for(item)) for item in markers])
+             workbook=document, sheet_name=item['sheet'], category_id=category_for(item), **detail) for item, detail in zip(markers, details)])
     else:
         a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
         Motor.objects.bulk_create([Motor(plan=plan, entity_key=item['entity_key'], name=item['name'],
             x=item['x'], y=item['y'], z=item['z'], svg_x=a*item['x']+c*item['y']+e,
             svg_y=b*item['x']+d*item['y']+f, svg_bounds=[a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f, 0, 0],
             workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else [],
-            category_id=category_for(item)) for item in markers])
+             category_id=category_for(item), **detail) for item, detail in zip(markers, details)])
     return kind, plan
 
 

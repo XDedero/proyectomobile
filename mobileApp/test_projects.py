@@ -59,7 +59,7 @@ class ProjectTests(TestCase):
         plan = self.plan(kind)
         if linked:
             book = self.document()
-            imported = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', self.download(book['download_url']))})
+            imported = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', self.download(book['download_url'])), 'first_as_listing': 'true'})
             self.assertEqual(imported.status_code, 200, imported.content[:400])
             if kind == 'pdf':
                 for x in (.2, .6):
@@ -132,6 +132,7 @@ class ProjectTests(TestCase):
 
         self.client.force_login(self.admin)
         original = self.plan('pdf')
+        self.post(original['assign_listing_url'], {'action': 'add'})
         self.post(original['markers_url'], {'page': 1, 'x': .2, 'y': .3})
         with ZipFile(BytesIO(self.download(original['export_project_url']))) as archive:
             manifest = json.loads(archive.read('manifest.json'))
@@ -375,11 +376,11 @@ class ProjectTests(TestCase):
         with ZipFile(BytesIO(bundle)) as archive:
             workbook = load_workbook(BytesIO(archive.read('workbooks/w1.xlsx')))
             try:
-                self.assertIn('Listado', workbook.sheetnames)
-                self.assertIn('Otra hoja', workbook.sheetnames)
+                self.assertEqual(workbook.sheetnames[:2], ['Controladores', 'Motores'])
+                self.assertNotIn('Listado', workbook.sheetnames)
                 self.assertNotIn('Equipos', workbook.sheetnames)
-                self.assertEqual(workbook['Control']['A2'].value, '001')
-                self.assertEqual(workbook['Control']['B2'].data_type, 's')
+                self.assertEqual(workbook['Controladores']['A2'].value, '001')
+                self.assertEqual(workbook['Controladores']['B2'].data_type, 's')
             finally:
                 workbook.close()
         restored = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('Proyecto.planproj', bundle)})
@@ -406,20 +407,20 @@ class ProjectTests(TestCase):
             finally:
                 workbook.close()
 
-        self.assertEqual(shared_sheets(), ['Listado'])
+        self.assertEqual(shared_sheets(), ['Sin fichas'])
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
 
         selected = self.post(button['assign_url'], {
             'action': 'select_source', 'source_sheet': 'Otra hoja', 'source_workbook_id': button['workbook']['id'],
         })
         self.assertEqual(selected.status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Equipos'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(self.client.get(plan['detail_url']).json()['markers'][0]['workbook']['preferred_sheet'], 'Otra hoja')
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Otra hoja'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(len(self.client.get(source_url).json()['sheets']), 2)
 
         replacement = self.client.post(button['assign_url'], {
@@ -427,9 +428,9 @@ class ProjectTests(TestCase):
             'file': SimpleUploadedFile('Nuevo.csv', b'Equipo,ID\r\nTablero,001\r\n'),
         })
         self.assertEqual(replacement.status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Otra hoja'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
-        self.assertEqual(shared_sheets(), ['Listado', 'Nuevo'])
+        self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(replacement.json()['marker']['category_name'], 'Controladores')
 
     def test_pdf_project_round_trip_keeps_pages_positions_listing_and_shared_xlsx_bytes(self):
@@ -452,6 +453,34 @@ class ProjectTests(TestCase):
         for marker in restored['markers']:
             self.assertEqual(self.download(marker['workbook']['download_url']), xlsx)
         self.assertEqual(self.download(restored['listing']['download_url']), xlsx)
+
+    def test_save_orders_optional_listings_then_category_names_and_keeps_button_links(self):
+        plan = self.plan('pdf')
+        self.assertEqual(plan['listings'], [])
+        categories = dict(ButtonCategory.objects.values_list('name', 'id'))
+        for x, name in ((.2, 'Motores'), (.3, 'Controladores'), (.4, 'Motores')):
+            marker = self.post(plan['markers_url'], {'page': 1, 'x': x, 'y': .2,
+                'origin': 'blank', 'category_id': str(categories[name])})
+            self.assertEqual(marker.status_code, 201, marker.content)
+        self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'add'}).status_code, 200)
+        preview = self.client.post(plan['assign_listing_url'], {'action': 'inspect', 'file': excel_upload()})
+        self.assertEqual(preview.json()['sheets'], ['Equipos', 'Otra hoja'])
+        added = self.client.post(plan['assign_listing_url'], {'action': 'import', 'source_sheet': 'Otra hoja', 'file': excel_upload()})
+        self.assertEqual(added.status_code, 200, added.content)
+        saved = self.post(plan['save_project_url'])
+        self.assertEqual(saved.status_code, 200, saved.content)
+        data = saved.json()['plan']
+        self.assertEqual([button['sheet_name'] for button in data['markers']], ['Motores 1', 'Controladores', 'Motores 2'])
+        with ZipFile(BytesIO(self.download(saved.json()['saved']['export_url']))) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            book = load_workbook(BytesIO(archive.read('workbooks/w1.xlsx')), read_only=True)
+            try:
+                self.assertEqual(book.sheetnames, ['Listado', 'Listado motores 2', 'Controladores', 'Motores 1', 'Motores 2'])
+                self.assertEqual([sheet['name'] for sheet in manifest['sheets']], book.sheetnames)
+                self.assertEqual(book['Listado motores 2']['A1'].value, 'Conservar')
+                self.assertEqual([row['sheet'] for row in manifest['markers']], ['Motores 1', 'Controladores', 'Motores 2'])
+            finally:
+                book.close()
 
     def test_dxf_round_trip_preserves_motor_world_positions_and_attachments(self):
         original, content = self.bundle('dxf')
@@ -491,7 +520,7 @@ class ProjectTests(TestCase):
             self.post(plan['markers_url'], {'page': 1, 'x': .1 + index*.01, 'y': .3})
         response = self.post(plan['assign_listing_url'], {'create_template': True})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['listings'][-1]['name'], 'Listado motores 2')
+        self.assertEqual(response.json()['listings'][-1]['name'], 'Listado')
         from .project_views import listing_template
         book = load_workbook(BytesIO(listing_template(12)))
         self.assertEqual(book.sheetnames, ['Listado'])

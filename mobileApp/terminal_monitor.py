@@ -217,7 +217,7 @@ def on_user_logout(sender, request, user, **kwargs):
         )
 
 
-def _upload_drive_content(content, file_name, assoc_key, local_key, manifest=None, pdf_source=None, drive_target=None):
+def _upload_drive_content(content, file_name, assoc_key, local_key, manifest=None, project_source=None, drive_target=None):
     if not content:
         return None
     with tempfile.TemporaryDirectory(prefix='planos-publish-') as directory:
@@ -225,10 +225,10 @@ def _upload_drive_content(content, file_name, assoc_key, local_key, manifest=Non
         path = Path(directory)
         (path / 'content').write_bytes(content)
         extra = []
-        if manifest is not None:
+        if manifest is not None and project_source is not None:
             (path / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
-            (path / 'plan.pdf').write_bytes(pdf_source)
-            extra = ['--manifest', str(path / 'manifest.json'), '--pdf-source', str(path / 'plan.pdf')]
+            (path / 'plan.source').write_bytes(project_source)
+            extra = ['--manifest', str(path / 'manifest.json'), '--project-source', str(path / 'plan.source')]
         if drive_target:
             extra += ['--drive-id', drive_target['id'], '--modified-time', drive_target['modifiedTime']]
         return run_gdrive_upload_sync(str(path / 'content'), file_name, assoc_key, local_key, extra)
@@ -389,9 +389,9 @@ def delete_button_source(sender, instance, using, **kwargs):
 
 
 def _sync_workbook_worker(wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content_bytes, assoc_key, drive_filename,
-                          manifest=None, pdf_source=None, drive_target=None):
+                          manifest=None, project_source=None, drive_target=None):
     local_key = f"{assoc_key}_xlsx" if assoc_key.startswith("project_") else f"local_xlsx_{wb_pk}"
-    rec = _upload_drive_content(content_bytes, drive_filename, assoc_key, local_key, manifest, pdf_source, drive_target)
+    rec = _upload_drive_content(content_bytes, drive_filename, assoc_key, local_key, manifest, project_source, drive_target)
     if not rec or not rec.get('drive_file_id'):
         return
     drive_id = rec['drive_file_id']
@@ -424,17 +424,36 @@ def _sync_workbook_worker(wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content
         SELECT 1 FROM public.workbook_documents WHERE drive_file_id = '{drive_id}'
     );
     """
-    if manifest is not None or assoc_key.startswith('local_pdf_'):
+    if manifest is not None:
+        sheets = json.dumps(manifest['sheets']).replace("'", "''")
+        references = json.dumps([index for index, marker in enumerate(manifest['markers']) if marker.get('descriptions')])
+        sql += f"""
+        DELETE FROM public.plan_workbook_sheets WHERE workbook_id IN
+            (SELECT id FROM public.workbook_documents WHERE drive_file_id = '{drive_id}');
+        INSERT INTO public.plan_workbook_sheets(workbook_id, name, is_listing, is_primary, is_protected, listing_order, origin_uuid)
+        SELECT w.id, item->>'name', (item->>'is_listing')::boolean, (item->>'is_primary')::boolean,
+            (item->>'is_protected')::boolean, (item->>'listing_order')::integer, item->>'origin_uuid'
+        FROM public.workbook_documents w, jsonb_array_elements('{sheets}'::jsonb) WITH ORDINALITY AS tabs(item, position)
+        WHERE w.drive_file_id = '{drive_id}' ORDER BY position;
+        DELETE FROM public.workbook_button_description_refs WHERE workbook_id IN
+            (SELECT id FROM public.workbook_documents WHERE drive_file_id = '{drive_id}');
+        INSERT INTO public.workbook_button_description_refs(workbook_id, button_index, description_ref)
+        SELECT w.id, idx::integer, 'drive:' || w.drive_file_id || '#markers/' || idx || '/descriptions'
+        FROM public.workbook_documents w, jsonb_array_elements_text('{references}'::jsonb) AS buttons(idx)
+        WHERE w.drive_file_id = '{drive_id}';
+        """
+    if (manifest or {}).get('kind') == 'pdf' or assoc_key.startswith('local_pdf_'):
+        listing = 'book.id' if manifest is None or manifest['listing'] else 'NULL'
         sql += f"""
         UPDATE public.pdf_plans AS plan
-        SET workbook_id = book.id, listing_id = book.id
+        SET workbook_id = book.id, listing_id = {listing}
         FROM public.workbook_documents AS book
         WHERE plan.company_id = book.company_id AND plan.association_key = '{assoc_key}'
           AND book.drive_file_id = '{drive_id}';
         """
     rec['supabase_ok'] = run_supabase_sql_sync(
         f"Libro Excel '{drive_filename}' (Rev #{wb_revision}) sincronizado en Supabase (workbook_documents, Drive ID: {drive_id})",
-        sql,
+        f'BEGIN; {sql} COMMIT;',
     )
     return rec
 
@@ -537,7 +556,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
         try:
             with ZipFile(BytesIO(content)) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
-                source = archive.read('plan/source.pdf') if kind == 'pdf' else None
+                source = archive.read(f'plan/source.{kind}')
                 key = assoc_key
                 pdf_options, workbook_options = {}, {}
                 if shared:
@@ -549,11 +568,11 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                         raise CloudUnavailable('El proyecto original tiene una asociación no válida en Drive.')
                     pdf_options['drive_target'] = {'id': pdf_id, 'modifiedTime': remote['pdfVersion']}
                     workbook_options['drive_target'] = {'id': remote['excelId'], 'modifiedTime': remote['date']}
-                pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, **pdf_options) if source else None
-                if source and not pdf:
+                pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, **pdf_options) if kind == 'pdf' else None
+                if kind == 'pdf' and not pdf:
                     raise RuntimeError('No se pudo subir el PDF.')
                 book = _sync_workbook_worker(*workbook_args, archive.read('workbooks/w1.xlsx'), key,
-                    f'{basename}.xlsx', manifest if source else None, source, **workbook_options)
+                    f'{basename}.xlsx', manifest, source, **workbook_options)
                 if not book:
                     raise RuntimeError('No se pudo subir el Excel.')
                 if shared:
@@ -564,8 +583,8 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                     local.update(cloud_workbook_version=workbook_version(remote))
                     if not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
                         local.update(cloud_snapshot=identity)
-                database_ok = book.get('supabase_ok') and (not source or pdf.get('supabase_ok'))
-                if database_ok and source:
+                database_ok = book.get('supabase_ok') and (kind != 'pdf' or pdf.get('supabase_ok'))
+                if database_ok and kind == 'pdf':
                     database_ok = _sync_marker_snapshot(pdf['drive_file_id'], manifest)
                 state = 'synced' if database_ok else 'partial'
                 error = '' if database_ok else 'Disponible en Drive. Supabase no confirmó el registro; vuelva a guardar para reintentar.'

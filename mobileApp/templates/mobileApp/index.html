@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="{% static 'mobileApp/dxf.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/pdf-viewer.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/pdf-workflow.css' %}?v={{ asset_version }}">
+    <link rel="stylesheet" href="{% static 'mobileApp/button-details.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/workbook-editor.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/project-workflow.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/motor-library.css' %}?v={{ asset_version }}">
@@ -282,7 +283,7 @@
                             <button type="button" id="btnDeleteCadPlan" class="btn btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar plano</button>
                         </div>
                         <button type="button" id="btnCadExportProject" class="btn btn-outline-primary btn-sm">Exportar proyecto</button>
-                        <button type="button" id="btnCadAssignListing" class="btn btn-outline-success btn-sm">Asignar listado</button>
+                        <button type="button" id="btnCadAssignListing" class="btn btn-outline-success btn-sm">Añadir listado</button>
                         <button type="button" id="btnCadOpenListing" class="btn btn-outline-success btn-sm" hidden>Ver listado</button>
                     </div>
                     <p id="cadProjectSaveStatus" class="small text-secondary" role="status"></p>
@@ -409,7 +410,25 @@
                             <button type="button" id="btnPdfAddMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-plus-circle" aria-hidden="true"></i><span>Añadir botón</span></button>
                             <button type="button" id="btnPdfMoveMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-arrows-move" aria-hidden="true"></i><span>Mover botones</span></button>
                         </div>
+                        <div class="mb-2"><button type="button" id="btnPdfAdjustArea" class="btn pdf-mode-action" aria-controls="pdfAreaPanel" aria-expanded="false" hidden>Ajustar radio</button></div>
                         <p id="pdfModeHint" class="small text-muted mb-2">Deslice para recorrer el plano. Use + y − para ampliar.</p>
+                        <section id="pdfAreaPanel" class="pdf-area-panel" aria-label="Ajustar radio del botón" hidden>
+                            <div class="d-flex align-items-center flex-wrap gap-2">
+                                <strong id="pdfAreaMarkerName"></strong>
+                                <label class="d-inline-flex align-items-center gap-1"><input class="form-check-input mt-0" type="checkbox" id="pdfMarkerHasArea"> Mostrar área</label>
+                                <button type="button" id="btnPdfSaveMarkerArea" class="btn btn-primary btn-sm">Aplicar radio</button>
+                                <button type="button" id="btnPdfCancelMarkerArea" class="btn btn-outline-secondary btn-sm">Cancelar</button>
+                            </div>
+                            <div id="pdfMarkerAreaSection" class="pdf-area-ranges">
+                                <label for="pdfMarkerRadiusX">Radio horizontal <output id="pdfMarkerRadiusXVal">5%</output>
+                                    <input type="range" class="form-range" id="pdfMarkerRadiusX" min="0.5" max="50" step="0.5" value="5">
+                                </label>
+                                <label for="pdfMarkerRadiusY">Radio vertical <output id="pdfMarkerRadiusYVal">5%</output>
+                                    <input type="range" class="form-range" id="pdfMarkerRadiusY" min="0.5" max="50" step="0.5" value="5">
+                                </label>
+                                <label class="d-inline-flex align-items-center gap-1"><input class="form-check-input mt-0" type="checkbox" id="pdfMarkerLockRadius" checked> Mover ambos radios juntos</label>
+                            </div>
+                        </section>
                         <div id="pdfViewport" data-pdfjs-url="{% static 'mobileApp/vendor/pdfjs/pdf-entry.mjs' %}?v={{ asset_version }}" data-worker-url="{% static 'mobileApp/vendor/pdfjs/pdf.worker-entry.mjs' %}?v={{ asset_version }}" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
                         <p class="small text-muted mt-2">Toque un botón para abrir su Excel o asignarle uno.</p>
                         <div id="pdfMarkerList" class="pdf-marker-list" aria-label="Botones de esta página"></div>
@@ -422,7 +441,7 @@
                         <h6 id="pdfSelectedMarkerName" class="fw-bold mt-1 pdf-selection-name"></h6>
                         <p id="pdfSelectedWorkbookName" class="small text-muted pdf-selection-name"></p>
                         <button type="button" id="btnPdfOpenWorkbook" class="btn btn-excel pdf-excel-action mb-2" hidden><i class="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i><span>Abrir y editar Excel</span></button>
-                        <button type="button" id="btnPdfConfigureMarker" class="btn pdf-secondary-action"><i class="bi bi-sliders" aria-hidden="true"></i><span>Asignar hoja</span></button>
+                        <button type="button" id="btnPdfConfigureMarker" class="btn pdf-secondary-action"><i class="bi bi-sliders" aria-hidden="true"></i><span>Opciones del botón</span></button>
                     </section>
                 </div>
             </div>
@@ -487,32 +506,6 @@
                 <input id="pdfMarkerLabel" class="form-control" maxlength="120" placeholder="Ej. Motor 01">
                 <button type="button" id="btnPdfSaveMarkerLabel" class="btn btn-outline-primary">Guardar nombre</button>
             </div>
-            <!-- Área de cobertura opcional (Circular / Elíptica) -->
-            <div class="border rounded-3 p-2 mb-3 bg-light">
-                <div class="form-check form-switch mb-1">
-                    <input class="form-check-input" type="checkbox" id="pdfMarkerHasArea">
-                    <label class="form-check-label small fw-semibold" for="pdfMarkerHasArea">Área de cobertura circular</label>
-                </div>
-                <div id="pdfMarkerAreaSection" class="pt-2 border-top mt-2" style="display: none;">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label for="pdfMarkerRadiusX" class="small text-muted mb-0">Ajuste horizontal (ancho):</label>
-                        <span id="pdfMarkerRadiusXVal" class="badge bg-secondary">5%</span>
-                    </div>
-                    <input type="range" class="form-range mb-2" id="pdfMarkerRadiusX" min="1" max="50" step="0.5" value="5">
-
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label for="pdfMarkerRadiusY" class="small text-muted mb-0">Ajuste vertical (alto):</label>
-                        <span id="pdfMarkerRadiusYVal" class="badge bg-secondary">5%</span>
-                    </div>
-                    <input type="range" class="form-range mb-2" id="pdfMarkerRadiusY" min="1" max="50" step="0.5" value="5">
-
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="pdfMarkerLockRadius" checked>
-                        <label class="form-check-label small text-muted" for="pdfMarkerLockRadius">Mantener forma circular (1:1)</label>
-                    </div>
-                    <button type="button" id="btnPdfSaveMarkerArea" class="btn btn-outline-primary btn-sm w-100">Guardar área de cobertura</button>
-                </div>
-            </div>
             <div id="pdfMarkerCurrentWorkbook" class="small text-success mb-3"></div>
             <label for="pdfWorkbookLibrary" class="small fw-semibold mb-1">Importar motor guardado</label>
             <select id="pdfWorkbookLibrary" class="form-select mb-2"><option value="">Cargando biblioteca…</option></select>
@@ -541,6 +534,7 @@
     <script src="{% static 'mobileApp/workbook-editor.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pdf-workflow.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/project-workflow.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/button-details.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-excel.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/motor-library.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/auth.js' %}?v={{ asset_version }}"></script>

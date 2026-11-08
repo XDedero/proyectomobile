@@ -67,9 +67,9 @@ class SharedPlanWorkbookTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content[:500])
         return response.json()['marker']
 
-    def imported(self, plan):
+    def imported(self, plan, *, as_listing=False):
         content = source_workbook()
-        response = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', content)})
+        response = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', content), 'first_as_listing': str(as_listing).lower()})
         self.assertEqual(response.status_code, 200, response.content[:500])
         return response.json(), content
 
@@ -80,20 +80,21 @@ class SharedPlanWorkbookTests(TestCase):
         self.assertEqual(len({motor['sheet_name'] for motor in cad['motors']}), len(cad['motors']))
         workbook = load_workbook(BytesIO(bytes(WorkbookDocument.objects.get().content)))
         try:
-            self.assertEqual(workbook.sheetnames[0], 'Listado')
-            for name in workbook.sheetnames[1:]:
+            self.assertIsNone(cad['listing'])
+            self.assertNotIn('Listado', workbook.sheetnames)
+            for name in workbook.sheetnames:
                 self.assertEqual(len(workbook[name]._charts), 2)
                 self.assertEqual(len(workbook[name]._images), 1)
                 self.assertIsNone(workbook[name]['C18'].value)
         finally:
             workbook.close()
 
-    def test_import_preserves_original_book_and_automatically_assigns_first_sheet(self):
+    def test_import_preserves_original_book_and_leaves_listing_optional(self):
         plan = self.plan()
         data, content = self.imported(plan)
         document = WorkbookDocument.objects.get(pk=data['workbook']['id'])
         self.assertEqual(bytes(document.content), content)
-        self.assertEqual(data['listing']['preferred_sheet'], 'Inventario')
+        self.assertIsNone(data['listing'])
         self.assertEqual(len(data['sheet_options']), 3)
         self.assertEqual(WorkbookDocument.objects.count(), 1)
         marker = self.marker(plan)
@@ -227,6 +228,7 @@ class SharedPlanWorkbookTests(TestCase):
 
     def test_additional_listings_are_numbered_and_only_author_or_deleter_can_remove(self):
         plan = self.plan()
+        self.imported(plan, as_listing=True)
         self.client.force_login(self.author)
         original = self.client.get(plan['workbook_url']).json()['listings'][0]
         denied = self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': original['id']})
@@ -247,6 +249,7 @@ class SharedPlanWorkbookTests(TestCase):
     def test_view_listing_exposes_all_listing_sheets_and_no_motor_sheets(self):
         plan = self.plan()
         self.marker(plan)
+        self.post(plan['assign_listing_url'], {'action': 'add'})
         result = self.post(plan['assign_listing_url'], {'action': 'add'}).json()
         response = self.client.get(result['listing']['metadata_url'])
         self.assertEqual(response.status_code, 200)
@@ -263,7 +266,7 @@ class SharedPlanWorkbookTests(TestCase):
 
     def test_existing_free_sheet_can_become_a_numbered_additional_listing(self):
         plan = self.plan()
-        self.imported(plan)
+        self.imported(plan, as_listing=True)
         result = self.post(plan['assign_listing_url'], {'action': 'add_sheet', 'sheet': 'Motor B'})
         self.assertEqual(result.status_code, 200, result.content[:500])
         self.assertEqual(result.json()['listings'][-1]['name'], 'Listado motores 2')
@@ -278,19 +281,41 @@ class SharedPlanWorkbookTests(TestCase):
     def test_importing_another_book_cannot_remove_protection_from_previous_original(self):
         self.client.force_login(self.author)
         plan = self.plan()
-        self.imported(plan)
+        self.imported(plan, as_listing=True)
         workbook = load_workbook(BytesIO(source_workbook()))
         workbook['Inventario']['B2'] = 'Datos de otro listado'
         output = BytesIO()
         workbook.save(output)
         workbook.close()
-        response = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Otro.xlsx', output.getvalue())})
+        response = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Otro.xlsx', output.getvalue()), 'first_as_listing': 'true'})
         self.assertEqual(response.status_code, 200, response.content[:400])
         result = response.json()
         previous = result['listings'][-1]
         self.assertTrue(previous['is_protected'])
         self.assertFalse(previous['can_delete'])
         self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'delete', 'listing_id': previous['id']}).status_code, 403)
+
+    def test_tab_order_and_category_rename_keep_cross_sheet_formulas_and_print_areas(self):
+        from .xlsx_package import arrange_sheets
+
+        book = Workbook()
+        original = book.active
+        original.title = 'Nombre original'
+        original['A1'] = 27
+        original.print_area = 'A1:B2'
+        listing = book.create_sheet('Listado')
+        listing['A1'] = "='Nombre original'!A1"
+        output = BytesIO()
+        book.save(output)
+        book.close()
+        result = load_workbook(BytesIO(arrange_sheets(output.getvalue(), {'Nombre original': 'Motores'}, ['Listado', 'Nombre original'])))
+        try:
+            self.assertEqual(result.sheetnames, ['Listado', 'Motores'])
+            self.assertEqual(result['Listado']['A1'].value, "='Motores'!A1")
+            self.assertIn('$A$1:$B$2', result['Motores'].print_area)
+            self.assertEqual(result['Motores']['A1'].value, 27)
+        finally:
+            result.close()
 
     def test_sheet_composition_preserves_tables_and_compatibility_namespaces(self):
         from .project_views import listing_template
@@ -336,7 +361,7 @@ class SharedPlanWorkbookTests(TestCase):
 
     def test_project_roundtrip_preserves_single_book_all_listings_and_shared_bindings(self):
         plan = self.plan()
-        self.imported(plan)
+        self.imported(plan, as_listing=True)
         for _ in range(2):
             marker = self.marker(plan)
             self.assertEqual(self.post(marker['assign_url'], {'sheet': 'Motor A'}).status_code, 200)

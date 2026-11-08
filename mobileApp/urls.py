@@ -3,12 +3,14 @@ from . import views
 from . import pdf_views
 from . import project_views
 from . import motor_views
+from . import button_views
 
 urlpatterns = [
     path('', views.index, name='index'),
     path('api/auth/session/', views.auth_session, name='auth_session'),
     path('api/auth/login/', views.auth_login, name='auth_login'),
     path('api/auth/logout/', views.auth_logout, name='auth_logout'),
+    path('api/buttons/<str:kind>/<int:button_id>/details/', button_views.button_details, name='button_details'),
     path('api/plans/', views.plans, name='plans'),
     path('api/plans/import/', views.plan_import, name='plan_import'),
     path('api/plans/<int:plan_id>/', views.plan_detail, name='plan_detail'),

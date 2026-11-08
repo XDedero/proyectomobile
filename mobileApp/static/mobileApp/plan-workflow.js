@@ -9,7 +9,11 @@
     let busy = false;
     let revision = 0;
     let pendingAssignment = null;
-    const viewer = new DxfViewer(document.getElementById('dxfViewport'), selectMotor);
+    const viewer = new DxfViewer(document.getElementById('dxfViewport'), id => {
+        if (busy || viewer.moving) return;
+        selectMotor(id);
+        openSelectedButton();
+    });
     const activeKey = () => `dxf.activePlan.${appState.user?.id || 'anonymous'}`;
     const permissions = () => appState.user?.permissions || {};
     let placing = false;
@@ -149,7 +153,7 @@
             button.dataset.motorId = motor.id;
             button.setAttribute('aria-pressed', String(motor.id === appState.selectedMotorId));
             button.textContent = `${index + 1}. ${motor.name} · ${motor.sheet_name || 'Sin hoja asignada'}`;
-            button.addEventListener('click', () => selectMotor(motor.id, true));
+            button.addEventListener('click', () => { selectMotor(motor.id, true); openSelectedButton(); });
             motorList.append(button);
         }
         updateMotorCard();
@@ -271,6 +275,30 @@
 
     function resetPreview() {}
 
+    async function openSelectedButton() {
+        const motor = selectedMotor();
+        if (motor?.show_description) await showButtonDetails();
+        else if (motor?.excel) await showPreview();
+        else if (motor && !busy && permissions().can_assign) chooseExcel();
+    }
+
+    async function showButtonDetails(edit = false) {
+        const motor = selectedMotor(), plan = appState.currentPlan;
+        if (!motor) return;
+        await window.buttonDetails.open(motor, {
+            kind: 'dxf', name: motor.name, edit, defaultName: `Botón ${plan.motors.indexOf(motor) + 1}`,
+            openExcel: motor.excel ? showPreview : null,
+            assign: permissions().can_assign ? chooseExcel : null,
+            onSaved(updated) {
+                if (appState.currentPlan !== plan) return;
+                Object.assign(motor, updated);
+                viewer.updateButtonAppearance(motor);
+                updatePlanCardUI();
+                window.projectWorkspace?.dirty();
+            },
+        });
+    }
+
     async function showPreview() {
         const motor = selectedMotor();
         if (!motor?.excel || !permissions().can_view) return;
@@ -307,7 +335,7 @@
             setMode('explore');
             status.textContent = 'Botón creado.';
             window.projectWorkspace?.dirty();
-            if (motor.excel) await showPreview();
+            await openSelectedButton();
         } catch (error) { showError(error.message); }
         finally { setBusy(false); updateActions(); }
     };
@@ -356,7 +384,7 @@
     };
     function activateProject() {
         if (appState.currentPlan && viewImportAutoCAD.classList.contains('active')) {
-            window.projectWorkspace?.activate({ kind: 'dxf', plan: appState.currentPlan, viewport: viewer.container, viewer, setMode, isBusy: () => busy });
+            window.projectWorkspace?.activate({ kind: 'dxf', plan: appState.currentPlan, viewport: viewer.container, viewer, setMode, refresh: updateMotorCard, isBusy: () => busy });
             updateMotorCard();
         }
     }
@@ -430,6 +458,7 @@
     window.planWorkflow = { close, listSaved, restore, permissionsChanged, activate: activateProject,
         get currentPlan() { return appState.currentPlan; },
         select: selectMotor,
+        editButtonDetails(mode = 'description') { return showButtonDetails(mode); },
         removeDeleted(id) {
             let remembered;
             try { remembered = localStorage.getItem(activeKey()); } catch (_) {}

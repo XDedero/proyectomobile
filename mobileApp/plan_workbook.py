@@ -2,20 +2,23 @@
 from io import BytesIO
 import hashlib
 import json
-from uuid import UUID
+import unicodedata
+from uuid import UUID, uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from .models import ButtonCategory, Motor, PdfMarker, PlanWorkbookSheet, SavedMotor, WorkbookDocument
 from .motor_service import inspect_motor, single_sheet, template_bytes, read_origin
-from .xlsx_package import append_sheet, remove_sheet, rename_sheet, sheet_names, read_sheet_origins, write_sheet_origins
+from .xlsx_package import (append_sheet, arrange_sheets, remove_sheet, rename_sheet, sheet_names,
+                           read_sheet_origins, unique_name, write_sheet_origins)
 
 MAX_WORKBOOK_BYTES = 100 * 1024 * 1024
+EMPTY_SHEET = 'Sin fichas'
 
 
 class WorkbookConflict(ValidationError):
@@ -24,6 +27,31 @@ class WorkbookConflict(ValidationError):
 
 def markers(plan):
     return plan.markers if plan._meta.model_name == 'pdfplan' else plan.motors
+
+
+def empty_workbook():
+    book = Workbook()
+    book.active.title = EMPTY_SHEET
+    output = BytesIO()
+    book.save(output)
+    return output.getvalue()
+
+
+def discard_empty_sheet(document, content):
+    if sheet_names(document.content) != [EMPTY_SHEET]:
+        return content
+    row = document.plan_sheets.filter(name=EMPTY_SHEET, is_listing=False).first()
+    plan = plan_for_workbook(document)
+    if not row or (plan and markers(plan).filter(sheet_name=EMPTY_SHEET).exists()):
+        return content
+    workbook = load_workbook(BytesIO(document.content), read_only=True)
+    try:
+        if any(value is not None for values in workbook.active.values for value in values):
+            return content
+    finally:
+        workbook.close()
+    row.delete()
+    return remove_sheet(content, EMPTY_SHEET)
 
 
 def store(document, content, user):
@@ -73,6 +101,7 @@ def _append(document, content, source_name, user, *, title=None, origin=None, de
                     row.save(update_fields=['origin_uuid'])
                 return row
     result, name = append_sheet(document.content, content, source_name, title or source_name)
+    result = discard_empty_sheet(document, result)
     if origin:
         origins = read_sheet_origins(result)
         origins[name] = origin
@@ -97,14 +126,14 @@ def ensure_workbook(plan, user=None):
     if locked.workbook_id:
         plan.workbook_id = locked.workbook_id
         return WorkbookDocument.objects.get(pk=locked.workbook_id)
-    from .project_views import listing_template
     owner = user or plan.imported_by
     legacy_listing = locked.listing
-    content = bytes(legacy_listing.content) if legacy_listing else listing_template(markers(locked).count())
+    content = bytes(legacy_listing.content) if legacy_listing else empty_workbook()
     document = WorkbookDocument.objects.create(name='Excel del plano.xlsx', content=content, plan_mode='template', updated_by=owner)
     for index, name in enumerate(sheet_names(content)):
-        PlanWorkbookSheet.objects.create(workbook=document, name=name, is_listing=index == 0,
-            is_primary=index == 0, is_protected=index == 0, listing_order=1 if index == 0 else 0, created_by=owner)
+        is_listing = bool(legacy_listing and index == 0)
+        PlanWorkbookSheet.objects.create(workbook=document, name=name, is_listing=is_listing,
+            is_primary=is_listing, is_protected=is_listing, listing_order=int(is_listing), created_by=owner)
     copied = {}
     known_listings = {sheet_identity(document.content, row.name)[0]: row.name for row in document.plan_sheets.filter(is_listing=True)}
     for index, marker in enumerate(markers(locked).select_related('workbook')):
@@ -165,20 +194,23 @@ def can_delete_listing(record, user, plan=None):
     if not plan:
         return False
     permission = 'can_delete_pdf_plan' if plan._meta.model_name == 'pdfplan' else 'can_delete_plan'
-    return capabilities(user)[permission] or (not record.is_primary and not record.is_protected and record.created_by_id == user.pk)
+    return capabilities(user)[permission] or (not record.is_protected and record.created_by_id == user.pk)
 
 
 def workspace_data(plan, user=None):
     from .pdf_views import workbook_data
     document = ensure_workbook(plan, user)
-    rows = list(document.plan_sheets.all())
+    by_name = {row.name: row for row in document.plan_sheets.all()}
+    rows = [by_name[name] for name in sheet_names(document.content) if name in by_name]
+    listing_rows = sorted((row for row in rows if row.is_listing), key=lambda row: (not row.is_primary, row.listing_order, row.pk))
     listings = [{
         'id': row.pk, 'name': row.name, 'sheet': row.name,
         'is_primary': row.is_primary, 'is_protected': row.is_protected, 'can_delete': can_delete_listing(row, user, plan),
-    } for row in rows if row.is_listing]
+    } for row in listing_rows]
     listing = workbook_data(document, sheets=False, sheet_name=listings[0]['name'], context='listing') if listings else None
     return {'workbook': workbook_data(document, sheets=False), 'workbook_mode': document.plan_mode,
-        'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows],
+        'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows
+                          if not (row.name == EMPTY_SHEET and not row.is_listing and document.plan_mode == 'template')],
         'button_categories': list(ButtonCategory.objects.values('id', 'name')),
         'listings': listings, 'listing': listing,
         'binding_counts': {item['sheet_name']: item['count'] for item in markers(plan).values('sheet_name').annotate(count=Count('pk'))}}
@@ -229,6 +261,8 @@ def new_button_options(request):
         if not isinstance(data, dict):
             raise ValidationError('La ubicación del botón no es válida.')
     origin = data.get('origin')
+    if 'show_description' in data and type(data['show_description']) is not bool:
+        raise ValidationError('Indica si el botón mostrará su descripción.')
     if origin is None and upload is None and 'category_id' not in data:
         return data, None, None, None
     if origin not in ('blank', 'upload') or (origin == 'upload') != (upload is not None):
@@ -276,6 +310,7 @@ def materialize_button_sources(plan, user):
     """Update only the selected sheet of each source in the shared workbook."""
     document = ensure_workbook(plan, user)
     sources = markers(plan).select_for_update().filter(source_workbook__isnull=False).order_by('pk')
+    changed = False
     for marker in sources.iterator(chunk_size=32):
         source = marker.source_workbook
         if marker.source_revision == source.revision and marker.sheet_name == marker.source_output:
@@ -289,7 +324,8 @@ def materialize_button_sources(plan, user):
         remove_first = previous and document.plan_sheets.count() > 1
         if remove_first:
             content = remove_sheet(content, old)
-        content, title = append_sheet(content, source.content, name, old if remove_first and old == name else name)
+        content, title = append_sheet(content, source.content, name, old if remove_first else name)
+        content = discard_empty_sheet(document, content)
         if previous and not remove_first:
             content = remove_sheet(content, old)
         store(document, content, user)
@@ -300,6 +336,85 @@ def materialize_button_sources(plan, user):
         marker.source_revision = source.revision
         marker.save(update_fields=['source_output', 'source_revision'])
         bind(marker, document, title)
+        changed = True
+    return changed
+
+
+def organize_project_sheets(plan, user):
+    """Use the category and marker order as the authoritative exported tab names."""
+    document = ensure_workbook(plan, user)
+    rows = {row.name: row for row in document.plan_sheets.all()}
+    buttons = list(markers(plan).select_for_update().select_related('category').order_by('pk'))
+    groups = {}
+    for button in buttons:
+        row = rows.get(button.sheet_name)
+        if row and not row.is_listing and button.category_id:
+            groups.setdefault(row.name, {}).setdefault(button.category.name, []).append(button)
+
+    content = bytes(document.content)
+    targets = {}
+    categories = {}
+    for name, by_category in groups.items():
+        for index, (category, assigned) in enumerate(by_category.items()):
+            target = name
+            if index:
+                # Existing links within a category still share their sheet.
+                # A sheet used by another category needs its own named tab.
+                content, target = append_sheet(content, content, name, category)
+                if len(content) > MAX_WORKBOOK_BYTES:
+                    raise ValidationError('El libro del plano supera el límite de 100 MB.')
+                rows[target] = PlanWorkbookSheet.objects.create(workbook=document, name=target, created_by=user)
+            categories.setdefault(category, []).append((assigned[0].pk, target))
+            targets.update((button.pk, target) for button in assigned)
+
+    def alphabetic(value):
+        return ''.join(char for char in unicodedata.normalize('NFKD', value.casefold()) if not unicodedata.combining(char))
+
+    categorized = {name for entries in categories.values() for _, name in entries}
+    occupied = {name.casefold() for name in rows if name not in categorized}
+    ordered = [row.name for row in sorted(rows.values(), key=lambda row: (not row.is_primary, row.listing_order, row.pk)) if row.is_listing]
+    renamed = {}
+    for category in sorted(categories, key=lambda value: (alphabetic(value), value.casefold())):
+        entries = sorted(categories[category])
+        base = unique_name([], category)
+        next_number = 1
+        for _, name in entries:
+            title = base
+            if len(entries) > 1 or title.casefold() in occupied:
+                while True:
+                    suffix = f' {next_number}'
+                    title = base[:31 - len(suffix)].rstrip() + suffix
+                    next_number += 1
+                    if title.casefold() not in occupied:
+                        break
+            occupied.add(title.casefold())
+            ordered.append(name)
+            if title != name:
+                renamed[name] = title
+    names = sheet_names(content)
+    ordered.extend(name for name in names if name not in rows or (name not in categorized and not rows[name].is_listing))
+    if not renamed and ordered == names and content == bytes(document.content):
+        return False
+    result = arrange_sheets(content, renamed, ordered)
+    store(document, result, user)
+    changing = [rows[name] for name in renamed]
+    for row in changing:
+        PlanWorkbookSheet.objects.filter(pk=row.pk).update(name=uuid4().hex[:31])
+        row.name = renamed[row.name]
+    PlanWorkbookSheet.objects.bulk_update(changing, ['name'])
+    fields = ['sheet_name', 'source_output']
+    if plan._meta.model_name == 'plan':
+        fields.append('excel_sheets')
+    for button in buttons:
+        original = button.sheet_name
+        target = targets.get(button.pk, original)
+        button.sheet_name = renamed.get(target, target)
+        if button.source_output == original:
+            button.source_output = button.sheet_name
+        if isinstance(button, Motor) and button.sheet_name:
+            button.excel_sheets = [button.sheet_name]
+    markers(plan).bulk_update(buttons, fields)
+    return True
 
 
 @transaction.atomic
@@ -373,8 +488,9 @@ def assign_marker(marker, user, data=None, upload=None):
         record = _append(document, source, name, user, origin=origin)
     elif data.get('blank'):
         source = template_bytes()
+        title = marker.category.name if marker.category_id else f'Motor {document.plan_sheets.exclude(name=EMPTY_SHEET).filter(is_listing=False).count()+1}'
         record = _append(document, source, sheet_names(source)[0], user,
-            title=f'Motor {document.plan_sheets.filter(is_listing=False).count()+1}', deduplicate=False)
+            title=title, deduplicate=False)
     else:
         raise ValidationError('Elija una hoja, una ficha vacía o un motor guardado.')
     bind(marker, document, record.name)
@@ -401,7 +517,7 @@ def initialize_marker(marker, user):
 
 
 @transaction.atomic
-def import_workbook(plan, filename, content, user):
+def import_workbook(plan, filename, content, user, *, first_as_listing=False):
     document = ensure_workbook(plan, user)
     # Build first; conditional store prevents replacing a concurrent edit.
     previous = bytes(document.content)
@@ -422,9 +538,10 @@ def import_workbook(plan, filename, content, user):
     document.save(update_fields=['name', 'plan_mode'])
     document.plan_sheets.all().delete()
     for index, name in enumerate(names):
-        PlanWorkbookSheet.objects.create(workbook=document, name=name, is_listing=index == 0,
-            is_primary=index == 0, is_protected=index == 0, listing_order=1 if index == 0 else 0,
-            origin_uuid=origins.get(name) if index else None, created_by=user)
+        is_listing = first_as_listing and index == 0
+        PlanWorkbookSheet.objects.create(workbook=document, name=name, is_listing=is_listing,
+            is_primary=is_listing, is_protected=is_listing, listing_order=int(is_listing),
+            origin_uuid=None if is_listing else origins.get(name), created_by=user)
     remap = {}
     for old_name, filled in preserved.items():
         if filled:
@@ -435,20 +552,21 @@ def import_workbook(plan, filename, content, user):
     from .project_views import listing_template
     baseline = listing_template(markers(plan).count())
     baseline_key, _ = sheet_identity(baseline, sheet_names(baseline)[0])
-    new_primary_key, _ = sheet_identity(content, names[0])
-    number = 2
+    new_primary_key = sheet_identity(content, names[0])[0] if first_as_listing else None
+    number = 2 if first_as_listing else 1
     for row in old_records.values():
         if not row.is_listing:
             continue
         identity, _ = sheet_identity(previous, row.name)
-        if row.is_primary and old_mode == 'template' and identity == baseline_key:
+        if first_as_listing and row.is_primary and row.is_protected and old_mode == 'template' and identity == baseline_key:
             continue
         if (row.is_primary or row.is_protected) and identity == new_primary_key:
             continue
-        result, title = append_sheet(document.content, previous, row.name, f'Listado motores {number}')
+        result, title = append_sheet(document.content, previous, row.name, f'Listado motores {number}' if first_as_listing else row.name)
+        result = discard_empty_sheet(document, result)
         store(document, result, user)
         PlanWorkbookSheet.objects.create(workbook=document, name=title, is_listing=True,
-            listing_order=number, is_protected=row.is_protected or row.is_primary, created_by=row.created_by)
+            is_primary=number == 1, listing_order=number, is_protected=row.is_protected, created_by=row.created_by)
         number += 1
     for marker in old_markers:
         bind(marker, document, remap.get(marker.sheet_name, ''))
@@ -458,21 +576,21 @@ def import_workbook(plan, filename, content, user):
 
 
 @transaction.atomic
-def add_listing(plan, user, upload=None):
+def add_listing(plan, user, upload=None, selected=None):
     from .project_views import listing_template
-    from .views import validate_excel
+    from .button_import import inspect_button_file
     document = ensure_workbook(plan, user)
     if upload:
-        names = validate_excel(upload)
-        content, source = upload.read(), names[0]
+        content, source = inspect_button_file(upload, selected, allow_default=True)
     else:
-        content = listing_template(9)
+        content = listing_template(markers(plan).count())
         source = sheet_names(content)[0]
-    number = max([1] + list(document.plan_sheets.filter(is_listing=True).values_list('listing_order', flat=True))) + 1
-    content, name = append_sheet(document.content, content, source, f'Listado motores {number}')
+    number = max([0] + list(document.plan_sheets.filter(is_listing=True).values_list('listing_order', flat=True))) + 1
+    content, name = append_sheet(document.content, content, source, 'Listado' if number == 1 else f'Listado motores {number}')
+    content = discard_empty_sheet(document, content)
     store(document, content, user)
     return PlanWorkbookSheet.objects.create(workbook=document, name=name, is_listing=True,
-        listing_order=number, created_by=user)
+        is_primary=number == 1, listing_order=number, created_by=user)
 
 
 @transaction.atomic
@@ -497,13 +615,14 @@ def add_existing_listing(plan, name, user):
     record = document.plan_sheets.filter(name=name, is_listing=False).first()
     if not record or markers(plan).filter(sheet_name=name).exists():
         raise ValidationError('Elija una hoja libre que no esté asignada a un botón.')
-    number = max([1] + list(document.plan_sheets.filter(is_listing=True).values_list('listing_order', flat=True))) + 1
-    content, title = rename_sheet(document.content, record.name, f'Listado motores {number}')
+    number = max([0] + list(document.plan_sheets.filter(is_listing=True).values_list('listing_order', flat=True))) + 1
+    content, title = rename_sheet(document.content, record.name, 'Listado' if number == 1 else f'Listado motores {number}')
     store(document, content, user)
     record.name, record.is_listing, record.listing_order = title, True, number
+    record.is_primary = number == 1
     if not record.is_protected:
         record.created_by = user
-    record.save(update_fields=['name', 'is_listing', 'listing_order', 'created_by'])
+    record.save(update_fields=['name', 'is_listing', 'is_primary', 'listing_order', 'created_by'])
     return record
 
 
@@ -518,10 +637,17 @@ def delete_listing(plan, record_id, user):
     if markers(plan).filter(sheet_name=record.name).exists():
         raise ValidationError('La hoja está asignada a un botón y no puede eliminarse.')
     if len(sheet_names(document.content)) == 1:
-        source = template_bytes()
-        _append(document, source, sheet_names(source)[0], user, title='Motor 1', deduplicate=False)
+        store(document, empty_workbook(), user)
+        record.delete()
+        PlanWorkbookSheet.objects.create(workbook=document, name=EMPTY_SHEET, created_by=user)
+        return
     store(document, remove_sheet(document.content, record.name), user)
     record.delete()
+    if record.is_primary:
+        first = document.plan_sheets.filter(is_listing=True).first()
+        if first:
+            first.is_primary = True
+            first.save(update_fields=['is_primary'])
 
 
 def selected_motor_document(document, name):
