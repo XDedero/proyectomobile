@@ -32,7 +32,7 @@ def command_json(command, message, *, timeout):
         start = result.stdout.find('{')
         if start < 0:
             raise ValueError
-        return json.loads(result.stdout[start:])
+        return json.JSONDecoder().raw_decode(result.stdout[start:])[0]
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise CloudUnavailable(message) from exc
 
@@ -88,7 +88,7 @@ def supabase_query(sql, *, read_only):
         flag = '--read-only' if read_only else '--yes'
         return command_json(
             [*command, 'db', 'query', '--remote', flag, '--file', str(query)],
-            message, timeout=12 if read_only else 30,
+            message, timeout=30 if read_only else 90,
         )
 
 
@@ -96,11 +96,12 @@ def supabase_metadata(pdf_id, excel_id):
     if not all(re.fullmatch(r'[A-Za-z0-9_-]{1,128}', key) for key in (pdf_id, excel_id)):
         raise ValidationError('Los identificadores del proyecto en la nube no son válidos.')
     sql = f"""
-    select p.name, w.plan_mode,
+    select p.name, p.display_settings, w.plan_mode,
         coalesce((select jsonb_agg(jsonb_build_object(
             'page', m.page, 'x', m.x, 'y', m.y, 'label', m.label, 'sheet', m.sheet_name,
             'has_area', m.has_area, 'area_radius_x', m.area_radius_x, 'area_radius_y', m.area_radius_y,
-            'area_color', m.area_color, 'category_id', m.category_id, 'category_name', c.name
+            'area_color', m.area_color, 'area_shape', m.area_shape, 'button_color', m.button_color,
+            'show_description', m.show_description, 'piece_source',m.piece_source, 'category_id', m.category_id, 'category_name', c.name
         ) order by m.id) from public.pdf_markers m
         left join public.button_categories c on c.id = m.category_id where m.plan_id = p.id), '[]') as markers
     from public.pdf_plans p
@@ -136,7 +137,7 @@ def snapshot_identity(project, metadata, portable):
 
 
 def manifest_metadata(manifest):
-    return {'name': manifest.get('name'), 'plan_mode': manifest.get('workbook_mode'), 'markers': manifest.get('markers')}
+    return {'name': manifest.get('name'), 'plan_mode': manifest.get('workbook_mode'), 'markers': manifest.get('markers'), 'display_settings':manifest.get('display_settings', {})}
 
 
 def read_cloud_snapshot(pdf_id):
@@ -169,19 +170,10 @@ def read_cloud_snapshot(pdf_id):
 
 
 def shared_publish_target(plan_id, pdf_id, source):
-    """Resolve the original Drive pair and reject a newer remote workbook."""
-    plan = PdfPlan.objects.only('cloud_snapshot', 'cloud_workbook_version').get(pk=plan_id)
-    if plan.cloud_workbook_version:
-        project = next((item for item in list_cloud_projects() if item['id'] == pdf_id), None)
-        if project is None:
-            raise CloudUnavailable('El PDF o el Excel original ya no está disponible en Drive.')
-        matches = workbook_version(project) == plan.cloud_workbook_version
-    else:
-        project, remote_source, _, metadata, portable, _ = read_cloud_snapshot(pdf_id)
-        matches = source == remote_source and snapshot_identity(project, metadata, portable) == plan.cloud_snapshot
-    if not matches:
-        raise CloudUnavailable('Drive tiene una versión distinta del Excel. Tus cambios quedaron en este PC. Abre la versión de la nube antes de volver a publicar.')
-    PdfPlan.objects.filter(pk=plan_id).update(cloud_workbook_version=workbook_version(project))
+    """Resolve the original files; an explicit save replaces their current contents."""
+    project = drive_command('--publish-target', '--drive-id', pdf_id)['project']
+    if project is None:
+        raise CloudUnavailable('El PDF original ya no está disponible en Drive.')
     return project
 
 
@@ -229,7 +221,7 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
     used = {marker['sheet'] for marker in markers}
     listings = [sheet for sheet in sheets if sheet not in used and sheet.casefold().startswith('listado')]
     mode = (metadata or {}).get('plan_mode')
-    manifest = {'workbook': 'w1', 'workbook_mode': mode if mode in ('template', 'imported') else 'imported', 'sheets': [
+    manifest = {'display_settings':(metadata or {}).get('display_settings', {}), 'workbook': 'w1', 'workbook_mode': mode if mode in ('template', 'imported') else 'imported', 'sheets': [
         {'name': sheet, 'is_listing': sheet in listings, 'is_primary': bool(listings and sheet == listings[0]),
          'listing_order': listings.index(sheet) + 1 if sheet in listings else 0}
         for sheet in sheets
@@ -247,6 +239,9 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
         with transaction.atomic():
             import_shared_project(plan, 'pdf', source, None, markers,
                                   {'w1': {'name': excel_name, 'content': content, 'sheets': sheets}}, manifest, user)
+            from .cloud_save import capture_base_state
+            plan.cloud_base_state = capture_base_state(plan)
+            plan.save(update_fields=['cloud_base_state'])
             if replace_plan and replace_plan.pk != plan.pk:
                 _replace_cached_plan(replace_plan, plan)
     except Exception as exc:

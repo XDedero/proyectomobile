@@ -3,10 +3,19 @@ from . import views
 from . import pdf_views
 from . import project_views
 from . import motor_views
+from . import piece_views
 from . import button_views
 from . import management_views
 
 urlpatterns = [
+    path('api/piece-library/', piece_views.saved_pieces, name='saved_pieces'),
+    path('api/piece-library/<int:piece_id>/edit/', piece_views.edit_piece, name='edit_piece'),
+    path('api/piece-library/<int:piece_id>/update/', piece_views.update_piece, name='update_piece'),
+    path('api/piece-library/<int:piece_id>/delete/', piece_views.delete_piece, name='delete_piece'),
+    path('api/piece-library/categories/', piece_views.piece_categories, name='piece_categories'),
+    path('api/piece-library/register/', piece_views.register_piece, name='register_piece'),
+    path('api/piece-library/import/', piece_views.import_piece_document, name='import_piece_document'),
+    path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
     path('api/administration/', management_views.management_data, name='management_data'),
     path('api/administration/roles/', management_views.manage_role, name='manage_role'),

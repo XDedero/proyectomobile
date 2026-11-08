@@ -184,13 +184,14 @@
             this.colButton = this.button('+ Columna', 'workbookEditorAddColumn', () => this.appendDimension('insert_column'));
             this.downloadButton = this.button('Exportar .xlsx', 'workbookEditorDownload', () => this.download());
             this.csvButton = this.button('Exportar .csv', 'workbookEditorCsv', () => this.download('csv'));
-            this.saveMotorButton = this.button('Guardar motor', 'workbookEditorSaveMotor', () => window.motorLibrary?.registerCurrent(this));
+            this.saveMotorButton = this.button('Guardar pieza', 'workbookEditorSaveMotor', () => window.pieceLibrary?.registerCurrent(this));
+            this.replacePieceButton = this.button('Importar otro Excel o CSV', 'workbookEditorReplacePiece', () => window.pieceLibrary?.replaceCurrent(this));
             this.reloadButton = this.button('Recargar', 'workbookEditorReload', () => this.reload());
             this.reloadButton.title = 'Volver a cargar la versión guardada';
             this.listingsButton = this.button('Listados', 'workbookEditorListings', async () => {
                 if (await this.requestClose()) window.planExcel?.listings();
             });
-            toolbar.append(this.sheetSelect, this.saveButton, this.saveMotorButton, this.listingsButton, this.rowButton, this.colButton, this.downloadButton, this.csvButton, this.reloadButton);
+            toolbar.append(this.sheetSelect, this.saveButton, this.saveMotorButton, this.replacePieceButton, this.listingsButton, this.rowButton, this.colButton, this.downloadButton, this.csvButton, this.reloadButton);
             this.motorRegistrationNotice = this.node('p', 'wbe-motor-registration');
             this.motorRegistrationNotice.id = 'workbookEditorMotorRegistration';
             this.motorRegistrationNotice.hidden = true;
@@ -285,19 +286,25 @@
         }
 
         get canEdit() { return this.metadata?.can_edit === true; }
+        get pieceRegistration() { return this.metadata?.piece_registrations ? this.metadata.piece_registrations[this.sheet] || {registered:false,is_motor:true} : this.metadata?.motor_registration; }
 
         applyPermissions() {
             this.listingsButton.hidden = this.context !== 'listing' || !this.metadata?.plan_mode;
             this.removeMarkerButton.hidden = !this.removeMarker;
             for (const button of [this.saveButton, this.rowButton, this.colButton]) button.hidden = !this.canEdit;
-            if (['motor-import', 'saved-motor'].includes(this.context)) this.saveButton.hidden = true;
-            const registration = this.metadata?.motor_registration;
-            this.saveMotorButton.hidden = !registration?.is_motor || this.context === 'listing';
-            this.saveMotorButton.disabled = Boolean(registration?.registered) || this.busy || this.staleRevision;
+            if (this.context === 'saved-piece' || this.pieceEdit) this.saveButton.hidden = true;
+            this.replacePieceButton.hidden = !this.pieceEdit;
+            const registration = this.pieceRegistration;
+            this.saveMotorButton.hidden = !(this.metadata?.is_piece || registration?.is_motor) || this.context === 'listing';
+            this.saveMotorButton.disabled = (!this.pieceEdit && Boolean(registration?.registered)) || this.busy || this.staleRevision;
             this.motorRegistrationNotice.hidden = !registration?.is_motor || this.context === 'listing';
             this.motorRegistrationNotice.textContent = registration?.registered
-                ? (this.context === 'saved-motor' ? `Motor guardado: ${registration.name}. Puede incorporarlo al Excel de un plano.` : `Motor guardado: ${registration.name}. Los botones vinculados a esta hoja comparten sus datos.`)
-                : 'Ficha independiente. Rellene sus datos y use Guardar motor para registrarla con un nombre.';
+                ? (this.context === 'saved-piece' ? `Pieza guardada: ${registration.name}. Puede incorporarlo al Excel de un plano.` : `Pieza guardada: ${registration.name}. Los botones vinculados a esta hoja comparten sus datos.`)
+                : 'Ficha independiente. Use Guardar pieza para registrarla con un nombre.';
+            if (this.pieceEdit) {
+                this.motorRegistrationNotice.hidden = false;
+                this.motorRegistrationNotice.textContent = `Modificando «${this.pieceDraftName}». Guardar pieza reemplaza únicamente la hoja seleccionada en el catálogo.`;
+            }
             this.formula.readOnly = !this.canEdit || Boolean(this.staleRevision);
             this.formula.placeholder = this.canEdit ? 'Seleccione una celda para editar su valor' : 'Valor de la celda seleccionada';
             this.viewport.setAttribute('aria-readonly', String(!this.canEdit));
@@ -311,6 +318,10 @@
             this.returnFocus = document.activeElement;
             this.metadata = metadata;
             this.context = metadata.context || 'motor';
+            this.pieceEdit = metadata.piece_edit || null;
+            this.pieceUnpublished = metadata.piece_unpublished === true;
+            this.pieceCategoryId = metadata.piece_category_id || (this.context === 'piece-import' ? null : window.projectWorkspace?.selected?.target?.category_id);
+            this.pieceDraftName = metadata.piece_name || '';
             this.selectSourceUrl = metadata.select_source_url || '';
             this.sheetSelect.setAttribute('aria-label', this.selectSourceUrl ? 'Hoja que se incorporará al guardar el plano' : 'Hoja del Excel');
             this.removeMarker = metadata.removeMarker || null;
@@ -361,6 +372,7 @@
             if (!this.visible) return true;
             this.commitAll();
             if (this.busy) return false;
+            if (this.pieceEdit) return this.close();
             if (this.hasUnsavedChanges && !(await this.save())) return false;
             return this.close(true);
         }
@@ -369,13 +381,15 @@
             if (!this.visible) return true;
             this.commitAll();
             if (!force && this.busy) { this.setStatus('Espere a que termine la operación antes de cerrar.'); return false; }
-            if (!force && this.hasUnsavedChanges && !window.confirm('Hay cambios sin guardar. ¿Desea cerrar y descartarlos?')) return false;
+            if (!force && (this.hasUnsavedChanges || this.pieceUnpublished) && !window.confirm('Hay cambios sin guardar. ¿Desea cerrar y descartarlos?')) return false;
             this.visible = false;
             this.epoch += 1;
             this.selectionRevision += 1;
             this.cancelCellEditor();
             this.overlay.hidden = true;
             this.metadata = null;
+            this.pieceEdit = null;
+            this.pieceUnpublished = false;
             this.selectSourceUrl = '';
             this.removeMarker = null;
             this.sheet = null;
@@ -479,14 +493,14 @@
             const epoch = this.epoch;
             this.setBusy(true);
             try {
-                await this.request(this.selectSourceUrl, {
+                const result = await this.request(this.selectSourceUrl, {
                     method: 'POST',
                     body: JSON.stringify({ action: 'select_source', source_sheet: name, source_workbook_id: this.metadata.id }),
                     headers: { 'Content-Type': 'application/json' },
                 });
                 if (epoch !== this.epoch) return;
                 this.changeSheet(name);
-                window.planExcel?.sourceSelected(this.metadata.id, name);
+                window.planExcel?.sourceSelected(this.metadata.id, name, result);
                 this.setStatus(`Se incorporará «${name}» al guardar el plano.`, 'success');
             } catch (error) {
                 if (epoch !== this.epoch) return;
@@ -502,6 +516,7 @@
             this.commitAll();
             if (this.sheet) this.sheetPositions.set(this.sheet, { top: this.viewport.scrollTop, left: this.viewport.scrollLeft, row: this.selectedRow, col: this.selectedCol, zoom: this.zoom, fitMode: this.fitMode, formMode: this.formMode });
             this.sheet = name;
+            this.applyPermissions();
             this.addressDirty = false;
             this.sheetSelect.value = name;
             const saved = this.sheetPositions.get(name);
@@ -956,15 +971,17 @@
             const original = this.tiles.get(this.tileInfo(row, col, sheet).key)?.get(`${row}:${col}`)?.value ?? null;
             if (Object.is(original, value)) this.pending.delete(key);
             else this.pending.set(key, { sheet, row, col, value });
+            if (this.pieceEdit) this.pieceUnpublished = true;
             this.updatePending();
         }
 
         updatePending() {
             const count = this.pending.size;
             const draft = this.formulaDirty || (this.activeEdit && this.activeEdit.input.value !== this.activeEdit.originalText);
-            this.pendingLabel.textContent = !this.canEdit ? 'Solo lectura' : count || draft ? `${count + (draft ? 1 : 0)} cambio${count + (draft ? 1 : 0) === 1 ? '' : 's'} sin guardar` : 'Sin cambios pendientes';
+            this.pendingLabel.textContent = !this.canEdit ? 'Solo lectura' : count || draft ? `${count + (draft ? 1 : 0)} cambio${count + (draft ? 1 : 0) === 1 ? '' : 's'} sin guardar` : this.pieceUnpublished ? 'Cambios pendientes de Guardar pieza' : 'Sin cambios pendientes';
             this.saveButton.disabled = !this.canEdit || this.busy || this.staleRevision;
-            this.saveMotorButton.disabled = Boolean(this.metadata?.motor_registration?.registered) || this.busy || this.staleRevision;
+            this.saveMotorButton.disabled = (!this.pieceEdit && Boolean(this.pieceRegistration?.registered)) || this.busy || this.staleRevision;
+            this.replacePieceButton.disabled = this.busy || this.staleRevision;
             this.removeMarkerButton.disabled = this.busy;
         }
 
@@ -1070,6 +1087,7 @@
         }
 
         notifySaved(metadata) {
+            if (this.pieceEdit) { this.pieceUnpublished = true; this.updatePending(); return; }
             try { this.onSaved?.(metadata); } catch (_) { /* A host callback must not hide a successful save. */ }
             document.dispatchEvent(new CustomEvent('workbook:saved', { detail: metadata }));
         }
@@ -1089,6 +1107,7 @@
             this.commitAll();
             if (this.hasUnsavedChanges && !window.confirm('Recargar descartará sus cambios sin guardar. ¿Desea continuar?')) return;
             const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet,
+                piece_edit:this.pieceEdit, piece_unpublished:this.pieceUnpublished, piece_name:this.pieceDraftName, piece_category_id:this.pieceCategoryId,
                 removeMarker: this.removeMarker, select_source_url: this.selectSourceUrl };
             this.close(true);
             await this.open(metadata);
@@ -1144,7 +1163,7 @@
 
         dialogKeydown(event) {
             if (!this.visible) return;
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); this.save(); return; }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (this.pieceEdit) window.pieceLibrary?.registerCurrent(this); else this.save(); return; }
             if (event.key === 'Escape' && !this.activeEdit && event.target !== this.formula) { event.preventDefault(); this.requestClose(); return; }
             if (event.key !== 'Tab' || event.target === this.viewport || event.target === this.activeEdit?.input) return;
             const elements = [...this.panel.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter((element) => element.getClientRects().length);

@@ -29,7 +29,7 @@
             window.pdfWorkflow?.reset?.();
             window.planVersions?.reset();
             window.projectWorkspace?.reset();
-            window.motorLibrary?.reset();
+            window.pieceLibrary?.reset();
         }
         appState.user = user;
         const permissions = user?.permissions || {};

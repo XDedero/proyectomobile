@@ -3,6 +3,7 @@ from io import BytesIO
 import json
 import tempfile
 from zipfile import ZipFile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -12,7 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-from .models import PdfMarker, PdfPlan, PlanWorkbookSheet, SavedMotor, WorkbookDocument
+from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, PlanWorkbookSheet, SavedMotor, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload
 from .tests import dxf_file
 
@@ -72,6 +73,122 @@ class SharedPlanWorkbookTests(TestCase):
         response = self.client.post(plan['workbook_url'], {'file': SimpleUploadedFile('Equipos.xlsx', content), 'first_as_listing': str(as_listing).lower()})
         self.assertEqual(response.status_code, 200, response.content[:500])
         return response.json(), content
+
+    def test_resaving_removes_deleted_and_replaced_button_sheets_in_both_plan_formats(self):
+        for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
+            with self.subTest(kind=kind):
+                plan = self.plan(kind)
+                if kind == 'pdf':
+                    self.marker(plan)
+                    self.marker(plan)
+                state = self.client.get(plan['detail_url']).json()
+                buttons = state['markers' if kind == 'pdf' else 'motors']
+                category = ButtonCategory.objects.get(name='Motores')
+                for button in buttons:
+                    self.assertEqual(self.post(button['assign_url'], {'action': 'set_category', 'category_id': str(category.pk)}).status_code, 200)
+                self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'add'}).status_code, 200)
+                self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'add'}).status_code, 200)
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+                for button in buttons[:-1]:
+                    self.assertEqual(self.post(button['delete_url']).status_code, 200)
+                survivor = buttons[-1]
+                self.assertEqual(self.post(survivor['assign_url'], {'blank': True}).status_code, 200)
+                document = model.objects.get(pk=plan['id']).workbook
+                before = document.plan_sheets.count()
+                with patch('mobileApp.terminal_monitor.queue_saved_project_sync') as publish:
+                    response = self.post(plan['save_project_url'])
+                self.assertEqual(response.status_code, 200, response.content[:500])
+                self.assertGreater(before, 3)
+                document.refresh_from_db()
+                self.assertEqual(set(document.plan_sheets.values_list('name', flat=True)), {'Listado', 'Listado motores 2', 'Motores'})
+                marker_model = PdfMarker if kind == 'pdf' else Motor
+                current = marker_model.objects.get(pk=survivor['id'])
+                self.assertEqual(current.sheet_name, 'Motores')
+                if kind == 'dxf':
+                    self.assertEqual(current.excel_sheets, ['Motores'])
+                snapshot = SavedProject.objects.get(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan['id']})
+                self.assertEqual(publish.call_args.args[2], bytes(snapshot.content))
+                with ZipFile(BytesIO(bytes(snapshot.content))) as archive:
+                    manifest = json.loads(archive.read('manifest.json'))
+                    self.assertEqual([button['sheet'] for button in manifest['markers']], ['Motores'])
+                    book = load_workbook(BytesIO(archive.read('workbooks/w1.xlsx')))
+                    try:
+                        self.assertEqual(book.sheetnames, ['Listado', 'Listado motores 2', 'Motores'])
+                        self.assertEqual(len(book['Motores']._images), 1)
+                        self.assertEqual(len(book['Motores']._charts), 2)
+                    finally:
+                        book.close()
+
+    def test_shared_sheet_survives_until_its_last_button_is_deleted(self):
+        from .plan_workbook import EMPTY_SHEET
+        from .xlsx_package import sheet_names
+
+        plan = self.plan()
+        self.imported(plan)
+        first, second = self.marker(plan), self.marker(plan)
+        for button in (first, second):
+            self.assertEqual(self.post(button['assign_url'], {'sheet': 'Motor A'}).status_code, 200)
+        document = PdfPlan.objects.get(pk=plan['id']).workbook
+        self.assertEqual(self.post(first['delete_url']).status_code, 200)
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(sheet_names(document.content), ['Motor A'])
+        self.assertEqual(list(document.plan_sheets.values_list('name', flat=True)), ['Motor A'])
+        book = load_workbook(BytesIO(bytes(document.content)))
+        try:
+            self.assertEqual(book['Motor A']['A2'].value, 'Compresor')
+        finally:
+            book.close()
+        self.assertEqual(self.post(second['delete_url']).status_code, 200)
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(sheet_names(document.content), [EMPTY_SHEET])
+        revision = document.revision
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(document.revision, revision)
+
+    def test_imported_button_source_replaces_default_sheet_without_exporting_other_source_tabs(self):
+        from .xlsx_package import sheet_names
+
+        plan = self.plan()
+        marker = self.marker(plan)
+        response = self.client.post(marker['assign_url'], {
+            'action': 'stage', 'source_sheet': 'Motor B',
+            'file': SimpleUploadedFile('Importado.xlsx', source_workbook()),
+        })
+        self.assertEqual(response.status_code, 200, response.content[:400])
+        response = self.post(plan['save_project_url'])
+        self.assertEqual(response.status_code, 200, response.content[:400])
+        button = PdfMarker.objects.get(pk=marker['id'])
+        self.assertEqual(sheet_names(button.workbook.content), ['Motor B'])
+        self.assertEqual(sheet_names(button.source_workbook.content), ['Inventario', 'Motor A', 'Motor B'])
+        self.assertEqual(button.source_output, button.sheet_name)
+        book = load_workbook(BytesIO(bytes(button.workbook.content)))
+        try:
+            self.assertEqual(book['Motor B']['A2'].value, 'Bomba')
+        finally:
+            book.close()
+        self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+        button.workbook.refresh_from_db()
+        self.assertEqual(sheet_names(button.workbook.content), ['Motor B'])
+
+    def test_failed_save_rolls_back_sheet_cleanup_and_catalog_changes(self):
+        from django.core.exceptions import ValidationError
+
+        plan = self.plan()
+        self.marker(plan)
+        marker = self.marker(plan)
+        self.assertEqual(self.post(marker['delete_url']).status_code, 200)
+        document = PdfPlan.objects.get(pk=plan['id']).workbook
+        original = bytes(document.content)
+        rows = list(document.plan_sheets.values_list('id', 'name'))
+        with patch('mobileApp.project_views.export_project', side_effect=ValidationError('No se pudo exportar.')):
+            response = self.post(plan['save_project_url'])
+        self.assertEqual(response.status_code, 400)
+        document.refresh_from_db()
+        self.assertEqual(bytes(document.content), original)
+        self.assertEqual(list(document.plan_sheets.values_list('id', 'name')), rows)
 
     def test_default_drawings_use_one_book_and_independent_empty_motor_sheets(self):
         cad = self.plan('dxf')

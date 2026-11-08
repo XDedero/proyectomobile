@@ -11,8 +11,7 @@
     let pendingAssignment = null;
     const viewer = new DxfViewer(document.getElementById('dxfViewport'), id => {
         if (busy || viewer.moving) return;
-        selectMotor(id);
-        openSelectedButton();
+        activateMotor(id);
     });
     const activeKey = () => `dxf.activePlan.${appState.user?.id || 'anonymous'}`;
     const permissions = () => ({...appState.user?.permissions, ...appState.currentPlan?.permissions});
@@ -94,8 +93,8 @@
         motorCard.hidden = !motor;
         excelLinkedSection.style.display = motor?.excel ? 'block' : 'none';
         if (window.projectWorkspace?.active?.kind === 'dxf') window.projectWorkspace.selection(motor ? {
-            name: motor.name, workbook: motor.excel, assign: chooseExcel, open: showPreview, remove: deleteSelectedMarker,
-            target: { name: motor.name, assign_url: motor.assign_url, apply(result) {
+            buttonId: motor.id, name: motor.name, workbook: motor.excel, assign: chooseExcel, open: showPreview, remove: deleteSelectedMarker,
+            target: { category_id: motor.category_id, name: motor.name, assign_url: motor.assign_url, apply(result) {
                 const current = appState.currentPlan?.motors.find((item) => item.id === result.motor.id);
                 if (!current) return null;
                 Object.assign(current, result.motor);
@@ -127,11 +126,28 @@
         resetPreview();
         appState.selectedMotorId = id;
         viewer.select(id);
+        window.planDisplay?.peekButton('dxf',id);
         if (center) viewer.focusMotor(id);
         for (const button of motorList.querySelectorAll('button')) button.setAttribute('aria-pressed', String(Number(button.dataset.motorId) === id));
         updateMotorCard();
         errorNoPlanAlert.style.display = 'none';
-        status.textContent = `${motor.name} seleccionado. ${permissions().can_assign ? 'Puede asignar su archivo .xlsx.' : 'Consulta de Excel en modo de lectura.'}`;
+        status.textContent = `${motor.name} seleccionado. Pulse de nuevo para abrir su ficha.`;
+    }
+
+    function activateMotor(id, center = false) {
+        if (busy || viewer.moving || !appState.currentPlan?.motors.some(item => item.id === id)) return;
+        const alreadySelected = appState.selectedMotorId === id;
+        selectMotor(id, center);
+        if (alreadySelected) openSelectedButton();
+    }
+
+    function deselectMotor() {
+        appState.selectedMotorId = null;
+        window.planDisplay?.clearPeek();
+        viewer.select(null);
+        for (const button of motorList.querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
+        updateMotorCard();
+        status.textContent = '';
     }
 
     function updatePlanCardUI() {
@@ -153,7 +169,7 @@
             button.dataset.motorId = motor.id;
             button.setAttribute('aria-pressed', String(motor.id === appState.selectedMotorId));
             button.textContent = `${index + 1}. ${motor.name} · ${motor.sheet_name || 'Sin hoja asignada'}`;
-            button.addEventListener('click', () => { selectMotor(motor.id, true); openSelectedButton(); });
+            button.addEventListener('click', () => activateMotor(motor.id, true));
             motorList.append(button);
         }
         updateMotorCard();
@@ -182,7 +198,7 @@
         remember(plan.id);
         setMode('explore');
         activateProject();
-        status.textContent = plan.motors.length ? `Plano listo. Toque uno de los ${plan.motors.length} motores para consultar su Excel.` : 'Plano listo. Puede desplazarse y ampliar el dibujo.';
+        status.textContent = plan.motors.length ? 'Pulse un motor para seleccionarlo y vuelva a pulsarlo para abrir su ficha.' : 'Plano listo. Puede desplazarse y ampliar el dibujo.';
         errorNoPlanAlert.style.display = 'none';
         return true;
     }
@@ -324,6 +340,7 @@
         const plan = appState.currentPlan;
         if (!plan || busy || !placing || !permissions().can_assign) return;
         const currentRevision = revision;
+        const fromPiece = placementOptions?.origin === 'piece';
         setBusy(true, 'Guardando botón…');
         try {
             const position = { svg_x, svg_y, name: `Botón ${plan.motors.length + 1}` };
@@ -338,11 +355,11 @@
             viewer.update();
             selectMotor(motor.id);
             setMode('explore');
-            status.textContent = 'Botón creado.';
+            status.textContent = 'Botón creado y seleccionado. Pulse de nuevo para abrir su ficha.';
             window.projectWorkspace?.dirty();
-            await openSelectedButton();
         } catch (error) { showError(error.message); }
         finally { setBusy(false); updateActions(); }
+        if (fromPiece && currentRevision === revision && appState.currentPlan?.id === plan.id) await showPreview();
     };
     async function setMode(mode) {
         if (mode === 'move' && !permissions().can_change_plan) return;
@@ -463,6 +480,7 @@
     window.planWorkflow = { close, listSaved, restore, permissionsChanged, activate: activateProject,
         get currentPlan() { return appState.currentPlan; },
         select: selectMotor,
+        deselect: deselectMotor,
         editButtonDetails(mode = 'description') { return showButtonDetails(mode); },
         removeDeleted(id) {
             let remembered;

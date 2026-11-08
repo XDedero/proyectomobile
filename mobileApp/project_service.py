@@ -86,6 +86,7 @@ def export_project(kind, plan):
                        for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
+        'display_settings': plan.display_settings,
         'owner_username': plan.owner_username or (plan.imported_by.get_username() if plan.imported_by_id else ''),
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
         'workbook_mode': document.plan_mode,
@@ -145,6 +146,8 @@ def finite(value):
 @transaction.atomic
 def import_shared_project(plan, kind, source, svg, markers, books, manifest, user):
     from .button_descriptions import imported_details
+    from .display_settings import clean_display
+    plan.display_settings = clean_display(manifest.get('display_settings', {}))
     key = manifest.get('workbook')
     if not isinstance(key, str) or key not in books or len(books) != 1:
         raise ValidationError('El proyecto debe contener un único Excel del plano.')
@@ -204,6 +207,7 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
     else:
         a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
         Motor.objects.bulk_create([Motor(plan=plan, entity_key=item['entity_key'], name=item['name'],
+            has_area=item.get('has_area', False), area_radius_x=item.get('area_radius_x'), area_radius_y=item.get('area_radius_y'),
             x=item['x'], y=item['y'], z=item['z'], svg_x=a*item['x']+c*item['y']+e,
             svg_y=b*item['x']+d*item['y']+f, svg_bounds=[a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f, 0, 0],
             workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else [],

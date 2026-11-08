@@ -118,7 +118,7 @@
         byId('pdfModeHint').textContent = next === 'add'
             ? 'Toque el punto del plano donde desea colocar el botón.'
             : next === 'move' ? 'Arrastre un botón hasta su nueva posición. También puede moverlo con las flechas del teclado.'
-            : 'Deslice para recorrer el plano. Toque un botón para abrir su Excel.';
+            : 'Pulse un botón para seleccionarlo y vuelva a pulsarlo para abrir su ficha.';
     }
 
     function renderMarkerList() {
@@ -148,8 +148,8 @@
         areaToggle.disabled = busy;
         byId('pdfSelectedMarker').hidden = !marker;
         if (window.projectWorkspace?.active?.kind === 'pdf') window.projectWorkspace.selection(marker ? {
-            name: markerName(marker), workbook: marker.workbook, adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
-            target: { name: markerName(marker), assign_url: marker.assign_url, apply(result) {
+            buttonId: marker.id, name: markerName(marker), workbook: marker.workbook, adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
+            target: { category_id: marker.category_id, name: markerName(marker), assign_url: marker.assign_url, apply(result) {
                 const index = plan.markers.findIndex((item) => item.id === result.marker.id);
                 if (index < 0) return null;
                 plan.markers[index] = result.marker;
@@ -178,10 +178,18 @@
         if (busy || !plan || !appState.user) return;
         const marker = plan.markers.find((item) => item.id === Number(id));
         if (!marker) return;
+        const alreadySelected = selectedId === marker.id;
         selectedId = marker.id;
         updateMarkers();
-        if (!open || mode === 'move') return;
+        window.planDisplay?.peekButton('pdf',marker.id);
+        if (!open || !alreadySelected || mode === 'move') return;
         await openSelectedButton(marker);
+    }
+
+    function deselectMarker() {
+        selectedId = null;
+        window.planDisplay?.clearPeek();
+        updateMarkers();
     }
 
     async function openSelectedButton(marker) {
@@ -231,11 +239,11 @@
         dialog.hidden = false;
         byId('pdfMarkerLabel').focus();
         try {
-            const data = await request('/api/motor-library/');
+            const data = await request('/api/piece-library/');
             if (dialogMarkerId !== marker.id || dialog.hidden) return;
-            library.replaceChildren(new Option('Seleccione un motor guardado', ''));
-            for (const motor of data.motors) library.append(new Option(motor.name, String(motor.id)));
-            if (!data.motors.length) library.options[0].textContent = 'No hay motores guardados. Puede usar la ficha vacía o importar del dispositivo.';
+            library.replaceChildren(new Option('Seleccione una pieza guardada', ''));
+            for (const motor of data.pieces) library.append(new Option(motor.name, String(motor.id)));
+            if (!data.pieces.length) library.options[0].textContent = 'No hay piezas guardadas. Puede usar la ficha vacía o importar del dispositivo.';
         } catch (error) { if (dialogMarkerId === marker.id) byId('pdfMarkerDialogStatus').textContent = error.message; }
     }
 
@@ -279,6 +287,8 @@
     async function placeMarker(position) {
         if (!plan || busy || !appState.user) return;
         const currentRevision = revision;
+        const fromPiece = placementOptions?.origin === 'piece';
+        let pieceWorkbook = null;
         setBusy(true);
         clearError();
         try {
@@ -290,11 +300,12 @@
             selectedId = marker.id;
             updateMarkers();
             setMode('explore');
-            status(marker.source_sheet ? 'Botón creado. Elija la hoja que se incorporará al guardar.' : 'Botón creado.');
+            status('Botón creado y seleccionado. Pulse de nuevo para abrir su ficha.');
             window.projectWorkspace?.dirty();
-            await openSelectedButton(marker);
+            if (fromPiece) pieceWorkbook = marker.workbook;
         } catch (error) { showError(error); }
         finally { setBusy(false); }
+        if (pieceWorkbook && currentRevision === revision) await openWorkbook(pieceWorkbook);
     }
 
     async function moveMarker(id, position) {
@@ -538,6 +549,7 @@
         reset,
         get currentPlan() { return plan; },
         select(id) { return selectMarker(id, false); },
+        deselect: deselectMarker,
         editButtonDetails(marker, mode = 'description') { return showButtonDetails(marker, mode); },
         removeDeleted(id) {
             if (plan?.id !== id) return;

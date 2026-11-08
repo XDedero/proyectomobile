@@ -267,9 +267,13 @@ def new_button_options(request):
         raise ValidationError('Indica si el botón mostrará su descripción.')
     if origin is None and upload is None and 'category_id' not in data:
         return data, None, None, None
-    if origin not in ('blank', 'upload', 'category') or (origin == 'upload') != (upload is not None):
+    if origin not in ('blank', 'upload', 'category', 'piece') or (origin == 'upload') != (upload is not None):
         raise ValidationError('Elija una ficha predeterminada o un archivo para importar.')
     category = button_category(data.get('category_id'))
+    if origin == 'piece':
+        from .workbook_service import positive_integer
+        record = get_object_or_404(SavedMotor, pk=positive_integer(data.get('saved_piece_id'), 'Pieza'))
+        origin = ('piece', record.pk)
     if origin == 'category':
         from .models import CategoryWorkbook
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -282,7 +286,9 @@ def new_button_options(request):
 
 
 def initialize_button(marker, user, origin, upload):
-    if isinstance(origin, tuple) and origin[0] == 'category':
+    if isinstance(origin, tuple) and origin[0] == 'piece':
+        stage_piece_source(marker, user, origin[1])
+    elif isinstance(origin, tuple) and origin[0] == 'category':
         stage_button_source(marker, user, upload, selected=origin[1])
     elif origin == 'upload':
         stage_button_source(marker, user, upload)
@@ -304,9 +310,45 @@ def stage_button_source(marker, user, upload, selected=None):
     )
     marker.source_sheet = sheet
     marker.source_revision = None
-    marker.save(update_fields=['source_workbook', 'source_sheet', 'source_revision'])
+    marker.piece_source = False
+    marker.save(update_fields=['source_workbook', 'source_sheet', 'source_revision', 'piece_source'])
     if previous:
         WorkbookDocument.objects.filter(pk=previous, plan_mode='source').delete()
+
+
+def stage_piece_source(marker, user, piece_id):
+    """Each button gets its own catalog copy; only its selected tab is materialized."""
+    from .models import PieceDeletion
+    selected = get_object_or_404(SavedMotor, pk=piece_id)
+    content, mapping, origins, chosen = None, {}, {}, None
+    records = SavedMotor.objects.select_related('workbook','category').exclude(uuid__in=PieceDeletion.objects.values('id')).order_by('name_key','id')
+    for record in records:
+        source = bytes(record.workbook.content)
+        first = sheet_names(source)[0]
+        requested = record.cloud_sheet or f'{record.category.name if record.category_id else "Piezas"}-{record.name}'
+        if content is None:
+            from .xlsx_package import rename_sheet
+            content, title = rename_sheet(single_sheet(source,first),first,requested)
+        else:
+            content, title = append_sheet(content, source, first, requested)
+        mapping[title] = {'id':str(record.uuid),'name':record.name,'category_id':str(record.category_id) if record.category_id else None,
+            'category_name':record.category.name if record.category_id else ''}
+        origins[title] = record.uuid
+        if record.pk == selected.pk:
+            chosen = title
+        if len(content) > MAX_WORKBOOK_BYTES:
+            raise ValidationError('El catálogo supera el máximo de 100 MB para la copia del botón.')
+    if chosen is None:
+        raise ValidationError('La pieza ya no está disponible. Actualice el catálogo.')
+    previous = marker.source_workbook_id
+    marker.source_workbook = WorkbookDocument.objects.create(name='Piezas del botón.xlsx', content=write_sheet_origins(content,origins),
+        plan_mode='source', source_pieces=mapping, updated_by=user)
+    marker.source_sheet, marker.source_revision, marker.piece_source = chosen, None, True
+    if selected.category_id:
+        marker.category = selected.category
+    marker.save(update_fields=['source_workbook','source_sheet','source_revision','piece_source','category'])
+    if previous:
+        WorkbookDocument.objects.filter(pk=previous,plan_mode='source').delete()
 
 
 def source_workbook_data(marker, assign_url):
@@ -337,7 +379,7 @@ def materialize_button_sources(plan, user):
         remove_first = previous and document.plan_sheets.count() > 1
         if remove_first:
             content = remove_sheet(content, old)
-        content, title = append_sheet(content, source.content, name, old if remove_first else name)
+        content, title = append_sheet(content, source.content, name, name if marker.piece_source else old if remove_first else name)
         content = discard_empty_sheet(document, content)
         if previous and not remove_first:
             content = remove_sheet(content, old)
@@ -353,20 +395,46 @@ def materialize_button_sources(plan, user):
     return changed
 
 
+@transaction.atomic
 def organize_project_sheets(plan, user):
     """Use the category and marker order as the authoritative exported tab names."""
     document = ensure_workbook(plan, user)
     rows = {row.name: row for row in document.plan_sheets.all()}
     buttons = list(markers(plan).select_for_update().select_related('category').order_by('pk'))
+    content = bytes(document.content)
+    names = sheet_names(content)
+    retained = {button.sheet_name for button in buttons if button.sheet_name}
+    retained.update(row.name for row in rows.values() if row.is_listing)
+    retained.intersection_update(names)
+    if retained:
+        for name in names:
+            if name not in retained:
+                content = remove_sheet(content, name)
+    else:
+        # XLSX requires one worksheet even when the plan has no buttons/listings.
+        if names != [EMPTY_SHEET]:
+            content = empty_workbook()
+        retained = {EMPTY_SHEET}
+        if EMPTY_SHEET not in rows:
+            rows[EMPTY_SHEET] = PlanWorkbookSheet.objects.create(
+                workbook=document, name=EMPTY_SHEET, created_by=user)
+    removed = set(rows) - retained
+    if removed:
+        document.plan_sheets.filter(name__in=removed).delete()
+        rows = {name: row for name, row in rows.items() if name in retained}
+    if content != bytes(document.content):
+        origins = read_sheet_origins(content)
+        if origins:
+            content = write_sheet_origins(content, {name: origin for name, origin in origins.items() if name in retained})
     groups = {}
     for button in buttons:
         row = rows.get(button.sheet_name)
         if row and not row.is_listing and button.category_id:
             groups.setdefault(row.name, {}).setdefault(button.category.name, []).append(button)
 
-    content = bytes(document.content)
     targets = {}
     categories = {}
+    piece_sheets = {button.sheet_name for button in buttons if button.piece_source}
     for name, by_category in groups.items():
         for index, (category, assigned) in enumerate(by_category.items()):
             target = name
@@ -385,6 +453,7 @@ def organize_project_sheets(plan, user):
 
     categorized = {name for entries in categories.values() for _, name in entries}
     occupied = {name.casefold() for name in rows if name not in categorized}
+    occupied.update(name.casefold() for name in piece_sheets)
     ordered = [row.name for row in sorted(rows.values(), key=lambda row: (not row.is_primary, row.listing_order, row.pk)) if row.is_listing]
     renamed = {}
     for category in sorted(categories, key=lambda value: (alphabetic(value), value.casefold())):
@@ -392,6 +461,9 @@ def organize_project_sheets(plan, user):
         base = unique_name([], category)
         next_number = 1
         for _, name in entries:
+            if name in piece_sheets:
+                ordered.append(name)
+                continue
             title = base
             if len(entries) > 1 or title.casefold() in occupied:
                 while True:
@@ -406,7 +478,7 @@ def organize_project_sheets(plan, user):
                 renamed[name] = title
     names = sheet_names(content)
     ordered.extend(name for name in names if name not in rows or (name not in categorized and not rows[name].is_listing))
-    if not renamed and ordered == names and content == bytes(document.content):
+    if not renamed and ordered == names and content == bytes(document.content) and not removed:
         return False
     result = arrange_sheets(content, renamed, ordered)
     store(document, result, user)
@@ -452,7 +524,13 @@ def assign_marker(marker, user, data=None, upload=None):
         if name != marker.source_sheet:
             marker.source_sheet = name
             marker.source_revision = None
-            marker.save(update_fields=['source_sheet', 'source_revision'])
+            fields=['source_sheet', 'source_revision']
+            info = marker.source_workbook.source_pieces.get(name,{}) if marker.piece_source else {}
+            category = ButtonCategory.objects.filter(pk=info['category_id']).first() if info.get('category_id') else None
+            if category:
+                marker.category = category
+                fields.append('category')
+            marker.save(update_fields=fields)
         return None
     document = ensure_workbook(marker.plan, user)
     if upload:
@@ -466,9 +544,13 @@ def assign_marker(marker, user, data=None, upload=None):
         record = document.plan_sheets.filter(name=data['sheet'], is_listing=False).first()
         if not record:
             raise ValidationError('Seleccione una hoja de motor del Excel de este plano.')
+    elif data.get('saved_piece_id'):
+        from .workbook_service import positive_integer
+        stage_piece_source(marker,user,positive_integer(data['saved_piece_id'],'Pieza'))
+        return None
     elif data.get('saved_motor_id'):
         from .workbook_service import positive_integer
-        record_motor = get_object_or_404(SavedMotor, pk=positive_integer(data['saved_motor_id'], 'Motor guardado'))
+        record_motor = get_object_or_404(SavedMotor, pk=positive_integer(data.get('saved_piece_id') or data.get('saved_motor_id'), 'Pieza guardada'))
         names = sheet_names(record_motor.workbook.content)
         source_name = next((name for name in names if not name.casefold().startswith('listado')), names[0])
         record = _append(document, record_motor.workbook.content, source_name, user,
@@ -506,6 +588,8 @@ def assign_marker(marker, user, data=None, upload=None):
             title=title, deduplicate=False)
     else:
         raise ValidationError('Elija una hoja, una ficha vacía o un motor guardado.')
+    marker.piece_source = False
+    marker.save(update_fields=['piece_source'])
     bind(marker, document, record.name)
     if marker.source_workbook_id:
         source_id = marker.source_workbook_id

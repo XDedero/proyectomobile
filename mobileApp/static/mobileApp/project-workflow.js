@@ -8,7 +8,8 @@
     let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
     let localRows = [], cloudRows = [];
     let cloudRequestVersion = 0, cloudLoading = false, cloudOpening = false, cloudCheckedAt = 0;
-    const cloudMessages = { local: "Guardado en este equipo", pending: "Guardado aquí. Publicando en la nube…", synced: "Guardado en Drive y Supabase", partial: "Disponible en Drive. Supabase pendiente", error: "Guardado aquí. Falló la publicación en la nube" };
+    let localCheckedAt = 0;
+    const cloudMessages = { local: "Guardado en este equipo", pending: "Guardado aquí. Publicando en la nube…", uploaded: "Archivos subidos a Drive. Sincronizando el registro en segundo plano…", synced: "Guardado en Drive y Supabase", partial: "Disponible en Drive. Confirmando el registro…", error: "Guardado aquí. Falló la publicación en la nube" };
     const overlay = document.createElement('section');
     overlay.id = 'planFullscreen';
     overlay.className = 'plan-fullscreen';
@@ -24,7 +25,7 @@
           <button type="button" data-project-action="explore">Explorar plano</button>
           <button type="button" data-project-action="add">Agregar botón</button>
           <button type="button" data-project-action="move" id="fullscreenMoveMarker">Mover botón</button>
-          <button type="button" data-project-action="saved-motors">Importar motor guardado</button>
+          <button type="button" data-project-action="saved-motors">Importar pieza guardada</button>
           <button type="button" data-project-action="assign-listing">Añadir listado</button>
           <button type="button" data-project-action="open-listing" id="fullscreenOpenListing">Ver listados</button>
           <button type="button" data-project-action="save" id="fullscreenSaveMenu" hidden>Guardar plano</button>
@@ -42,6 +43,40 @@
         <p id="fullscreenPlanStatus" class="fullscreen-plan-status" role="status"></p>`;
     document.body.append(overlay);
     const fullMenu = byId('fullscreenPlanMenu');
+    const uploadStages = { queued: 'Guardado en este PC. Esperando turno para subir…', preparing: 'Preparando los archivos para Drive…',
+        pdf: 'Subiendo el PDF a Drive…', excel: 'Subiendo el Excel y sus hojas a Drive…',
+        database: 'Registrando el plano, las hojas y los botones en Supabase…', confirming: 'Confirmando el guardado completo…' };
+    for (const [id, anchor] of [['pdfProjectUploadProgress', 'pdfProjectSaveStatus'], ['cadProjectUploadProgress', 'cadProjectSaveStatus'], ['fullscreenUploadProgress', 'fullscreenPlanStatus']]) {
+        const element = document.createElement('section');
+        element.id = id; element.className = 'project-upload-progress'; element.hidden = true;
+        element.innerHTML = '<p class="upload-stage mb-1" role="status" aria-live="polite"></p><progress max="100" aria-label="Etapas del guardado en la nube"></progress><small class="upload-hint"></small>';
+        byId(anchor).after(element);
+    }
+    function renderUploadProgress() {
+        const plan = active?.plan, pending = saving || plan?.cloud_status === 'pending';
+        for (const id of ['pdfProjectUploadProgress', 'cadProjectUploadProgress', 'fullscreenUploadProgress']) {
+            const element = byId(id);
+            element.hidden = !plan || (id === 'fullscreenUploadProgress' ? !full : id.startsWith('pdf') !== (active.kind === 'pdf')) ||
+                (!saving && !plan._saveRequestError && !['pending', 'uploaded', 'synced', 'partial', 'error'].includes(plan.cloud_status));
+            if (element.hidden) continue;
+            const state = saving ? 'pending' : plan._saveRequestError ? 'error' : plan.cloud_status;
+            const message = saving ? 'Guardando los cambios en este PC…' : plan._cloudPollDelayed && pending ? 'Esperando conexión para confirmar la subida…' :
+                state === 'pending' ? uploadStages[plan.cloud_stage] || cloudMessages.pending : state === 'synced' ? 'Guardado confirmado en Drive y Supabase' :
+                ['uploaded', 'partial'].includes(state) ? 'Archivos subidos a Drive' : 'No se completó la subida.';
+            const label = element.querySelector('.upload-stage');
+            if (label.textContent !== message) label.textContent = message;
+            element.dataset.state = state;
+            const bar = element.querySelector('progress');
+            if (saving) bar.removeAttribute('value');
+            else bar.value = ['synced', 'uploaded', 'partial'].includes(state) ? 100 : Math.min(95, Math.max(0, plan.cloud_progress || 5));
+            bar.setAttribute('aria-valuetext', message);
+            element.querySelector('.upload-hint').textContent = pending ? 'La subida todavía no ha terminado.' : state === 'synced' ? 'La subida y el registro han finalizado.' : ['uploaded', 'partial'].includes(state) ? 'El registro de Supabase se confirma automáticamente. Puede seguir trabajando.' : plan._saveRequestError || plan.cloud_error || '';
+        }
+    }
+    function applyCloudState(plan, saved) {
+        for (const key of ['cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress']) plan[key] = saved[key];
+        plan._cloudPollDelayed = false;
+    }
 
     async function request(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -69,8 +104,9 @@
     function canSave(kind = active?.kind) { return Boolean(rights(kind)[kind === 'pdf' ? 'can_save_pdf_plan' : 'can_save_plan']); }
     function canDelete(kind = active?.kind, plan = null) { return Boolean(rights(kind, plan)[kind === 'pdf' ? 'can_delete_pdf_plan' : 'can_delete_plan'] || appState.user?.permissions?.can_administer); }
     function canDeleteMarker() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_delete_pdf_marker' : 'can_delete_cad_marker']); }
-    function isBusy() { return saving || deleting || Boolean(active?.isBusy?.()); }
+    function isBusy() { return saving || deleting || active?.plan.cloud_status === 'pending' || Boolean(active?.isBusy?.()); }
     function update() {
+        window.planDisplay?.render(active, selectedActions);
         byId('cadProjectActions').hidden = !appState.currentPlan;
         for (const button of byId('savedPlansContainer').querySelectorAll('[data-delete-plan]')) button.disabled = isBusy();
         for (const [kind, prefix] of [['pdf', 'Pdf'], ['dxf', 'Cad']]) {
@@ -96,11 +132,12 @@
         byId('fullscreenMoveMarkerQuick').hidden = !active || !canMove();
         byId('fullscreenDeleteMarker').hidden = !selectedActions?.remove || !canDeleteMarker();
         for (const id of ['fullscreenSavePlan', 'fullscreenSaveMenu', 'fullscreenDeletePlan', 'fullscreenDeleteMarker', 'fullscreenAddMarker', 'fullscreenMoveMarkerQuick']) byId(id).disabled = isBusy();
+        renderUploadProgress();
         if (!active) return;
-        const saveState = !active.plan.saved_at ? 'Sin guardar' : active.plan._projectDirty ? 'Cambios pendientes' : 'Guardado';
+        const saveState = saving ? 'Guardando…' : active.plan._saveRequestError ? 'Guardado pendiente' : active.plan.cloud_status === 'pending' ? 'Subiendo a la nube…' : !active.plan.saved_at ? 'Sin guardar' : active.plan._projectDirty ? 'Cambios pendientes' : active.plan.cloud_status === 'synced' ? 'Guardado en la nube' : active.plan.cloud_status === 'uploaded' ? 'En Drive · Registrando…' : 'Guardado en este PC';
         const badge = byId(active.kind === 'pdf' ? 'pdfSaveBadge' : 'cadSaveBadge');
         badge.textContent = saveState;
-        badge.classList.toggle('has-changes', saveState !== 'Guardado');
+        badge.classList.toggle('has-changes', saving || Boolean(active.plan._saveRequestError) || active.plan._projectDirty || active.plan.cloud_status !== 'synced');
         byId('fullscreenPlanName').textContent = `${active.plan.name} · ${active.kind.toUpperCase()}`;
         byId('fullscreenOpenListing').hidden = !active.plan.listing;
         byId('fullscreenMoveMarker').hidden = !canMove();
@@ -117,7 +154,7 @@
         if (full && active && (active.kind !== configuration.kind || active.plan.id !== configuration.plan.id)) exitFullscreen();
         active = configuration;
         update();
-        if (!full) status(active.plan._projectDirty ? 'Cambios pendientes' : active.plan.saved_at ? 'Plano guardado' : 'Plano sin guardar');
+        if (!full) status(active.plan._projectDirty ? 'Cambios pendientes' : active.plan.saved_at ? cloudMessages[active.plan.cloud_status] || cloudMessages.local : 'Plano sin guardar');
     }
     function deactivate(kind) {
         if (active?.kind !== kind) return;
@@ -131,6 +168,7 @@
     async function saveActive() {
         if (!active || isBusy() || !canSave()) return false;
         const current = active;
+        current.plan._saveRequestError = '';
         saving = true;
         update();
         status('Guardando plano, botones, fichas y listado…');
@@ -148,6 +186,7 @@
                 }
             }
             if (current.applyArea && !(await current.applyArea())) return false;
+            await window.planDisplay?.flush();
             const data = await post(current.plan.save_project_url);
             if (data.plan && active === current) {
                 if (editor?.visible) editor.close(true);
@@ -155,12 +194,14 @@
                 current.refresh?.();
             }
             current.plan.saved_at = data.saved_at;
+            applyCloudState(current.plan, data.saved);
             current.plan.project_version = data.saved_at;
             window.planVersions?.remember(current.plan);
             current.plan._projectDirty = false;
-            if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(data.saved.cloud_status));
+            if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, data.saved.cloud_status === 'error');
             return true;
         } catch (error) {
+            current.plan._saveRequestError = error.message;
             status(error.message, true);
             if (window.workbookEditor?.visible) window.workbookEditor.setStatus(error.message, 'error');
             return false;
@@ -253,7 +294,8 @@
     }
     function selection(configuration) {
         selectedActions = configuration;
-        window.motorLibrary?.setTarget(configuration?.target || null);
+        window.pieceLibrary?.setTarget(configuration?.target || null);
+        window.planDisplay?.render(active, configuration);
         byId('fullscreenSelection').hidden = !configuration;
         byId('fullscreenDeleteMarker').hidden = !configuration?.remove || !canDeleteMarker();
         if (!configuration) return;
@@ -266,6 +308,25 @@
         byId('fullscreenAdjustArea').hidden = !configuration.adjustArea;
         byId('fullscreenAdjustArea').onclick = configuration.adjustArea;
     }
+
+    function deselectOutsideDocument(event) {
+        if (!active || !selectedActions || !(event.target instanceof Element)) return;
+        if (event.type === 'pointerdown' && (event.button !== 0 || !event.isPrimary)) return;
+        const target = event.target;
+        const documentSurface = active.kind === 'pdf' ? active.viewer.stage : active.viewer.svg;
+        if (documentSurface?.contains(target)) return;
+        // Keep controls that operate on the current button usable while editing.
+        if (window.workbookEditor?.visible || document.querySelector('.modal.show') || !byId('pdfMarkerDialog').hidden) return;
+        if (target.closest('button, input, select, textarea, label, a') && target.closest(
+            '#pdfSelectedMarker, #selectedMotorCard, #fullscreenSelection, #pdfAreaPanel, .display-area, .plan-color-legend, #pdfMarkerList, #motorList, #btnPdfAdjustArea, #btnMoveCadMarker, #btnAssignExcelCorner'
+        )) return;
+        const workflow = active.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow;
+        workflow?.deselect();
+    }
+    document.addEventListener('pointerdown', deselectOutsideDocument, true);
+    document.addEventListener('click', event => {
+        if (event.detail === 0) deselectOutsideDocument(event);
+    }, true);
 
     async function openListing() { await window.planExcel?.openListings(); }
     async function configureListing() { await window.planExcel?.listings(); }
@@ -298,7 +359,12 @@
             }
             byId('savedCountBadge').textContent = data.plans.length;
             const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === active?.plan.id);
-            if (currentSaved && !active.plan._projectDirty && !isBusy()) status(currentSaved.cloud_error || cloudMessages[currentSaved.cloud_status] || cloudMessages.local, ['error', 'partial'].includes(currentSaved.cloud_status));
+            if (currentSaved && !saving && (!active.plan.saved_at || Date.parse(currentSaved.date) >= Date.parse(active.plan.saved_at))) {
+                if (!active.plan.saved_at || Date.parse(currentSaved.date) > Date.parse(active.plan.saved_at)) active.plan._saveRequestError = '';
+                applyCloudState(active.plan, currentSaved);
+                if (!active.plan._projectDirty && !active.plan._saveRequestError) status(currentSaved.cloud_error || cloudMessages[currentSaved.cloud_status] || cloudMessages.local, currentSaved.cloud_status === 'error');
+                update();
+            }
             if (quiet && !byId('modalSavedPlans').classList.contains('show')) return;
             localRows = [...data.plans, ...(data.cached || [])];
             renderLibrary();
@@ -306,6 +372,7 @@
             // Connection failures never mean a plan was deleted. Keep the last
             // confirmed state until this installation can be reached again.
             if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) container.textContent = error.message;
+            if (active?.plan.cloud_status === 'pending') { active.plan._cloudPollDelayed = true; renderUploadProgress(); }
         } finally { if (version === libraryRequestVersion) libraryLoading = false; }
     }
     const titleKey = (name) => name.replace(/\.pdf$/i, '').trim().toLocaleLowerCase('es');
@@ -360,7 +427,10 @@
             const badge = document.createElement('small');
             badge.className = 'project-kind-badge';
             badge.textContent = [kind.toUpperCase(), local ? 'En este PC' : 'Sin copia en este PC',
-                cloud && 'En la nube', cloud?.date && new Date(cloud.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
+                local?.cloud_status === 'pending' ? 'Subiendo a la nube…' : cloud && 'En la nube',
+                local?.cloud_status === 'partial' && 'Confirmación pendiente',
+                local?.cloud_status === 'uploaded' && 'Archivos en Drive · Registrando',
+                cloud?.date && new Date(cloud.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
             open.append(title, badge);
             open.addEventListener('click', () => openLibraryEntry(entry, !local));
             row.append(open);
@@ -462,7 +532,8 @@
         librarySignature = null;
     });
     function synchronize() {
-        if (!appState.user || document.hidden || isBusy() || libraryLoading) return;
+        if (!appState.user || document.hidden || saving || deleting || active?.isBusy?.() || libraryLoading) return;
+        localCheckedAt = Date.now();
         listSaved({ quiet: true });
         if (byId('modalSavedPlans').classList.contains('show') && Date.now() - cloudCheckedAt > 15000) showCloudProjects({ quiet: true });
     }
@@ -471,8 +542,9 @@
     window.addEventListener('online', synchronize);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
     setInterval(() => {
-        if (window.pdfWorkflow?.currentPlan || window.planWorkflow?.currentPlan || byId('modalSavedPlans').classList.contains('show')) synchronize();
-    }, 5000);
+        if ((active?.plan.cloud_status === 'pending' || Date.now() - localCheckedAt >= 5000) &&
+            (window.pdfWorkflow?.currentPlan || window.planWorkflow?.currentPlan || byId('modalSavedPlans').classList.contains('show'))) synchronize();
+    }, 1000);
     async function openPlan(kind, plan) {
         if (kind === 'pdf') return window.pdfWorkflow.open(plan);
         return window.planWorkflow.open(plan);
@@ -503,7 +575,7 @@
             active.setMode(action);
             status(action === 'add' ? 'Toque el plano donde desea agregar el botón.' : action === 'move' ? 'Arrastre el botón que desea mover.' : 'Arrastre para recorrer el plano.');
         } else if (action === 'assign-listing') configureListing();
-        else if (action === 'saved-motors') window.motorLibrary?.chooseForTarget();
+        else if (action === 'saved-motors') window.pieceLibrary?.chooseForTarget();
         else if (action === 'open-listing') openListing();
         else if (action === 'save') saveActive();
         else if (action === 'export') exportActive();

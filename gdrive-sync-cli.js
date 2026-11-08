@@ -31,6 +31,24 @@ async function cloudProjects() {
     });
 }
 
+async function cloudPublishTarget(pdfId) {
+    if (typeof pdfId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(pdfId)) throw new Error('Identificador de PDF no válido.');
+    const [pdfs, books] = await Promise.all([
+        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.PDF),
+        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.EXCEL_CSV),
+    ]);
+    const pdf = pdfs.find(file => file.id === pdfId && /\.pdf$/i.test(file.name));
+    if (!pdf) return null;
+    const key = pdf.appProperties?.associationKey;
+    if (!key || pdfs.filter(file => file.appProperties?.associationKey === key).length !== 1) throw new Error('La asociación del PDF en Drive no es única.');
+    const matching = books.filter(file => file.appProperties?.associationKey === key);
+    if (matching.length > 1 || (matching.length && !/\.xlsx$/i.test(matching[0].name))) throw new Error('La asociación del Excel en Drive no es única o no es válida.');
+    const excel = matching[0];
+    const project = { id: pdf.id, name: pdf.name, projectKey: key, pdfVersion: pdf.modifiedTime,
+        excelId: excel?.id || null, excelName: excel?.name || '', date: excel?.modifiedTime || pdf.modifiedTime };
+    return project;
+}
+
 async function downloadProjectFile(id, destination, limit) {
     const response = await GoogleDriveService._fetchWithAuth(
         `${GoogleDriveService.BASE_URL}/files/${encodeURIComponent(id)}?alt=media`,
@@ -194,6 +212,23 @@ async function main() {
         process.exit(1);
     }
 
+    if (args['publish-target']) {
+        console.log(JSON.stringify({ ok: true, project: await cloudPublishTarget(args['drive-id']) }));
+        return;
+    }
+
+    if (args['read-pieces']) {
+        const {findLibrary, readPieceIndex} = require('./scripts/piece-library.js');
+        const library = await findLibrary(GoogleDriveService);
+        let pieces = [];
+        if (library) {
+            const destination = path.join(args.output, 'pieces.xlsx');
+            await downloadProjectFile(library.id, destination, 100*1024*1024);
+            pieces = await readPieceIndex(fs.readFileSync(destination));
+        }
+        console.log(JSON.stringify({ok:true, library, pieces})); return;
+    }
+
     if (args['list-projects'] || args['read-project']) {
         const projects = await cloudProjects();
         if (args['list-projects']) {
@@ -221,6 +256,14 @@ async function main() {
         process.exit(2);
     }
 
+    if (args['write-pieces']) {
+        const {findLibrary, attachPieceIndex, writeLibrary} = require('./scripts/piece-library.js');
+        const existing = await findLibrary(GoogleDriveService);
+        if ((existing?.id || '') !== (args['drive-id'] || '') || (existing?.modifiedTime || '') !== (args['modified-time'] || '')) throw new Error('El catálogo cambió; se volverá a combinar antes de guardar.');
+        const content = await attachPieceIndex(fs.readFileSync(args.file), JSON.parse(fs.readFileSync(args.index,'utf8')));
+        const library = await writeLibrary(GoogleDriveService, existing, content);
+        console.log(JSON.stringify({ok:true,library})); return;
+    }
     if (args.upload) {
         const filePath = args.file;
         const fileName = args.name || path.basename(filePath);
@@ -243,7 +286,8 @@ async function main() {
             associationKey,
             localRecordKey,
             companyId: 1,
-            driveTarget: args['drive-id'] ? { id: args['drive-id'], modifiedTime: args['modified-time'] } : undefined,
+            driveTarget: args['create-only'] ? { missing: true, force: Boolean(args['force-replace']) }
+                : args['drive-id'] ? { id: args['drive-id'], modifiedTime: args['modified-time'], force: Boolean(args['force-replace']) } : undefined,
         });
 
         console.log(JSON.stringify({ ok: true, record }));

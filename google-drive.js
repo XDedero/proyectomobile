@@ -340,9 +340,15 @@ const GoogleDriveService = {
 
         const existingFiles = await this.listFilesInFolder(target.folderId);
         let existing = null;
-        if (driveTarget) {
+        if (driveTarget?.missing) {
+            const matching = existingFiles.filter(file => file.appProperties?.associationKey === assocKey);
+            if (matching.length && (!driveTarget.force || matching.length !== 1)) {
+                throw new Error('El Excel fue recreado en Drive desde otro equipo. Abre la versión de la nube antes de publicar.');
+            }
+            existing = matching[0] || null;
+        } else if (driveTarget) {
             existing = existingFiles.find(file => file.id === driveTarget.id && file.appProperties?.associationKey === assocKey);
-            if (!existing || existing.modifiedTime !== driveTarget.modifiedTime) {
+            if (!existing || (!driveTarget.force && existing.modifiedTime !== driveTarget.modifiedTime)) {
                 throw new Error('El archivo original cambió en Drive. Abre la versión de la nube antes de publicar.');
             }
         } else if (localRecordKey) {
@@ -370,7 +376,7 @@ const GoogleDriveService = {
                 associationKey: String(assocKey),
                 companyId: String(companyId),
                 fileCategory: target.category,
-                localRecordKey: String((driveTarget && existing.appProperties.localRecordKey) || localRecordKey || assocKey)
+                localRecordKey: String((driveTarget && existing?.appProperties?.localRecordKey) || localRecordKey || assocKey)
             }
         };
 

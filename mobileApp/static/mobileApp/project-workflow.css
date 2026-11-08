@@ -1,4 +1,13 @@
 .project-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.project-upload-progress { flex: 0 0 auto; width: 100%; padding: 10px 12px; margin-block: 6px; border: 1px solid #b8cce5; border-radius: 10px; color: #163862; background: #eff6ff; font-size: .8rem; overflow-wrap: anywhere; }
+.project-upload-progress[hidden] { display: none; }
+.project-upload-progress progress { display: block; width: 100%; height: 12px; margin-block: 6px; accent-color: #2563eb; }
+.project-upload-progress .upload-hint { display: block; font-size: .72rem; }
+.project-upload-progress[data-state="synced"] { color: #14532d; border-color: #86cba2; background: #edf9f1; }
+.project-upload-progress[data-state="synced"] progress { accent-color: #16803d; }
+.project-upload-progress[data-state="partial"] { color: #713f12; border-color: #e4c27a; background: #fffbeb; }
+.project-upload-progress[data-state="error"] { color: #991b1b; border-color: #e9a6a6; background: #fff1f2; }
+.plan-fullscreen > .project-upload-progress { width: auto; margin: 0; border-radius: 0; border-width: 1px 0 0; }
 .project-actions .btn { min-height: 38px; font-size: .75rem; }
 .excel-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .excel-choice-actions > button { flex: 1; min-width: 110px; min-height: 44px; font-size: .83rem; }
@@ -63,3 +72,26 @@
 .plan-update-warning { color: #ac1827; border: 1px solid #f0a9b1; background: #fff0f2; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
 .plan-update-warning h2 { font-size: 1.25rem; margin: .5rem 0; }
 .plan-update-warning p { margin: 0; }
+/* Display controls live beside the document, including in fullscreen. */
+.plan-display-dock { position: relative; z-index: 8; display: flex; justify-content: flex-end; gap: .5rem; padding: .5rem; }
+.plan-document-layout { display:flex; align-items:stretch; gap:.5rem; }
+.plan-document-layout > :first-child { flex:1; min-width:0; }
+.plan-document-layout .plan-display-dock { flex-direction:column; justify-content:flex-start; width:220px; flex:none; }
+.plan-display-controls { background: #fff; color: #17324d; border: 1px solid #ccd9e5; border-radius: 10px; padding: .5rem; max-width: 300px; }
+.plan-display-controls label { display: block; font-size: .85rem; margin: .5rem 0; }
+.plan-display-controls input[type=range] { display: block; width: 100%; }
+.display-area legend { font-size: .85rem; font-weight: bold; }
+.plan-color-legend { background: #ffffffed; border: 1px solid #ccd9e5; border-radius: 10px; max-height: 35vh; max-width: 250px; overflow: auto; padding: .4rem; }
+.plan-color-legend button { display:flex; align-items:center; gap:.5rem; background:none; border:0; text-align:left; width:100%; padding:.3rem; font-size:.8rem; }
+.plan-color-legend i { display:inline-block; width:14px; height:14px; flex:none; border-radius:50%; }
+.plan-fullscreen .plan-display-dock { position:absolute; right:.5rem; top:65px; max-height:55vh; overflow:auto; align-items:flex-start; }
+.pdf-plan-marker.enable-peek.is-peeking { transform: translate(-50%, -50%) scale(1.18); z-index: 20; }
+.pdf-plan-marker:is(.selected, :hover, .is-peeking) { opacity: 1 !important; }
+.pdf-plan-marker.enable-peek.is-peeking::after { content:attr(data-hover-name); position:absolute; top:115%; left:50%; transform:translateX(-50%); font-size:12px; color:#fff; background:#17324d; border-radius:5px; padding:4px 7px; white-space:normal; min-width:90px; max-width:220px; pointer-events:none; }
+.motor-hover-name { display:none; text-anchor:middle; fill:#17324d; stroke:white; stroke-width:3px; paint-order:stroke; pointer-events:none; }
+.motor-target.enable-peek.is-peeking .motor-hover-name { display:block; }
+.motor-target.enable-peek.is-peeking .motor-pin { transform-box:fill-box; transform-origin:center; transform:scale(1.18); }
+.motor-target:is(.selected, :hover, .is-peeking) :is(.motor-pin, .motor-label, .motor-hover-name, .motor-bounds) { opacity: 1 !important; }
+.pdf-marker-coverage-area { border-width:1px; }
+@media(max-width:600px) { .plan-fullscreen .plan-display-dock { top:115px; max-width:75vw; } .plan-display-dock { flex-wrap:wrap; } }
+@media(max-width:800px) { .plan-document-layout {display:block;} .plan-document-layout .plan-display-dock {width:auto;flex-direction:row;} }

@@ -9,6 +9,7 @@ import os
 import queue
 import re
 import subprocess
+import time
 import sys
 import tempfile
 import threading
@@ -110,18 +111,21 @@ def print_live_event(tag, title, lines):
     _log_line('\n'.join(output))
 
 
-def run_supabase_sql_sync(description, sql_statement):
+def run_supabase_sql_sync(description, sql_statement, attempts=3):
     from .cloud_projects import CloudUnavailable, supabase_query
 
     now = datetime.now().strftime('%H:%M:%S')
-    try:
-        supabase_query(sql_statement, read_only=False)
-    except CloudUnavailable as exc:
-        _log_line(f"  ↳ [{now}] [SUPABASE-CLOUD WARN] {description}: {exc}")
-        return False
-    else:
-        _log_line(f"  ↳ [{now}] [SUPABASE-CLOUD OK] {description}")
-        return True
+    for attempt in range(attempts):
+        try:
+            supabase_query(sql_statement, read_only=False)
+        except CloudUnavailable as exc:
+            _log_line(f"  ↳ [{now}] [SUPABASE-CLOUD RETRY {attempt + 1}/3] {description}: {exc}")
+            if attempt < attempts - 1:
+                time.sleep(attempt + 1)
+        else:
+            _log_line(f"  ↳ [{now}] [SUPABASE-CLOUD OK] {description}")
+            return True
+    return False
 
 
 def run_gdrive_upload_sync(file_path, file_name, assoc_key, local_key, extra_args=()):
@@ -187,6 +191,10 @@ def category_upsert_sql(category):
 def on_category_saved(sender, instance, using, **kwargs):
     sql = category_upsert_sql(instance)
     transaction.on_commit(lambda: sync_sql_to_supabase_async('Categoría de botón guardada', sql), using=using)
+    if not kwargs.get('created') and SavedMotor.objects.filter(category=instance).exists():
+        SavedMotor.objects.filter(category=instance).update(cloud_status='local')
+        from .piece_service import queue_catalog_sync
+        queue_catalog_sync()
 
 
 @receiver(post_delete, sender=ButtonCategory)
@@ -230,15 +238,25 @@ def _upload_drive_content(content, file_name, assoc_key, local_key, manifest=Non
             (path / 'plan.source').write_bytes(project_source)
             extra = ['--manifest', str(path / 'manifest.json'), '--project-source', str(path / 'plan.source')]
         if drive_target:
-            extra += ['--drive-id', drive_target['id'], '--modified-time', drive_target['modifiedTime']]
+            if drive_target.get('force'):
+                extra += ['--force-replace']
+            if drive_target.get('missing'):
+                extra += ['--create-only']
+            else:
+                extra += ['--drive-id', drive_target['id'], '--modified-time', drive_target['modifiedTime']]
         return run_gdrive_upload_sync(str(path / 'content'), file_name, assoc_key, local_key, extra)
 
 
-def _sync_pdf_plan_worker(plan_pk, plan_name, source, pages_list, file_name, assoc_key=None, drive_target=None):
+def _sync_pdf_plan_worker(plan_pk, plan_name, source, pages_list, file_name, assoc_key=None, drive_target=None, register=True):
     local_key = assoc_key or f"local_pdf_{plan_pk}"
     rec = _upload_drive_content(source, file_name, local_key, local_key, drive_target=drive_target)
     if not rec or not rec.get('drive_file_id'):
         return
+    return _register_pdf_record(rec, plan_pk, plan_name, source, pages_list, assoc_key, drive_target) if register else rec
+
+
+def _register_pdf_record(rec, plan_pk, plan_name, source, pages_list, assoc_key=None, drive_target=None, sql_only=False):
+    local_key = assoc_key or f"local_pdf_{plan_pk}"
     drive_id = rec['drive_file_id']
     stream_url = rec.get('drive_stream_url', f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media")
     preview_url = rec.get('drive_preview_url', f"https://drive.google.com/file/d/{drive_id}/preview")
@@ -268,6 +286,8 @@ def _sync_pdf_plan_worker(plan_pk, plan_name, source, pages_list, file_name, ass
         SELECT 1 FROM public.pdf_plans WHERE drive_file_id = '{drive_id}'
     );
     """
+    if sql_only:
+        return sql
     rec['supabase_ok'] = run_supabase_sql_sync(
         f"Plano PDF '{plan_name}' sincronizado en Supabase (tabla pdf_plans, Drive ID: {drive_id})",
         sql,
@@ -389,21 +409,34 @@ def delete_button_source(sender, instance, using, **kwargs):
 
 
 def _sync_workbook_worker(wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content_bytes, assoc_key, drive_filename,
-                          manifest=None, project_source=None, drive_target=None):
+                          manifest=None, project_source=None, drive_target=None, register=True):
     local_key = f"{assoc_key}_xlsx" if assoc_key.startswith("project_") else f"local_xlsx_{wb_pk}"
     rec = _upload_drive_content(content_bytes, drive_filename, assoc_key, local_key, manifest, project_source, drive_target)
     if not rec or not rec.get('drive_file_id'):
         return
+    return _register_workbook_record(rec, wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content_bytes,
+                                     assoc_key, drive_filename, manifest, drive_target) if register else rec
+
+
+def _register_workbook_record(rec, wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content_bytes, assoc_key,
+                              drive_filename, manifest=None, drive_target=None, sql_only=False):
+    local_key = f"{assoc_key}_xlsx" if assoc_key.startswith("project_") else f"local_xlsx_{wb_pk}"
     drive_id = rec['drive_file_id']
     stream_url = rec.get('drive_stream_url', f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media")
 
     safe_name = drive_filename.replace("'", "''")
     file_fmt = 'csv' if drive_filename.lower().endswith('.csv') else 'xlsx'
     legacy_match = '' if drive_target else f" OR drive_file_id = '{local_key}'"
+    if drive_target and drive_target.get('missing'):
+        previous_id = drive_target.get('previous_id', '')
+        if re.fullmatch(r'[A-Za-z0-9_-]{1,128}', previous_id):
+            legacy_match = f" OR (drive_file_id = '{previous_id}' AND association_key = '{assoc_key}' AND NOT EXISTS (SELECT 1 FROM public.workbook_documents WHERE drive_file_id = '{drive_id}'))"
     sql = f"""
     UPDATE public.workbook_documents
     SET association_key = '{assoc_key}',
         name = '{safe_name}',
+        plan_mode = '{wb_plan_mode or 'pdf'}',
+        is_motor = {'TRUE' if wb_is_motor else 'FALSE'},
         drive_file_id = '{drive_id}',
         size_bytes = {len(content_bytes)},
         drive_stream_url = '{stream_url}',
@@ -451,6 +484,8 @@ def _sync_workbook_worker(wb_pk, wb_revision, wb_plan_mode, wb_is_motor, content
         WHERE plan.company_id = book.company_id AND plan.association_key = '{assoc_key}'
           AND book.drive_file_id = '{drive_id}';
         """
+    if sql_only:
+        return sql
     rec['supabase_ok'] = run_supabase_sql_sync(
         f"Libro Excel '{drive_filename}' (Rev #{wb_revision}) sincronizado en Supabase (workbook_documents, Drive ID: {drive_id})",
         f'BEGIN; {sql} COMMIT;',
@@ -500,12 +535,11 @@ def on_project_saved(sender, instance, created, **kwargs):
     )
 
 
-def _sync_marker_snapshot(pdf_id, manifest):
+def _sync_marker_snapshot(pdf_id, manifest, sql_only=False):
     """Replace only this project's saved buttons; local numeric IDs are not global."""
     payload = json.dumps(manifest.get('markers', [])).replace("'", "''")
     pdf_id = pdf_id.replace("'", "''")
     sql = f"""
-    BEGIN;
     LOCK TABLE public.pdf_markers IN SHARE ROW EXCLUSIVE MODE;
     SELECT setval(pg_get_serial_sequence('public.pdf_markers', 'id'),
         GREATEST(COALESCE((SELECT max(id) FROM public.pdf_markers), 0) + 1, 1), false);
@@ -517,19 +551,87 @@ def _sync_marker_snapshot(pdf_id, manifest):
     DELETE FROM public.pdf_markers WHERE plan_id IN
         (SELECT id FROM public.pdf_plans WHERE drive_file_id = '{pdf_id}');
     INSERT INTO public.pdf_markers(plan_id, page, x, y, label, sheet_name, workbook_id,
-        category_id, has_area, area_radius_x, area_radius_y, area_color)
+        category_id, has_area, area_radius_x, area_radius_y, area_color, area_shape, button_color, show_description, piece_source)
     SELECT p.id, (item->>'page')::int, (item->>'x')::float, (item->>'y')::float,
         COALESCE(item->>'label', ''), COALESCE(item->>'sheet', ''),
         CASE WHEN COALESCE(item->>'sheet', '') <> '' THEN p.workbook_id END,
         (SELECT c.id FROM public.button_categories c
          WHERE c.id::text = item->>'category_id' OR lower(c.name) = lower(item->>'category_name') LIMIT 1),
         COALESCE((item->>'has_area')::boolean, false), (item->>'area_radius_x')::float,
-        (item->>'area_radius_y')::float, COALESCE(item->>'area_color', 'rgba(59, 130, 246, 0.25)')
+        (item->>'area_radius_y')::float, COALESCE(item->>'area_color', 'rgba(59, 130, 246, 0.25)'),
+        COALESCE(item->>'area_shape', 'ellipse'), COALESCE(item->>'button_color', ''), COALESCE((item->>'show_description')::boolean, false), COALESCE((item->>'piece_source')::boolean,false)
     FROM public.pdf_plans p, jsonb_array_elements('{payload}'::jsonb) item
     WHERE p.drive_file_id = '{pdf_id}';
-    COMMIT;
     """
-    return run_supabase_sql_sync('Botones del proyecto guardado sincronizados', sql)
+    if sql_only:
+        return sql
+    return run_supabase_sql_sync('Botones del proyecto guardado sincronizados', f'BEGIN; {sql} COMMIT;')
+
+
+def _verify_saved_registration(kind, manifest, source, content, pdf_id, excel_id, key, revision, filename):
+    """Confirm the exact saved data when a write response was lost or timed out."""
+    from .cloud_projects import CloudUnavailable, supabase_query
+
+    def literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    def payload(value):
+        return literal(json.dumps(value)) + '::jsonb'
+
+    sheets = [{name: row.get(name) for name in ('name', 'is_listing', 'is_primary', 'is_protected', 'listing_order', 'origin_uuid')}
+              for row in manifest['sheets']]
+    references = [{'button_index': index, 'description_ref': f'drive:{excel_id}#markers/{index}/descriptions'}
+                  for index, button in enumerate(manifest['markers']) if button.get('descriptions')]
+    expected_markers = [{
+        'page': button['page'], 'x': button['x'], 'y': button['y'], 'label': button.get('label', ''),
+        'sheet': button.get('sheet', ''), 'category_name': button.get('category_name'),
+        'has_area': button.get('has_area', False), 'area_radius_x': button.get('area_radius_x'),
+        'area_radius_y': button.get('area_radius_y'), 'area_color': button.get('area_color') or 'rgba(59, 130, 246, 0.25)',
+        'area_shape':button.get('area_shape', 'ellipse'), 'button_color':button.get('button_color', ''), 'show_description':button.get('show_description', False),
+        'piece_source':button.get('piece_source',False),
+        'workbook_drive_id': excel_id if button.get('sheet') else None,
+    } for button in manifest['markers']] if kind == 'pdf' else []
+    pdf_ok, markers_ok = 'TRUE', 'TRUE'
+    if kind == 'pdf':
+        pdf_ok = f"EXISTS(SELECT 1 FROM public.pdf_plans WHERE drive_file_id={literal(pdf_id)} AND name={literal(manifest['name'])} AND size_bytes={len(source)})"
+        actual_markers = f"""COALESCE((SELECT jsonb_agg(jsonb_build_object(
+            'page', m.page, 'x', m.x, 'y', m.y, 'label', m.label, 'sheet', m.sheet_name,
+            'category_name', c.name, 'has_area', m.has_area, 'area_radius_x', m.area_radius_x,
+            'area_radius_y', m.area_radius_y, 'area_color', m.area_color, 'workbook_drive_id', w.drive_file_id
+            , 'area_shape', m.area_shape, 'button_color', m.button_color, 'show_description', m.show_description
+            , 'piece_source', m.piece_source
+        ) ORDER BY m.id) FROM public.pdf_markers m
+            JOIN public.pdf_plans p ON p.id=m.plan_id
+            LEFT JOIN public.button_categories c ON c.id=m.category_id
+            LEFT JOIN public.workbook_documents w ON w.id=m.workbook_id
+            WHERE p.drive_file_id={literal(pdf_id)}), '[]'::jsonb)"""
+        # Supabase numeric columns can round coordinates to fewer decimals.
+        # Compare every other field exactly and positions within 1e-12.
+        markers_ok = f"""NOT EXISTS(SELECT 1 FROM
+            jsonb_array_elements({actual_markers}) WITH ORDINALITY AS a(item, position)
+            FULL JOIN jsonb_array_elements({payload(expected_markers)}) WITH ORDINALITY AS e(item, position) USING(position)
+            WHERE a.item IS NULL OR e.item IS NULL
+            OR (a.item - ARRAY['x','y','area_radius_x','area_radius_y']) <> (e.item - ARRAY['x','y','area_radius_x','area_radius_y'])
+            OR EXISTS(SELECT 1 FROM unnest(ARRAY['x','y','area_radius_x','area_radius_y']) AS coordinates(field)
+                WHERE ((a.item->>field) IS NULL) IS DISTINCT FROM ((e.item->>field) IS NULL)
+                OR abs((a.item->>field)::double precision - (e.item->>field)::double precision) > 1e-12))"""
+    sql = f"""SELECT {pdf_ok} AS pdf_ok, {markers_ok} AS markers_ok,
+        EXISTS(SELECT 1 FROM public.workbook_documents WHERE drive_file_id={literal(excel_id)}
+            AND association_key={literal(key)} AND revision={int(revision)}
+            AND size_bytes={len(content)} AND name={literal(filename)})
+        AND COALESCE((SELECT jsonb_agg(jsonb_build_object('name', s.name, 'is_listing', s.is_listing,
+            'is_primary', s.is_primary, 'is_protected', s.is_protected, 'listing_order', s.listing_order,
+            'origin_uuid', s.origin_uuid) ORDER BY s.id)
+            FROM public.plan_workbook_sheets s JOIN public.workbook_documents w ON w.id=s.workbook_id
+            WHERE w.drive_file_id={literal(excel_id)}), '[]'::jsonb) = {payload(sheets)}
+        AND COALESCE((SELECT jsonb_agg(jsonb_build_object('button_index', r.button_index,
+            'description_ref', r.description_ref) ORDER BY r.button_index)
+            FROM public.workbook_button_description_refs r JOIN public.workbook_documents w ON w.id=r.workbook_id
+            WHERE w.drive_file_id={literal(excel_id)}), '[]'::jsonb) = {payload(references)} AS workbook_ok;"""
+    try:
+        rows = supabase_query(sql, read_only=True).get('rows', [])
+        return bool(rows and all(rows[0].get(name) is True for name in ('pdf_ok', 'workbook_ok', 'markers_ok')))
+    except CloudUnavailable:
+        return False
 
 
 def queue_saved_project_sync(kind, plan, content, saved_at):
@@ -537,6 +639,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     if not is_monitor_enabled():
         return
     from .cloud_projects import CloudUnavailable, manifest_metadata, shared_publish_target, snapshot_identity, workbook_version
+    from .cloud_save import capture_base_state
 
     plan_pk, plan_name = plan.pk, plan.name
     document = plan.workbook
@@ -548,17 +651,25 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     basename = f'{title[:255 - len(timestamp) - 8].rstrip()} - {timestamp}'
     workbook_args = document.pk, document.revision, document.plan_mode, document.is_motor
     pages = list(plan.pages) if kind == 'pdf' else []
+    base_state = capture_base_state(plan, content) if kind == 'pdf' else None
     target = {'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan_pk, 'saved_at': saved_at}
-    SavedProject.objects.filter(**target).update(cloud_status='pending', cloud_error='')
+    SavedProject.objects.filter(**target).update(cloud_status='pending', cloud_error='', cloud_stage='queued', cloud_progress=5)
 
     def publish():
         state, error = 'error', 'No se pudo publicar el proyecto completo en Drive. Vuelva a pulsar Guardar plano.'
+        completed = 5
+        def progress(stage, value):
+            nonlocal completed
+            completed = value
+            SavedProject.objects.filter(**target).update(cloud_stage=stage, cloud_progress=value)
         try:
             with ZipFile(BytesIO(content)) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
                 source = archive.read(f'plan/source.{kind}')
                 key = assoc_key
+                workbook_content = archive.read('workbooks/w1.xlsx')
                 pdf_options, workbook_options = {}, {}
+                progress('preparing', 10)
                 if shared:
                     if not pdf_id:
                         raise CloudUnavailable('Vuelve a abrir la versión de la nube para vincular el Excel original de Drive.')
@@ -566,39 +677,84 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                     key = remote['projectKey']
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', key):
                         raise CloudUnavailable('El proyecto original tiene una asociación no válida en Drive.')
-                    pdf_options['drive_target'] = {'id': pdf_id, 'modifiedTime': remote['pdfVersion']}
-                    workbook_options['drive_target'] = {'id': remote['excelId'], 'modifiedTime': remote['date']}
-                pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, **pdf_options) if kind == 'pdf' else None
+                    pdf_options['drive_target'] = {'id': pdf_id, 'modifiedTime': remote['pdfVersion'], 'force': True}
+                    if remote.get('excelId'):
+                        workbook_options['drive_target'] = {'id': remote['excelId'], 'modifiedTime': remote['date'], 'force': True}
+                    else:
+                        workbook_options['drive_target'] = {
+                            'missing': True, 'previous_id': plan.cloud_workbook_version.partition(':')[0], 'force': True,
+                        }
+                progress('pdf', 20)
+                pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, register=False, **pdf_options) if kind == 'pdf' else None
                 if kind == 'pdf' and not pdf:
                     raise RuntimeError('No se pudo subir el PDF.')
-                book = _sync_workbook_worker(*workbook_args, archive.read('workbooks/w1.xlsx'), key,
-                    f'{basename}.xlsx', manifest, source, **workbook_options)
+                progress('excel', 50)
+                book = _sync_workbook_worker(*workbook_args, workbook_content, key,
+                    f'{basename}.xlsx', manifest, source, register=False, **workbook_options)
                 if not book:
                     raise RuntimeError('No se pudo subir el Excel.')
                 if kind == 'pdf':
                     if not shared:
                         remote = {'id': pdf['drive_file_id'], 'excelId': book['drive_file_id'], 'projectKey': key}
-                    remote.update(name=f'{basename}.pdf', pdfVersion=pdf['modified_time'],
+                    remote.update(excelId=book['drive_file_id'], name=f'{basename}.pdf', pdfVersion=pdf['modified_time'],
                                   excelName=f'{basename}.xlsx', date=book['modified_time'])
+                    remote.pop('pdfHash', None)
                     identity = snapshot_identity(remote, manifest_metadata(manifest), manifest)
                     local = PdfPlan.objects.filter(pk=plan_pk)
                     local.update(cloud_origin=pdf['drive_file_id'], cloud_workbook_version=workbook_version(remote),
-                                 owner_username=manifest.get('owner_username', ''))
+                                 owner_username=manifest.get('owner_username', ''), cloud_base_state=base_state)
                     if plan.cloud_snapshot and not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
                         local.update(cloud_snapshot=identity)
-                database_ok = book.get('supabase_ok') and (kind != 'pdf' or pdf.get('supabase_ok'))
-                if database_ok and kind == 'pdf':
-                    database_ok = _sync_marker_snapshot(pdf['drive_file_id'], manifest)
-                state = 'synced' if database_ok else 'partial'
-                error = '' if database_ok else 'Disponible en Drive. Supabase no confirmó el registro; vuelva a guardar para reintentar.'
+                sql = _register_pdf_record(pdf, plan_pk, plan_name, source, pages, key, pdf_options.get('drive_target'), sql_only=True) if kind == 'pdf' else ''
+                sql += _register_workbook_record(book, *workbook_args, workbook_content, key,
+                    f'{basename}.xlsx', manifest, workbook_options.get('drive_target'), sql_only=True)
+                if kind == 'pdf':
+                    sql += _sync_marker_snapshot(pdf['drive_file_id'], manifest, sql_only=True)
+                    display = json.dumps(manifest.get('display_settings', {})).replace("'", "''")
+                    sql += f"UPDATE public.pdf_plans SET display_settings='{display}'::jsonb WHERE drive_file_id='{pdf['drive_file_id']}';"
+                sql = f'BEGIN; {sql} COMMIT; SELECT true AS saved;'
+                # Receipt survives restarts: retry database registration without uploading files again.
+                SavedProject.objects.filter(**target).update(cloud_receipt={'sql': sql}, cloud_status='uploaded', cloud_error='', cloud_stage='database', cloud_progress=100)
+                completed = 100
+                database_ok = run_supabase_sql_sync('Proyecto completo registrado en una transacción', sql, attempts=1)
+                if not database_ok:
+                    database_ok = _verify_saved_registration(kind, manifest, source, workbook_content,
+                        pdf['drive_file_id'] if pdf else '', book['drive_file_id'], key, document.revision, f'{basename}.xlsx')
+                state = 'synced' if database_ok else 'uploaded'
+                error = ''
         except CloudUnavailable as exc:
             error = str(exc)
         except Exception as exc:
             _log_line(f'  ↳ [SYNC ERROR] No se completó la publicación de {plan_name}: {exc}')
         finally:
-            SavedProject.objects.filter(**target).update(cloud_status=state, cloud_error=error)
+            SavedProject.objects.filter(**target).update(cloud_status=state, cloud_error=error,
+                cloud_stage='done' if state == 'synced' else state, cloud_progress=100 if state == 'synced' else completed)
 
     transaction.on_commit(lambda: enqueue_sync_task(publish))
+
+
+_REGISTRATION_RETRIES = {}
+_REGISTRATION_LOCK = threading.Lock()
+
+
+def retry_cloud_registrations():
+    """Resume acknowledged file uploads after a lost DB reply or an app restart."""
+    if not is_monitor_enabled():
+        return
+    for saved in SavedProject.objects.filter(cloud_status='uploaded').only('id', 'saved_at', 'cloud_receipt'):
+        sql = saved.cloud_receipt.get('sql')
+        if not sql:
+            continue
+        with _REGISTRATION_LOCK:
+            key = (saved.pk, saved.saved_at.isoformat())
+            if time.monotonic() - _REGISTRATION_RETRIES.get(key, -1000) < 60:
+                continue
+            _REGISTRATION_RETRIES[key] = time.monotonic()
+        def resume(pk=saved.pk, stamp=saved.saved_at, sql=sql):
+            query = SavedProject.objects.filter(pk=pk, saved_at=stamp, cloud_status='uploaded')
+            if query.exists() and run_supabase_sql_sync('Confirmación automática del guardado', sql, attempts=1):
+                query.update(cloud_status='synced', cloud_stage='done', cloud_progress=100, cloud_error='')
+        enqueue_sync_task(resume)
 
 
 @receiver(post_save, sender=Plan)

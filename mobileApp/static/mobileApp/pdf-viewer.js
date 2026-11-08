@@ -390,6 +390,8 @@ class PdfPlanViewer {
         this.renderMarkers();
     }
 
+    setDisplaySettings(settings) { this.displaySettings = settings; }
+
     renderMarkers() {
         this.layer.replaceChildren();
         this.buttons.clear();
@@ -407,7 +409,11 @@ class PdfPlanViewer {
                 area.style.top = `${Math.max(0, Math.min(1, Number(marker.y))) * 100}%`;
                 area.style.width = `${rx * 200}%`;
                 area.style.height = `${ry * 200}%`;
-                if (marker.area_color) area.style.backgroundColor = marker.area_color;
+                area.style.backgroundColor = marker.button_color || '#2563eb';
+                area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
+                area.style.borderColor = marker.button_color || '#2563eb';
+                area.style.borderRadius = marker.area_shape === 'rectangle' ? '0' : '50%';
+                area.style.boxShadow = 'none';
                 this.layer.append(area);
             }
 
@@ -416,9 +422,13 @@ class PdfPlanViewer {
             button.className = `pdf-plan-marker${marker.workbook ? ' has-workbook' : ''}`;
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
-            if (marker.button_color) {
-                button.style.backgroundColor = marker.button_color;
-                const rgb = marker.button_color.slice(1).match(/../g).map(value => parseInt(value, 16));
+            button.style.opacity = this.displaySettings?.opacity ?? 1;
+            button.dataset.hoverName = marker.label || `Botón ${index + 1}`;
+            button.classList.toggle('enable-peek', this.displaySettings?.hover !== false);
+            const buttonColor = marker.button_color || '#2563eb';
+            if (buttonColor) {
+                button.style.backgroundColor = buttonColor;
+                const rgb = buttonColor.slice(1).match(/../g).map(value => parseInt(value, 16));
                 const luminance = rgb.reduce((sum, value, channel) => {
                     const normalized = value / 255;
                     return sum + [.2126, .7152, .0722][channel] * (normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4);
@@ -433,6 +443,7 @@ class PdfPlanViewer {
             this.buttons.set(Number(marker.id), button);
         }
         this.select(this.selectedId);
+        window.planDisplay?.restorePeek();
     }
 
     positionButton(button, x, y) {
@@ -483,6 +494,11 @@ class PdfPlanViewer {
         }
         area.style.width = `${(rx || 0.05) * 200}%`;
         area.style.height = `${(ry || 0.05) * 200}%`;
+        area.style.backgroundColor = marker?.button_color || '#2563eb';
+        area.style.borderColor = marker?.button_color || '#2563eb';
+        area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
+        area.style.borderRadius = marker?.area_shape === 'rectangle' ? '0' : '50%';
+        area.style.boxShadow = 'none';
         area.classList.toggle('selected', Number(markerId) === this.selectedId);
     }
 

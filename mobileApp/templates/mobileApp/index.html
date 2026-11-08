@@ -163,23 +163,23 @@
                             </button>
                         </div>
                         <button type="button" id="btnSavedPlans" class="btn btn-outline-primary w-100 mt-3">Ver planos guardados</button>
-                        <button type="button" id="btnSavedMotors" class="btn btn-outline-success w-100 mt-2">Motores guardados</button>
+                        <button type="button" id="btnSavedMotors" class="btn btn-outline-success w-100 mt-2">Piezas guardadas</button>
                     </div>
 
                 </div>
             </div>
 
             <div class="app-view p-0" id="viewSavedMotors">
-                <div class="app-header"><button type="button" id="btnSavedMotorsBack" class="btn btn-light btn-sm">← Volver</button><h6 class="mb-0 fw-bold">Motores guardados</h6></div>
+                <div class="app-header"><button type="button" id="btnSavedMotorsBack" class="btn btn-light btn-sm">← Volver</button><h6 class="mb-0 fw-bold">Piezas guardadas</h6></div>
                 <div class="p-3">
-                    <p class="small text-muted">Guarde motores con nombre y datos rellenados. Se incorporan como hojas al Excel del plano.</p>
-                    <button type="button" id="btnImportMotorRecord" class="btn btn-success w-100 mb-3">Importar ficha del dispositivo</button>
-                    <input type="file" id="motorRecordFileInput" accept=".xlsx" hidden>
+                    <p class="small text-muted">Guarde piezas con nombre y categoría. Se incorporan como hojas al Excel del plano.</p>
+                    <button type="button" id="btnImportMotorRecord" class="btn btn-success w-100 mb-3">Añadir pieza</button>
+                    <input type="file" id="motorRecordFileInput" accept=".xlsx,.csv" hidden>
                     <label for="savedMotorsSearch" class="small">Buscar por nombre</label>
-                    <input id="savedMotorsSearch" class="form-control mb-2" placeholder="Nombre del motor" type="search">
+                    <input id="savedMotorsSearch" class="form-control mb-2" placeholder="Nombre de la pieza" type="search">
                     <p id="savedMotorsStatus" class="small text-secondary" role="status"></p>
                     <div id="savedMotorsList" class="saved-motors-list"></div>
-                    <button type="button" id="btnMoreSavedMotors" class="btn btn-outline-secondary w-100 mt-2" hidden>Ver más motores</button>
+                    <button type="button" id="btnMoreSavedMotors" class="btn btn-outline-secondary w-100 mt-2" hidden>Ver más piezas</button>
                 </div>
             </div>
 
@@ -303,7 +303,7 @@
                         <button type="button" id="btnAddCadMarker" class="btn btn-sm btn-outline-primary mt-2" aria-pressed="false">Añadir botón</button>
                         <button type="button" id="btnMoveCadMarker" class="btn btn-sm btn-outline-primary mt-2" aria-pressed="false" hidden>Mover botón</button>
                         <button type="button" id="btnExploreCad" class="btn btn-sm btn-outline-secondary mt-2">Explorar</button>
-                        <p class="text-muted mt-2 mb-2" style="font-size: 0.73rem;">Arrastre para explorar · Pellizque para ampliar · Toque un motor para seleccionarlo</p>
+                        <p class="text-muted mt-2 mb-2" style="font-size: 0.73rem;">Arrastre para explorar · Pellizque para ampliar · Pulse un motor para seleccionarlo y otra vez para abrir su ficha</p>
                         <p id="noMotorsMessage" class="small text-secondary mb-0" hidden>No se encontró la palabra MOTOR en el plano. Puede añadir botones manualmente.</p>
                         <div id="motorList" class="motor-list" aria-label="Motores del plano"></div>
                     </section>
@@ -430,7 +430,7 @@
                             </div>
                         </section>
                         <div id="pdfViewport" data-pdfjs-url="{% static 'mobileApp/vendor/pdfjs/pdf-entry.mjs' %}?v={{ asset_version }}" data-worker-url="{% static 'mobileApp/vendor/pdfjs/pdf.worker-entry.mjs' %}?v={{ asset_version }}" tabindex="0" aria-label="Plano PDF con botones configurables"></div>
-                        <p class="small text-muted mt-2">Toque un botón para abrir su Excel o asignarle uno.</p>
+                        <p class="small text-muted mt-2">Pulse un botón para seleccionarlo y vuelva a pulsarlo para abrir su ficha.</p>
                         <div id="pdfMarkerList" class="pdf-marker-list" aria-label="Botones de esta página"></div>
                     </section>
                     <section id="pdfSelectedMarker" class="card border-0 shadow-sm rounded-4 p-3 mb-3" hidden>
@@ -507,9 +507,9 @@
                 <button type="button" id="btnPdfSaveMarkerLabel" class="btn btn-outline-primary">Guardar nombre</button>
             </div>
             <div id="pdfMarkerCurrentWorkbook" class="small text-success mb-3"></div>
-            <label for="pdfWorkbookLibrary" class="small fw-semibold mb-1">Importar motor guardado</label>
+            <label for="pdfWorkbookLibrary" class="small fw-semibold mb-1">Importar pieza guardada</label>
             <select id="pdfWorkbookLibrary" class="form-select mb-2"><option value="">Cargando biblioteca…</option></select>
-            <button type="button" id="btnPdfAssignLibrary" class="btn btn-outline-success w-100 mb-2">Vincular motor guardado</button>
+            <button type="button" id="btnPdfAssignLibrary" class="btn btn-outline-success w-100 mb-2">Vincular pieza guardada</button>
             <button type="button" id="btnPdfAssignDevice" class="btn btn-excel w-100 justify-content-center mb-2"><i class="bi bi-folder2-open"></i> Elegir Excel del dispositivo</button>
             <input type="file" id="pdfExcelFileInput" accept=".xlsx" hidden>
             <p class="small text-muted">Las fichas se incluyen al guardar el plano y pueden reutilizarse en otros botones.</p>
@@ -533,10 +533,11 @@
     <script src="{% static 'mobileApp/pdf-viewer.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/workbook-editor.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pdf-workflow.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/plan-display.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/project-workflow.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/button-details.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-excel.js' %}?v={{ asset_version }}"></script>
-    <script src="{% static 'mobileApp/motor-library.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/piece-library.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-versions.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/auth.js' %}?v={{ asset_version }}"></script>
 </body>

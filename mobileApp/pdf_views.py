@@ -51,6 +51,7 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
         'csv_url': reverse('workbook_csv', args=[document.pk]),
         'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document)),
         'is_motor': bool(document.is_motor or (document.plan_mode and sheet_name and context != 'listing')),
+        'is_piece': bool(context != 'listing' and (document.is_motor or document.plan_mode == 'source' or sheet_name)),
     }
     if sheets:
         result['sheets'] = document_sheets(document.content)
@@ -66,6 +67,12 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
     if context:
         result['context'] = context
     if user is not None:
+        from .xlsx_package import read_sheet_origins
+        origins = read_sheet_origins(document.content)
+        if origins:
+            records = {str(record.uuid):record for record in SavedMotor.objects.filter(uuid__in=origins.values())}
+            result['piece_registrations'] = {name:{'registered':True, 'is_motor':True, 'name':records[str(identifier)].name}
+                for name, identifier in origins.items() if str(identifier) in records}
         from .motor_service import registration_data
         if document.plan_mode and sheet_name and context != 'listing':
             from .plan_workbook import selected_motor_document, known_sheet
@@ -95,6 +102,7 @@ def marker_data(marker):
         'category_id': marker.category_id,
         'category_name': marker.category.name if marker.category_id else '',
         'has_area': bool(marker.has_area),
+        'area_shape': marker.area_shape,
         'area_radius_x': marker.area_radius_x,
         'area_radius_y': marker.area_radius_y,
         'area_color': marker.area_color or 'rgba(59, 130, 246, 0.25)',

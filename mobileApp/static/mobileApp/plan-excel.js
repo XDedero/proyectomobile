@@ -49,7 +49,7 @@
         <button type="button" id="btnAssignWorkbookSheet" class="btn btn-success w-100 mb-3">Vincular hoja</button>
         <div class="excel-choice-actions">
           <button type="button" id="btnAssignBlankSheet" class="btn btn-outline-success">Ficha vacía</button>
-          <button type="button" id="btnAssignSavedMotorSheet" class="btn btn-outline-success">Motor guardado</button>
+          <button type="button" id="btnAssignSavedMotorSheet" class="btn btn-outline-success">Pieza guardada</button>
           <button type="button" id="btnAssignmentImportWorkbook" class="btn btn-outline-secondary">Importar Excel o CSV</button>
         </div>
         <input type="file" id="buttonWorkbookInput" accept=".xlsx,.csv" hidden>
@@ -105,6 +105,13 @@
           <div class="excel-choice-actions">
             <button type="button" id="btnNewButtonBlank" class="btn btn-outline-success">Formato predeterminado</button>
             <button type="button" id="btnNewButtonImport" class="btn btn-success">Importar Excel o CSV</button>
+            <button type="button" id="btnNewButtonPiece" class="btn btn-outline-primary">Elegir pieza</button>
+          </div>
+          <div id="newButtonPieceOptions" class="mt-3" hidden>
+            <label for="newButtonPiece" class="form-label">Pieza guardada</label>
+            <select id="newButtonPiece" class="form-select mb-2"></select>
+            <p class="small text-muted">Se abrirá una copia para este botón. Podrá cambiar de pieza desde el selector de hojas sin modificar el catálogo.</p>
+            <button type="button" id="btnConfirmNewButtonPiece" class="btn btn-primary">Usar pieza</button>
           </div>
           <div id="newButtonCategoryTemplates" class="mt-3" hidden>
             <label for="newButtonTemplate" class="form-label">Excel permanente de la categoría</label>
@@ -179,6 +186,7 @@
         byId('newButtonCategoryStep').hidden = false;
         byId('newButtonDescriptionStep').hidden = true;
         byId('newButtonSourceStep').hidden = true;
+        byId('newButtonPieceOptions').hidden = true;
         byId('newButtonCategory').replaceChildren(new Option('Elija una categoría', ''));
         message(newButtonModal, '');
         newButtonModal.controller.show();
@@ -205,7 +213,7 @@
         try {
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
-            draft.result = { origin, template_id: Number(byId('newButtonTemplate').value) || undefined, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
+            draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined, template_id: Number(byId('newButtonTemplate').value) || undefined, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
             await hide(newButtonModal);
         } catch (error) {
             if (newButton === draft) message(newButtonModal, error.message, true);
@@ -214,13 +222,15 @@
         }
     }
 
-    function sourceSelected(id, sheet) {
+    function sourceSelected(id, sheet, result) {
         const current = active();
         const items = current?.kind === 'pdf' ? current.plan.markers : current?.plan.motors;
         for (const item of items || []) {
             const workbook = current.kind === 'pdf' ? item.workbook : item.excel;
             if (workbook?.id !== id) continue;
             workbook.preferred_sheet = item.source_sheet = sheet;
+            const updated=result?.marker || result?.motor;
+            if (updated?.id === item.id) Object.assign(item,updated);
         }
         window.projectWorkspace?.dirty();
     }
@@ -431,7 +441,7 @@
     byId('planWorkbookInput').onchange = event => { const file = event.target.files[0]; event.target.value = ''; if (file) replaceWorkbook(undefined, file); };
     byId('btnAssignWorkbookSheet').onclick = () => { const sheet = byId('planMotorSheet').value; if (sheet) linkSheet({ sheet }); else message(sheetModal, 'Elija una hoja.', true); };
     byId('btnAssignBlankSheet').onclick = () => linkSheet({ blank: true });
-    byId('btnAssignSavedMotorSheet').onclick = async () => { await hide(sheetModal); window.motorLibrary.chooseForTarget(); };
+    byId('btnAssignSavedMotorSheet').onclick = async () => { await hide(sheetModal); window.pieceLibrary.chooseForTarget(); };
     byId('btnSaveButtonCategory').onclick = () => linkSheet({ action: 'set_category', category_id: byId('sheetButtonCategory').value });
     newButtonModal.element.addEventListener('hidden.bs.modal', () => {
         const draft = newButton;
@@ -469,6 +479,31 @@
     };
     byId('btnNewButtonCategoryTemplate').onclick = () => chooseNewButtonSource('category');
     byId('btnNewButtonBlank').onclick = () => chooseNewButtonSource('blank');
+    byId('btnNewButtonPiece').onclick = async () => {
+        const draft=newButton;if(!draft) return;
+        busy(newButtonModal,true);
+        try {
+            const data=await request('/api/piece-library/');
+            if(newButton !== draft) return;
+            byId('newButtonPiece').replaceChildren(new Option('Elija una pieza',''));
+            for(const piece of data.pieces) byId('newButtonPiece').append(new Option(`${piece.category_name} - ${piece.name}`,piece.id));
+            // Fetch remaining pages so all saved pieces are available.
+            let offset=data.next_offset;
+            while(offset !== null && offset !== undefined) {
+                const more=await request(`/api/piece-library/?offset=${offset}`);
+                if(newButton !== draft) return;
+                for(const piece of more.pieces) byId('newButtonPiece').append(new Option(`${piece.category_name} - ${piece.name}`,piece.id));
+                offset=more.next_offset;
+            }
+            byId('newButtonPieceOptions').hidden=false;
+            message(newButtonModal,data.total ? '' : 'Todavía no hay piezas guardadas.');
+        } catch(error) {if(newButton===draft) message(newButtonModal,error.message,true);}
+        finally {if(newButton===draft) busy(newButtonModal,false);}
+    };
+    byId('btnConfirmNewButtonPiece').onclick = () => {
+        if(!byId('newButtonPiece').value) {message(newButtonModal,'Seleccione una pieza.',true);return;}
+        chooseNewButtonSource('piece');
+    };
     byId('btnNewButtonImport').onclick = () => byId('newButtonFile').click();
     byId('newButtonFile').onchange = event => {
         const file = event.target.files[0];

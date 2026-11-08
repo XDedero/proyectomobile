@@ -72,13 +72,16 @@ class DxfViewer {
             const bounds = this.element('rect', { x, y, width, height, class: 'motor-bounds' });
             const circle = this.element('circle', { cx: motor.svg_x, cy: motor.svg_y, class: 'motor-pin' });
             const label = this.element('text', { class: 'motor-label', 'font-size': 11, x: 0, y: 0 });
+            const hover = this.element('text', {class: 'motor-hover-name', x: 0, y: 30, 'font-size': 12});
+            const area = this.element(motor.area_shape === 'rectangle' ? 'rect' : 'ellipse', {class:'motor-coverage'});
             label.textContent = String(this.pins.size + 1);
-            group.append(title, bounds, circle, label);
+            group.append(title, area, bounds, circle, label, hover);
             layer.append(group);
-            this.pins.set(motor.id, { group, circle, label, motor });
+            this.pins.set(motor.id, { group, circle, label, hover, area, motor });
             this.updateButtonAppearance(motor);
         }
         this.update();
+        window.planDisplay?.restorePeek();
     }
 
     updateButtonAppearance(motor) {
@@ -86,9 +89,21 @@ class DxfViewer {
         if (!pin) return;
         pin.group.querySelector('title').textContent = `${motor.name} · X: ${motor.x} · Y: ${motor.y}`;
         pin.group.setAttribute('aria-label', `${motor.name}, X ${motor.x}, Y ${motor.y}`);
-        if (motor.button_color) pin.circle.style.fill = motor.button_color;
-        else pin.circle.style.removeProperty('fill');
+        pin.circle.style.fill = motor.button_color || '#2563eb';
+        pin.hover.textContent = motor.name;
+        pin.group.classList.toggle('enable-peek', this.displaySettings?.hover !== false);
+        for (const node of [pin.circle, pin.label, pin.hover, pin.group.querySelector('.motor-bounds')]) node.style.opacity = this.displaySettings?.opacity ?? 1;
+        pin.area.style.fill = motor.button_color || '#2563eb';
+        pin.area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
+        pin.area.style.pointerEvents = 'none';
+        pin.area.style.display = motor.has_area ? '' : 'none';
+        if (pin.area.localName !== (motor.area_shape === 'rectangle' ? 'rect' : 'ellipse')) {
+            const replacement = this.element(motor.area_shape === 'rectangle' ? 'rect' : 'ellipse', {class:'motor-coverage'});
+            pin.area.replaceWith(replacement); pin.area = replacement; this.updateButtonAppearance(motor);
+        }
     }
+
+    setDisplaySettings(settings) { this.displaySettings = settings; }
 
     element(name, attributes = {}) {
         const element = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -133,11 +148,15 @@ class DxfViewer {
         if (!this.svg) return;
         const scale = this.svg.getScreenCTM()?.a;
         if (!scale) return;
-        for (const { circle, label, motor } of this.pins.values()) {
+        for (const { circle, label, hover, area, motor } of this.pins.values()) {
             circle.setAttribute('r', 12 / scale);
             // Keep text in pixel-sized local coordinates: very large SVG font
             // sizes are clamped by browsers when the CAD viewBox uses 1e6 units.
             label.setAttribute('transform', `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`);
+            hover.setAttribute('transform', `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`);
+            const rx = (motor.area_radius_x || .05)*this.initial.width, ry = (motor.area_radius_y || .05)*this.initial.height;
+            const attrs = motor.area_shape === 'rectangle' ? {x:motor.svg_x-rx,y:motor.svg_y-ry,width:rx*2,height:ry*2} : {cx:motor.svg_x,cy:motor.svg_y,rx,ry};
+            for (const [key,value] of Object.entries(attrs)) area.setAttribute(key,value);
         }
     }
 

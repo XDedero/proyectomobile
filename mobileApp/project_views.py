@@ -35,8 +35,14 @@ def project_plan_data(kind, plan):
     except SavedProject.DoesNotExist:
         saved = None
     return {
+        'display_settings': plan.display_settings,
+        'display_url': reverse('project_display', args=[kind, plan.pk]),
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,
         'project_version': saved.saved_at.isoformat() if saved else '',
+        'cloud_status': saved.cloud_status if saved else 'local',
+        'cloud_error': saved.cloud_error if saved else '',
+        'cloud_stage': saved.cloud_stage if saved else 'local',
+        'cloud_progress': saved.cloud_progress if saved else 0,
         'version_url': reverse('project_version', args=[kind, plan.pk]),
         'refresh_url': reverse('refresh_project', args=[kind, plan.pk]),
         'cloud_key': plan.cloud_key,
@@ -46,6 +52,39 @@ def project_plan_data(kind, plan):
         'workbook_url': reverse('plan_workbook', args=[kind, plan.pk]),
         **workspace_data(plan),
     }
+
+
+@require_POST
+@api_permissions()
+def project_display(request, kind, plan_id):
+    from .display_settings import clean_display, clean_shape
+    from .plan_workbook import markers
+    plan = get_plan(kind, plan_id)
+    if not can_edit_plan(request.user, plan):
+        return error_response('No tiene permiso para modificar este plano.', 403)
+    try:
+        data = json_body(request)
+        if 'display_settings' in data:
+            plan.display_settings = clean_display(data['display_settings'])
+            plan.save(update_fields=['display_settings'])
+        if 'button_id' in data:
+            marker = get_object_or_404(markers(plan), pk=positive_integer(data['button_id'], 'Botón'))
+            values = {}
+            for key in ('area_radius_x', 'area_radius_y'):
+                value = data.get(key, .05)
+                from .project_service import finite
+                if not finite(value) or not 0 < value <= 1:
+                    raise ValidationError('El tamaño del área debe ser mayor que 0 y hasta 100 %.')
+                values[key] = value
+            if type(data.get('has_area')) is not bool:
+                raise ValidationError('Indique si desea mostrar el área.')
+            values.update(has_area=data['has_area'], area_shape=clean_shape(data.get('area_shape', 'ellipse')))
+            for key, value in values.items():
+                setattr(marker, key, value)
+            marker.save(update_fields=list(values))
+        return JsonResponse({'display_settings': plan.display_settings})
+    except ValidationError as exc:
+        return error_response(exc)
 
 
 def local_copy_data(kind, plan, user):
@@ -65,6 +104,7 @@ def saved_data(saved, user):
         **local_copy_data(kind, plan, user), 'id': saved.pk,
         'date': saved.saved_at.isoformat(),
         'cloud_status': saved.cloud_status, 'cloud_error': saved.cloud_error,
+        'cloud_stage': saved.cloud_stage, 'cloud_progress': saved.cloud_progress,
         'export_url': reverse('download_saved_project', args=[saved.pk]),
         'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[plan.pk]),
     }
@@ -73,9 +113,11 @@ def saved_data(saved, user):
 @require_GET
 @api_permissions()
 def saved_projects(request):
+    from .terminal_monitor import retry_cloud_registrations
+    retry_cloud_registrations()
     projects = SavedProject.objects.select_related('cad_plan', 'pdf_plan').only(
         'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
-        'cloud_status', 'cloud_error',
+        'cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress',
         'cad_plan__id', 'cad_plan__name', 'cad_plan__cloud_key', 'cad_plan__imported_by_id',
         'pdf_plan__id', 'pdf_plan__name', 'pdf_plan__cloud_key', 'pdf_plan__cloud_origin', 'pdf_plan__imported_by_id',
     )
@@ -230,8 +272,10 @@ def delete_cloud_project(request, pdf_id):
 @require_POST
 @api_permissions()
 def save_project(request, kind, plan_id):
+    from .cloud_projects import CloudUnavailable
+    from .cloud_save import merge_only_additions
     from .plan_workbook import materialize_button_sources, organize_project_sheets
-    from .terminal_monitor import queue_saved_project_sync
+    from .terminal_monitor import is_monitor_enabled, queue_saved_project_sync
 
     permission = 'can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'
     if not capabilities(request.user)[permission]:
@@ -241,15 +285,17 @@ def save_project(request, kind, plan_id):
         with transaction.atomic():
             layout_changed = materialize_button_sources(plan, request.user)
             layout_changed = organize_project_sheets(plan, request.user) or layout_changed
+            if kind == 'pdf' and is_monitor_enabled():
+                layout_changed = merge_only_additions(plan, request.user) or layout_changed
             content = export_project(kind, plan)
             saved, _ = SavedProject.objects.update_or_create(
                 **{'pdf_plan' if kind == 'pdf' else 'cad_plan': plan},
                 defaults={'name': plan.name, 'content': content, 'saved_by': request.user},
             )
             queue_saved_project_sync(kind, plan, content, saved.saved_at)
-    except (ValidationError, OSError) as exc:
+    except (ValidationError, OSError, CloudUnavailable) as exc:
         return error_response(exc)
-    saved.refresh_from_db(fields=['cloud_status', 'cloud_error'])
+    saved.refresh_from_db(fields=['cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress'])
     result = {'saved': saved_data(saved, request.user), 'saved_at': saved.saved_at.isoformat()}
     if layout_changed:
         from .views import plan_data

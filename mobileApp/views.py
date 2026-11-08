@@ -110,6 +110,8 @@ def motor_data(motor):
         'id': motor.pk, 'name': motor.name or f'Botón {motor.plan.motors.filter(pk__lt=motor.pk).count() + 1}',
         'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
         'button_color': motor.button_color, 'show_description': motor.show_description,
+        'has_area': motor.has_area, 'area_shape': motor.area_shape,
+        'area_radius_x': motor.area_radius_x, 'area_radius_y': motor.area_radius_y,
         'details_url': reverse('button_details', args=['dxf', motor.pk]),
         'source_sheet': motor.source_sheet,
         'category_id': motor.category_id,

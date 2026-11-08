@@ -22,6 +22,7 @@ def new_cloud_key():
 
 
 class Plan(models.Model):
+    display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
     imported_by = models.ForeignKey(
@@ -91,6 +92,8 @@ class PlanRoleGroup(models.Model):
 
 
 class ButtonSource(models.Model):
+    piece_source = models.BooleanField(default=False)
+    area_shape = models.CharField(max_length=12, default='ellipse')
     descriptions = models.JSONField(null=True, blank=True)
     button_color = models.CharField(max_length=7, blank=True)
     show_description = models.BooleanField(default=False)
@@ -132,11 +135,13 @@ class Motor(ButtonSource):
 
 
 class PdfPlan(models.Model):
+    display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
     cloud_snapshot = models.CharField(max_length=64, unique=True, null=True, blank=True)
     cloud_origin = models.CharField(max_length=128, blank=True, db_index=True)
     cloud_workbook_version = models.CharField(max_length=192, blank=True)
+    cloud_base_state = models.JSONField(null=True, blank=True)
     name = models.CharField(max_length=255)
     source = models.FileField(upload_to=pdf_upload_path)
     size = models.PositiveIntegerField()
@@ -154,6 +159,7 @@ class PdfPlan(models.Model):
 
 
 class WorkbookDocument(models.Model):
+    source_pieces = models.JSONField(default=dict, blank=True)
     plan_mode = models.CharField(max_length=12, blank=True)
     name = models.CharField(max_length=255)
     content = models.BinaryField()
@@ -192,6 +198,7 @@ class PdfMarker(ButtonSource):
 
 
 class SavedProject(models.Model):
+    cloud_receipt = models.JSONField(default=dict, blank=True)
     """A portable snapshot captured by Guardar plano, for either source format."""
     cad_plan = models.OneToOneField(Plan, null=True, blank=True, on_delete=models.CASCADE, related_name='saved_project')
     pdf_plan = models.OneToOneField(PdfPlan, null=True, blank=True, on_delete=models.CASCADE, related_name='saved_project')
@@ -201,6 +208,8 @@ class SavedProject(models.Model):
     saved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     cloud_status = models.CharField(max_length=16, default='local')
     cloud_error = models.CharField(max_length=500, blank=True)
+    cloud_stage = models.CharField(max_length=24, default='local')
+    cloud_progress = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         ordering = ['-saved_at']
@@ -222,7 +231,11 @@ class PlanWorkbookSheet(models.Model):
         constraints = [models.UniqueConstraint(fields=['workbook', 'name'], name='plan_workbook_unique_sheet')]
 
 
-class SavedMotor(models.Model):
+class SavedPiece(models.Model):
+    cloud_version = models.CharField(max_length=64, blank=True)
+    category = models.ForeignKey(ButtonCategory, null=True, blank=True, on_delete=models.SET_NULL)
+    cloud_sheet = models.CharField(max_length=31, blank=True)
+    cloud_status = models.CharField(max_length=16, default='local')
     data_fingerprint = models.CharField(max_length=64, blank=True, db_index=True)
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     name = models.CharField(max_length=120)
@@ -233,5 +246,16 @@ class SavedMotor(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
 
     class Meta:
+        db_table = 'mobileApp_savedmotor'
         ordering = ['name_key', 'id']
         constraints = [models.UniqueConstraint(fields=['data_fingerprint'], condition=~models.Q(data_fingerprint=''), name='saved_motor_unique_data')]
+
+
+# Compatibility for existing project archives and older API clients.
+SavedMotor = SavedPiece
+
+
+class PieceDeletion(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    synced = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
