@@ -16,7 +16,6 @@ const btnGoToImportSection = document.getElementById('btnGoToImportSection');
 const btnBackToMainMenu = document.getElementById('btnBackToMainMenu');
 const btnImportAutoCAD = document.getElementById('btnImportAutoCAD');
 const autocadFileInput = document.getElementById('autocadFileInput');
-const btnAssignExcelCorner = document.getElementById('btnAssignExcelCorner');
 const excelFileInput = document.getElementById('excelFileInput');
 const errorNoPlanAlert = document.getElementById('errorNoPlanAlert');
 const loadedPlanCard = document.getElementById('loadedPlanCard');

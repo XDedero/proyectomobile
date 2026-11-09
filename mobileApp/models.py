@@ -93,6 +93,7 @@ class PlanRoleGroup(models.Model):
 
 
 class ButtonSource(models.Model):
+    button_scale = models.FloatField(default=1)
     piece_source = models.BooleanField(default=False)
     area_shape = models.CharField(max_length=12, default='ellipse')
     descriptions = models.JSONField(null=True, blank=True)

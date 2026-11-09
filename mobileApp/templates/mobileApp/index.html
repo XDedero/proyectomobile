@@ -199,18 +199,11 @@
 
                     <h6 class="mb-0 fw-bold text-dark text-truncate px-2" style="font-size: 0.88rem;">Plano DXF</h6>
 
-                    <!-- Botón Asignar Excel en la esquina -->
-                    <button class="btn-excel" id="btnAssignExcelCorner" title="Elegir hoja para el motor seleccionado" hidden>
-                        <i class="bi bi-file-earmark-spreadsheet-fill"></i>
-                        <span>Asignar hoja</span>
-                    </button>
                 </div>
 
                 <!-- Contenido de la Sección -->
                 <div class="p-3">
 
-                    <!-- Mensaje de Error si no hay plano cargado:
-                         Sale SOLO cuando se hace clic en 'Asignar Excel' y desaparece al hacer clic en el mensaje -->
                     <div class="alert alert-danger align-items-start gap-2 rounded-4 shadow-sm border-danger border-opacity-25 custom-alert" role="alert"
                          id="errorNoPlanAlert" 
                          style="display: none; cursor: pointer;" 
@@ -304,6 +297,7 @@
                         <button type="button" id="btnAddCadMarker" class="btn btn-sm btn-outline-primary mt-2" aria-pressed="false">Añadir botón</button>
                         <button type="button" id="btnMoveCadMarker" class="btn btn-sm btn-outline-primary mt-2" aria-pressed="false" hidden>Mover botón</button>
                         <button type="button" id="btnExploreCad" class="btn btn-sm btn-outline-secondary mt-2">Explorar</button>
+                        <button type="button" id="btnCadCopyButton" class="btn btn-sm btn-outline-primary mt-2" disabled>Copiar botón</button>
                         <p class="text-muted mt-2 mb-2" style="font-size: 0.73rem;">Arrastre para explorar · Pellizque para ampliar · Pulse un motor para seleccionarlo y otra vez para abrir su ficha</p>
                         <p id="noMotorsMessage" class="small text-secondary mb-0" hidden>No se encontró la palabra MOTOR en el plano. Puede añadir botones manualmente.</p>
                         <div id="motorList" class="motor-list" aria-label="Motores del plano"></div>
@@ -312,23 +306,18 @@
                     <section id="selectedMotorCard" class="card border-0 shadow-sm rounded-4 p-3 mb-3" hidden>
                         <div class="marker-selection-heading">
                             <span class="text-primary small fw-semibold">Botón seleccionado</span>
-                            <button type="button" id="btnDeleteCadMarker" class="btn btn-sm btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button>
                         </div>
                         <h6 id="selectedMotorName" class="fw-bold mb-2"></h6>
                         <p id="selectedMotorCoordinates" class="motor-coordinates small text-secondary mb-2"></p>
                         <p id="selectedMotorHint" class="small text-muted">Asigne un archivo .xlsx a este motor.</p>
-                        <button type="button" class="btn-excel justify-content-center" id="btnAssignMotorExcel" hidden>
-                            <i class="bi bi-file-earmark-spreadsheet"></i> Elegir hoja del plano
-                        </button>
                         <div class="mt-3 pt-2 border-top" id="excelLinkedSection" style="display: none;">
                             <div class="d-flex align-items-center justify-content-between">
                                 <div class="d-flex align-items-center gap-2">
                                     <i class="bi bi-file-earmark-excel text-success fs-5"></i>
                                     <div>
-                                        <a class="fw-semibold text-success" style="font-size: 0.82rem;" id="excelFileName" download>datos.xlsx</a>
+                                        <span class="fw-semibold text-success" style="font-size: 0.82rem;" id="excelFileName"></span>
                                         <div class="text-success small" style="font-size: 0.7rem;"><i class="bi bi-link-45deg"></i> Excel vinculado</div>
                                         <div id="excelSheets" class="text-muted small"></div>
-                                        <button type="button" id="btnPreviewExcel" class="btn btn-sm btn-outline-success mt-2">Ver Excel</button>
                                     </div>
                                 </div>
                                 <span class="badge bg-success-subtle text-success" style="font-size: 0.7rem;">Listo</span>
@@ -410,6 +399,7 @@
                             <button type="button" id="btnPdfExplore" class="btn pdf-mode-action active" aria-pressed="true"><i class="bi bi-hand-index-thumb" aria-hidden="true"></i><span>Explorar</span></button>
                             <button type="button" id="btnPdfAddMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-plus-circle" aria-hidden="true"></i><span>Añadir botón</span></button>
                             <button type="button" id="btnPdfMoveMarker" class="btn pdf-mode-action" aria-pressed="false"><i class="bi bi-arrows-move" aria-hidden="true"></i><span>Mover botones</span></button>
+                            <button type="button" id="btnPdfCopyButton" class="btn pdf-mode-action" disabled><i class="bi bi-copy" aria-hidden="true"></i><span>Copiar botón</span></button>
                         </div>
                         <div class="mb-2"><button type="button" id="btnPdfAdjustArea" class="btn pdf-mode-action" aria-controls="pdfAreaPanel" aria-expanded="false" hidden>Ajustar radio</button></div>
                         <p id="pdfModeHint" class="small text-muted mb-2">Deslice para recorrer el plano. Use + y − para ampliar.</p>
@@ -437,12 +427,9 @@
                     <section id="pdfSelectedMarker" class="card border-0 shadow-sm rounded-4 p-3 mb-3" hidden>
                         <div class="marker-selection-heading">
                             <span class="small text-primary fw-semibold">Botón seleccionado</span>
-                            <button type="button" id="btnPdfDeleteSelectedMarker" class="btn btn-sm btn-outline-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button>
                         </div>
                         <h6 id="pdfSelectedMarkerName" class="fw-bold mt-1 pdf-selection-name"></h6>
                         <p id="pdfSelectedWorkbookName" class="small text-muted pdf-selection-name"></p>
-                        <button type="button" id="btnPdfOpenWorkbook" class="btn btn-excel pdf-excel-action mb-2" hidden><i class="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i><span>Abrir y editar Excel</span></button>
-                        <button type="button" id="btnPdfConfigureMarker" class="btn pdf-secondary-action"><i class="bi bi-sliders" aria-hidden="true"></i><span>Opciones del botón</span></button>
                     </section>
                 </div>
             </div>
@@ -526,6 +513,7 @@
     <script src="{% static 'mobileApp/vendor/bootstrap.bundle.min.js' %}?v={{ asset_version }}"></script>
 
     <script src="{% static 'mobileApp/mobile-runtime.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/app-confirm.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-state.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/dxf-viewer.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/vendor/jszip.min.js' %}?v={{ asset_version }}"></script>

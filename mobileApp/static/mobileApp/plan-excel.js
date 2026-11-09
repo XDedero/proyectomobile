@@ -31,6 +31,7 @@
         <div class="d-flex flex-wrap gap-2 mb-3">
           <button type="button" id="btnButtonNameOptions" class="btn btn-outline-secondary btn-sm">Cambiar nombre</button>
           <button type="button" id="btnButtonAppearanceOptions" class="btn btn-outline-secondary btn-sm">Apariencia</button>
+          <button type="button" id="btnCopyPlanButton" class="btn btn-outline-primary btn-sm">Copiar botón</button>
         </div>
         <div class="border rounded p-2 mb-3">
           <div class="form-check form-switch mb-2">
@@ -388,7 +389,11 @@
                 const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-outline-danger';
                 remove.setAttribute('aria-label', `Eliminar ${listing.name}`); remove.title = 'Eliminar listado'; remove.dataset.listingId = listing.id;
                 remove.innerHTML = '<i class="bi bi-trash" aria-hidden="true"></i>';
-                remove.onclick = () => { if (window.confirm(`¿Eliminar el listado «${listing.name}»?`)) changeListing({ action: 'delete', listing_id: listing.id }); };
+                remove.onclick = async () => {
+                    if (await window.confirmAppAction('Eliminar listado', `¿Eliminar el listado «${listing.name}»?`, 'Eliminar listado', { danger: true })) {
+                        if (context === listingTarget) await changeListing({ action: 'delete', listing_id: listing.id });
+                    }
+                };
                 row.append(remove);
             }
             container.append(row);
@@ -561,6 +566,25 @@
     byId('btnButtonNameOptions').onclick = () => editButtonOption('name');
     byId('btnButtonAppearanceOptions').onclick = () => editButtonOption('appearance');
     byId('btnButtonDetailsOptions').onclick = () => editButtonOption('description');
+    async function copyButton(context, marker, dialog = null) {
+        if (!marker || !valid(context) || !context.plan.permissions?.can_assign || active().isBusy?.() || window.planSectors?.editing) return;
+        if (window.planDisplay && !(await window.planDisplay.flush())) return;
+        if (!valid(context)) return;
+        const name = marker.label || marker.name || window.projectWorkspace.selected?.name || 'Botón';
+        const info = [marker.category_name, marker.source_sheet || marker.sheet_name].filter(Boolean).join(' · ');
+        if (!(await window.confirmAppAction('Copiar botón',
+            `¿Copiar «${name}»${info ? ` (${info})` : ''}? Se copiarán su ficha, descripción y apariencia.`, 'Copiar botón'))) return;
+        if (dialog) await hide(dialog);
+        if (!valid(context)) return;
+        await active().setMode('add', { origin: 'copy', copy_button_id: marker.id });
+    }
+    byId('btnCopyPlanButton').onclick = () => copyButton(assignment, assignment?.marker, sheetModal);
+    function copySelectedButton() {
+        const context = target();
+        if (!context) return;
+        const buttons = context.kind === 'pdf' ? context.plan.markers : context.plan.motors;
+        return copyButton(context, buttons.find(button => button.id === window.projectWorkspace.selected?.buttonId));
+    }
     byId('btnAddPlanListing').onclick = () => {
         byId('planListingOptions').hidden = false;
         byId('btnAddPlanListing').hidden = true;
@@ -593,7 +617,7 @@
     fullSheets.type = 'button'; fullSheets.textContent = 'Ver hojas de Excel';
     fullSheets.onclick = () => { byId('btnPlanFullscreenMenu').click(); openWorkbook(); };
     fullButton.before(fullSheets);
-    window.planExcel = { manage, assign, listings, openListings, newButtonOptions, sourceSelected,
+    window.planExcel = { manage, assign, listings, openListings, newButtonOptions, sourceSelected, copySelectedButton,
         createButton(url, position, { file, ...options }) {
             const values = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
             return request(url, { ...position, ...values }, file);

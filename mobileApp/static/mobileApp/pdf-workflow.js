@@ -91,23 +91,22 @@
         for (const control of areaPanel.querySelectorAll('button,input')) control.disabled = value;
         for (const button of dialog.querySelectorAll('button')) button.disabled = value;
         updatePermissions();
-        byId('btnPdfDeleteSelectedMarker').disabled = value;
         window.projectWorkspace?.update();
     }
     function selectedMarker() { return plan?.markers.find((marker) => marker.id === selectedId); }
     function markerName(marker) {
         return marker.label || `Botón ${plan?.markers.findIndex((item) => item.id === marker.id) + 1}`;
     }
-    async function setMode(next) {
+    async function setMode(next, placement = null) {
         if (next === 'add' && window.planExcel) {
             const current = plan;
-            const options = await window.planExcel.newButtonOptions();
+            const options = placement || await window.planExcel.newButtonOptions();
             if (!options || current !== plan) return;
             placementOptions = options;
         } else {
             placementOptions = null;
         }
-        window.projectWorkspace?.modeChanged(next);
+        window.projectWorkspace?.modeChanged(next, placement?.origin === 'copy');
         mode = next;
         viewer.setPlacing(next === 'add');
         viewer.setMoving(next === 'move');
@@ -116,7 +115,7 @@
             byId(id).setAttribute('aria-pressed', String(value === next));
         }
         byId('pdfModeHint').textContent = next === 'add'
-            ? 'Toque el punto del plano donde desea colocar el botón.'
+            ? (placement?.origin === 'copy' ? 'Elige dónde colocar la copia del botón.' : 'Toque el punto del plano donde desea colocar el botón.')
             : next === 'move' ? 'Arrastre un botón hasta su nueva posición. También puede moverlo con las flechas del teclado.'
             : 'Pulse un botón para seleccionarlo y vuelva a pulsarlo para abrir su ficha.';
     }
@@ -148,7 +147,7 @@
         areaToggle.disabled = busy;
         byId('pdfSelectedMarker').hidden = !marker;
         if (window.projectWorkspace?.active?.kind === 'pdf') window.projectWorkspace.selection(marker ? {
-            buttonId: marker.id, name: markerName(marker), workbook: marker.workbook, adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, open: () => openWorkbook(marker.workbook), remove: deleteSelectedMarker,
+            buttonId: marker.id, name: markerName(marker), adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, remove: deleteSelectedMarker,
             target: { category_id: marker.category_id, name: markerName(marker), assign_url: marker.assign_url, apply(result) {
                 const index = plan.markers.findIndex((item) => item.id === result.marker.id);
                 if (index < 0) return null;
@@ -164,7 +163,6 @@
         if (!marker) return;
         byId('pdfSelectedMarkerName').textContent = markerName(marker);
         byId('pdfSelectedWorkbookName').textContent = marker.sheet_name || marker.source_sheet || 'Elija una hoja del Excel del plano.';
-        byId('btnPdfOpenWorkbook').hidden = !marker.workbook;
     }
 
     function updateMarkers() {
@@ -404,10 +402,6 @@
     byId('btnPdfZoomIn').addEventListener('click', () => viewer.zoom(1.35));
     byId('btnPdfZoomOut').addEventListener('click', () => viewer.zoom(1 / 1.35));
     byId('btnPdfFit').addEventListener('click', () => viewer.fit());
-    byId('btnPdfConfigureMarker').addEventListener('click', configureMarker);
-    byId('btnPdfOpenWorkbook').addEventListener('click', () => {
-        if (selectedMarker()?.workbook) openWorkbook(selectedMarker().workbook);
-    });
     byId('btnPdfCloseMarkerDialog').addEventListener('click', hideDialog);
     byId('btnPdfSaveMarkerLabel').addEventListener('click', () => markerAction(
         (marker) => post(marker.update_url, { label: byId('pdfMarkerLabel').value }), 'Nombre del botón guardado.',
@@ -503,23 +497,22 @@
     async function deleteSelectedMarker() {
         const marker = selectedMarker();
         if (!marker || busy || !getPermissions().can_delete_pdf_marker) return;
-        if (!window.confirm(`¿Eliminar el botón «${markerName(marker)}» del plano?`)) return;
-        if (!(await editor.requestClose())) return;
+        const currentPlan = plan;
+        if (!(await window.confirmAppAction('Eliminar botón', `¿Eliminar el botón «${markerName(marker)}» del plano?`, 'Eliminar botón', { danger: true }))) return;
+        if (plan !== currentPlan || selectedMarker() !== marker || busy || !(await editor.requestClose())) return;
+        if (plan !== currentPlan || selectedMarker() !== marker) return;
         await markerAction(() => post(marker.delete_url, {}), 'Botón eliminado.');
         setMode('explore');
     }
     byId('btnPdfDeleteMarker').addEventListener('click', deleteSelectedMarker);
-    byId('btnPdfDeleteSelectedMarker').addEventListener('click', deleteSelectedMarker);
     function updatePermissions() {
         const permissions = getPermissions();
         byId('btnGoToPdfSection').hidden = !appState.user;
         byId('btnPdfMoveMarker').hidden = !permissions.can_change_pdf_plan;
         byId('btnPdfAddMarker').hidden = !permissions.can_assign;
         byId('btnPdfDeleteMarker').hidden = !permissions.can_delete_pdf_marker;
-        byId('btnPdfDeleteSelectedMarker').hidden = !permissions.can_delete_pdf_marker;
         byId('btnRenamePdfPlan').hidden = !plan || !permissions.can_change_pdf_plan;
         byId('btnDeletePdfPlan').hidden = !plan || !permissions.can_delete_pdf_plan;
-        byId('btnPdfOpenWorkbook').querySelector('span').textContent = permissions.can_change_excel ? 'Abrir y editar Excel' : 'Ver Excel';
         if (!permissions.can_change_pdf_plan && mode === 'move') setMode('explore');
     }
     byId('btnRenamePdfPlan').addEventListener('click', async () => {

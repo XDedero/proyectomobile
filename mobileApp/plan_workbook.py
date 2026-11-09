@@ -249,7 +249,7 @@ def button_category(value):
         raise ValidationError('Seleccione una categoría disponible.') from exc
 
 
-def new_button_options(request):
+def new_button_options(request, plan):
     from .pdf_views import json_body
 
     upload = request.FILES.get('file')
@@ -263,6 +263,11 @@ def new_button_options(request):
         if not isinstance(data, dict):
             raise ValidationError('La ubicación del botón no es válida.')
     origin = data.get('origin')
+    if origin == 'copy' and upload is None:
+        from .workbook_service import positive_integer
+        source = get_object_or_404(markers(plan), pk=positive_integer(data.get('copy_button_id'), 'Botón'))
+        data['button_color'] = source.button_color
+        return data, source.category, ('copy', source.pk), None
     from .button_descriptions import clean_color, clean_rows
     data['button_color'] = clean_color(data.get('button_color', ''))
     if 'descriptions' in data:
@@ -294,7 +299,9 @@ def new_button_options(request):
 
 
 def initialize_button(marker, user, origin, upload):
-    if isinstance(origin, tuple) and origin[0] == 'sheet':
+    if isinstance(origin, tuple) and origin[0] == 'copy':
+        copy_button(marker, user, origin[1])
+    elif isinstance(origin, tuple) and origin[0] == 'sheet':
         assign_marker(marker, user, {'sheet': origin[1]})
     elif isinstance(origin, tuple) and origin[0] == 'piece':
         stage_piece_source(marker, user, origin[1])
@@ -306,6 +313,41 @@ def initialize_button(marker, user, origin, upload):
         assign_marker(marker, user, {'blank': True})
     else:
         initialize_marker(marker, user)
+
+
+def copy_button(marker, user, source_id):
+    source = get_object_or_404(markers(marker.plan).select_for_update(), pk=source_id)
+    fields = ['category', 'descriptions', 'button_color', 'show_description', 'button_scale',
+              'piece_source', 'has_area', 'area_shape', 'area_radius_x', 'area_radius_y', 'area_color']
+    for field in fields:
+        setattr(marker, field, getattr(source, field))
+    if isinstance(marker, PdfMarker):
+        marker.label = source.label
+        fields.append('label')
+    elif source.name != f'Botón {markers(marker.plan).filter(pk__lte=source.pk).count()}':
+        marker.name = source.name
+        fields.append('name')
+
+    book, sheet, content, pieces = source.source_workbook, source.source_sheet, None, {}
+    if book:
+        content, pieces = book.content, book.source_pieces
+    elif source.workbook and (source.sheet_name or not source.workbook.plan_mode):
+        book = source.workbook
+        sheet = source.sheet_name or sheet_names(book.content)[0]
+        content = single_sheet(book.content, sheet)
+    elif isinstance(source, Motor) and source.excel:
+        with source.excel.open('rb') as stream:
+            content = stream.read()
+        sheet = sheet_names(content)[0]
+
+    if content is not None:
+        marker.source_workbook = WorkbookDocument.objects.create(
+            name=book.name if book else source.excel_name or 'Ficha.xlsx', content=content,
+            plan_mode='source', source_pieces=pieces, updated_by=user,
+        )
+        marker.source_sheet = sheet
+        fields.extend(['source_workbook', 'source_sheet'])
+    marker.save(update_fields=fields)
 
 
 def stage_button_source(marker, user, upload, selected=None):

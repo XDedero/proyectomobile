@@ -39,14 +39,14 @@ def command_json(command, message, *, timeout):
 
 def drive_command(*args):
     if not (settings.BASE_DIR / 'gdrive-token.json').is_file():
-        raise CloudUnavailable('Esta instalación necesita una conexión autorizada a Google Drive para ver la nube.')
+        raise CloudUnavailable('Esta instalación necesita autorización para consultar los archivos de la nube.')
     result = command_json(
         ['node', str(settings.BASE_DIR / 'gdrive-sync-cli.js'), *args],
-        'No se pudo consultar Google Drive desde esta instalación. Revisa la conexión y la autorización de Drive.',
+        'No se pudo consultar el almacenamiento en la nube. Revisa la conexión y los permisos.',
         timeout=65,
     )
     if not result.get('ok'):
-        raise CloudUnavailable('No se pudo leer el proyecto en Google Drive.')
+        raise CloudUnavailable('No se pudo leer el proyecto en la nube.')
     return result
 
 
@@ -59,7 +59,7 @@ def project_title(name):
 
 
 def supabase_query(sql, *, read_only):
-    message = 'Esta instalación no pudo consultar Supabase. Comprueba que su CLI esté enlazada y autorizada.'
+    message = 'No se pudo consultar la base de datos. Revisa la conexión y los permisos.'
     cli = shutil.which('supabase')
     npm_cli = (Path(os.getenv('APPDATA') or Path.home() / 'AppData' / 'Roaming')
                / 'npm' / 'node_modules' / 'supabase' / 'dist' / 'supabase.js')
@@ -101,7 +101,7 @@ def supabase_metadata(pdf_id, excel_id):
             'page', m.page, 'x', m.x, 'y', m.y, 'label', m.label, 'sheet', m.sheet_name,
             'has_area', m.has_area, 'area_radius_x', m.area_radius_x, 'area_radius_y', m.area_radius_y,
             'area_color', m.area_color, 'area_shape', m.area_shape, 'button_color', m.button_color,
-            'show_description', m.show_description, 'piece_source',m.piece_source, 'category_id', m.category_id, 'category_name', c.name
+            'show_description', m.show_description, 'piece_source',m.piece_source, 'button_scale',m.button_scale, 'category_id', m.category_id, 'category_name', c.name
         ) order by m.id) from public.pdf_markers m
         left join public.button_categories c on c.id = m.category_id where m.plan_id = p.id), '[]') as markers
     from public.pdf_plans p
@@ -155,11 +155,11 @@ def read_cloud_snapshot(pdf_id):
         try:
             metadata = supabase_metadata(pdf_id, project['excelId'])
         except CloudUnavailable:
-            warning = 'Supabase no respondió al consultar los botones. El Excel completo está disponible en «Ver hojas de Excel».'
+            warning = 'La base de datos no respondió al consultar los botones. El Excel completo está disponible en «Ver hojas de Excel».'
         if not metadata or not metadata.get('markers'):
             portable = saved_manifest(project, source, content)
         if not metadata and portable is None and not warning:
-            warning = 'Este guardado no tiene coordenadas de botones en Supabase. Puedes consultar sus hojas de Excel.'
+            warning = 'Este guardado no tiene coordenadas de botones en la base de datos. Puedes consultar sus hojas de Excel.'
     if portable is not None:
         if (not isinstance(portable, dict) or portable.get('format') != 'motor-plan-project'
                 or portable.get('version') != 3 or portable.get('kind') != 'pdf'):
@@ -173,7 +173,7 @@ def shared_publish_target(plan_id, pdf_id, source):
     """Resolve the original files; an explicit save replaces their current contents."""
     project = drive_command('--publish-target', '--drive-id', pdf_id)['project']
     if project is None:
-        raise CloudUnavailable('El PDF original ya no está disponible en Drive.')
+        raise CloudUnavailable('El PDF original ya no está disponible en la nube.')
     return project
 
 
@@ -214,7 +214,7 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
         if sheet and sheet not in sheets:
             if portable is not None:
                 raise ValidationError('La hoja de un botón no está en el Excel de este guardado.')
-            warning = 'Se recuperaron los botones. Algunas fichas referenciadas faltan en el Excel de Drive.'
+            warning = 'Se recuperaron los botones. Algunas fichas referenciadas faltan en el Excel almacenado en la nube.'
             sheet = ''
         marker.update(sheet=sheet, workbook='w1' if sheet else None, label=marker.get('label') or '',
                       has_area=bool(marker.get('has_area')), area_color=marker.get('area_color') or 'rgba(59, 130, 246, 0.25)')

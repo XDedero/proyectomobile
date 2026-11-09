@@ -103,6 +103,7 @@ def marker_data(marker):
         'category_name': marker.category.name if marker.category_id else '',
         'has_area': bool(marker.has_area),
         'area_shape': marker.area_shape,
+        'button_scale': marker.button_scale,
         'area_radius_x': marker.area_radius_x,
         'area_radius_y': marker.area_radius_y,
         'area_color': marker.area_color or 'rgba(59, 130, 246, 0.25)',
@@ -253,7 +254,7 @@ def create_marker(request, plan_id):
 
     plan = get_object_or_404(PdfPlan, pk=plan_id)
     try:
-        values, category, origin, upload = new_button_options(request)
+        values, category, origin, upload = new_button_options(request, plan)
         data = validated_marker(plan, values)
         with transaction.atomic():
             marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False),

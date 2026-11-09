@@ -147,8 +147,9 @@ class DxfViewer {
         this.container.dispatchEvent(new Event('plan-view-changed'));
         const scale = this.svg.getScreenCTM()?.a;
         if (!scale) return;
-        for (const { circle, label, hover, area, motor } of this.pins.values()) {
-            circle.setAttribute('r', 12 / scale);
+        for (const pin of this.pins.values()) {
+            const { label, hover, area, motor } = pin;
+            this.resizePin(pin, motor.button_scale ?? 1, scale);
             // Keep text in pixel-sized local coordinates: very large SVG font
             // sizes are clamped by browsers when the CAD viewBox uses 1e6 units.
             label.setAttribute('transform', `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`);
@@ -157,6 +158,13 @@ class DxfViewer {
             const attrs = motor.area_shape === 'rectangle' ? {x:motor.svg_x-rx,y:motor.svg_y-ry,width:rx*2,height:ry*2} : {cx:motor.svg_x,cy:motor.svg_y,rx,ry};
             for (const [key,value] of Object.entries(attrs)) area.setAttribute(key,value);
         }
+    }
+
+    resizePin(pin, size, scale = this.svg?.getScreenCTM()?.a) {
+        if (!scale || !pin) return;
+        pin.circle.setAttribute('r', 12 * size / scale);
+        pin.label.setAttribute('font-size', 11 * size);
+        pin.hover.setAttribute('y', 16 * size + 13);
     }
 
     fit() {

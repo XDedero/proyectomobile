@@ -9,7 +9,14 @@
     let localRows = [], cloudRows = [];
     let cloudRequestVersion = 0, cloudLoading = false, cloudOpening = false, cloudCheckedAt = 0;
     let localCheckedAt = 0;
-    const cloudMessages = { local: "Guardado en este equipo", pending: "Guardado aquí. Publicando en la nube…", uploaded: "Archivos subidos a Drive. Sincronizando el registro en segundo plano…", synced: "Guardado en Drive y Supabase", partial: "Disponible en Drive. Confirmando el registro…", error: "Guardado aquí. Falló la publicación en la nube" };
+    const cloudMessages = {
+        local: 'Guardado en este equipo',
+        pending: 'Guardado en este equipo. Subiendo a la nube…',
+        uploaded: 'Archivos almacenados en la nube. Confirmando el registro en la base de datos…',
+        synced: 'Guardado en la base de datos y almacenado en la nube',
+        partial: 'Archivos almacenados en la nube. Confirmando el registro en la base de datos…',
+        error: 'Guardado en este equipo. No se pudo almacenar en la nube',
+    };
     const overlay = document.createElement('section');
     overlay.id = 'planFullscreen';
     overlay.className = 'plan-fullscreen';
@@ -39,13 +46,13 @@
           <button type="button" id="fullscreenSavePlan" class="quick-save" hidden><i class="bi bi-floppy" aria-hidden="true"></i><span>Guardar plano</span></button>
           <button type="button" id="fullscreenDeletePlan" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i><span>Eliminar plano</span></button>
         </div>
-        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAssignExcel">Opciones del botón</button><button type="button" id="fullscreenOpenExcel">Ver ficha</button><button type="button" id="fullscreenAdjustArea" hidden>Ajustar radio</button><button type="button" id="fullscreenDeleteMarker" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i> Eliminar botón</button></div>
+        <div id="fullscreenSelection" class="fullscreen-selection" hidden><span id="fullscreenSelectionName"></span><button type="button" id="fullscreenAdjustArea" hidden>Ajustar radio</button></div>
         <p id="fullscreenPlanStatus" class="fullscreen-plan-status" role="status"></p>`;
     document.body.append(overlay);
     const fullMenu = byId('fullscreenPlanMenu');
-    const uploadStages = { queued: 'Guardado en este PC. Esperando turno para subir…', preparing: 'Preparando los archivos para Drive…',
-        pdf: 'Subiendo el PDF a Drive…', excel: 'Subiendo el Excel y sus hojas a Drive…',
-        database: 'Registrando el plano, las hojas y los botones en Supabase…', confirming: 'Confirmando el guardado completo…' };
+    const uploadStages = { queued: 'Guardado en este PC. Esperando turno para subir…', preparing: 'Preparando los archivos para la nube…',
+        pdf: 'Subiendo el PDF a la nube…', excel: 'Subiendo el Excel y sus hojas a la nube…',
+        database: 'Guardando el plano, las hojas y los botones en la base de datos…', confirming: 'Confirmando el guardado completo…' };
     for (const [id, anchor] of [['pdfProjectUploadProgress', 'pdfProjectSaveStatus'], ['cadProjectUploadProgress', 'cadProjectSaveStatus'], ['fullscreenUploadProgress', 'fullscreenPlanStatus']]) {
         const element = document.createElement('section');
         element.id = id; element.className = 'project-upload-progress'; element.hidden = true;
@@ -61,8 +68,8 @@
             if (element.hidden) continue;
             const state = saving ? 'pending' : plan._saveRequestError ? 'error' : plan.cloud_status;
             const message = saving ? 'Guardando los cambios en este PC…' : plan._cloudPollDelayed && pending ? 'Esperando conexión para confirmar la subida…' :
-                state === 'pending' ? uploadStages[plan.cloud_stage] || cloudMessages.pending : state === 'synced' ? 'Guardado confirmado en Drive y Supabase' :
-                ['uploaded', 'partial'].includes(state) ? 'Archivos subidos a Drive' : 'No se completó la subida.';
+                state === 'pending' ? uploadStages[plan.cloud_stage] || cloudMessages.pending : state === 'synced' ? cloudMessages.synced :
+                ['uploaded', 'partial'].includes(state) ? 'Archivos almacenados en la nube' : 'No se completó la subida.';
             const label = element.querySelector('.upload-stage');
             if (label.textContent !== message) label.textContent = message;
             element.dataset.state = state;
@@ -70,7 +77,7 @@
             if (saving) bar.removeAttribute('value');
             else bar.value = ['synced', 'uploaded', 'partial'].includes(state) ? 100 : Math.min(95, Math.max(0, plan.cloud_progress || 5));
             bar.setAttribute('aria-valuetext', message);
-            element.querySelector('.upload-hint').textContent = pending ? 'La subida todavía no ha terminado.' : state === 'synced' ? 'La subida y el registro han finalizado.' : ['uploaded', 'partial'].includes(state) ? 'El registro de Supabase se confirma automáticamente. Puede seguir trabajando.' : plan._saveRequestError || plan.cloud_error || '';
+            element.querySelector('.upload-hint').textContent = pending ? 'La subida todavía no ha terminado.' : state === 'synced' ? '' : ['uploaded', 'partial'].includes(state) ? 'El registro en la base de datos se confirma automáticamente.' : plan._saveRequestError || plan.cloud_error || '';
         }
     }
     function applyCloudState(plan, saved) {
@@ -131,11 +138,11 @@
         byId('fullscreenSavePlan').hidden = byId('fullscreenSaveMenu').hidden = !active || !canSave();
         byId('fullscreenDeletePlan').hidden = !active || !canDelete();
         byId('fullscreenMoveMarkerQuick').hidden = !active || !canMove();
-        byId('fullscreenDeleteMarker').hidden = !selectedActions?.remove || !canDeleteMarker();
-        for (const id of ['fullscreenSavePlan', 'fullscreenSaveMenu', 'fullscreenDeletePlan', 'fullscreenDeleteMarker', 'fullscreenAddMarker', 'fullscreenMoveMarkerQuick']) byId(id).disabled = isBusy();
+        renderSidebarActions();
+        for (const id of ['fullscreenSavePlan', 'fullscreenSaveMenu', 'fullscreenDeletePlan', 'fullscreenAddMarker', 'fullscreenMoveMarkerQuick']) byId(id).disabled = isBusy();
         renderUploadProgress();
         if (!active) return;
-        const saveState = saving ? 'Guardando…' : active.plan._saveRequestError ? 'Guardado pendiente' : active.plan.cloud_status === 'pending' ? 'Subiendo a la nube…' : !active.plan.saved_at ? 'Sin guardar' : active.plan._projectDirty ? 'Cambios pendientes' : active.plan.cloud_status === 'synced' ? 'Guardado en la nube' : active.plan.cloud_status === 'uploaded' ? 'En Drive · Registrando…' : 'Guardado en este PC';
+        const saveState = saving ? 'Guardando…' : active.plan._saveRequestError ? 'Guardado pendiente' : active.plan.cloud_status === 'pending' ? 'Subiendo a la nube…' : !active.plan.saved_at ? 'Sin guardar' : active.plan._projectDirty ? 'Cambios pendientes' : active.plan.cloud_status === 'synced' ? 'Almacenado en la nube' : active.plan.cloud_status === 'uploaded' ? 'En la nube · Confirmando registro…' : 'Guardado en este PC';
         const badge = byId(active.kind === 'pdf' ? 'pdfSaveBadge' : 'cadSaveBadge');
         badge.textContent = saveState;
         badge.classList.toggle('has-changes', saving || Boolean(active.plan._saveRequestError) || active.plan._projectDirty || active.plan.cloud_status !== 'synced');
@@ -154,6 +161,7 @@
         if (!active || active.kind !== configuration.kind || active.plan.id !== configuration.plan.id) selection(null);
         if (full && active && (active.kind !== configuration.kind || active.plan.id !== configuration.plan.id)) exitFullscreen();
         active = configuration;
+        mountButtonList(configuration);
         update();
         if (!full) status(active.plan._projectDirty ? 'Cambios pendientes' : active.plan.saved_at ? cloudMessages[active.plan.cloud_status] || cloudMessages.local : 'Plano sin guardar');
     }
@@ -186,6 +194,7 @@
                     return false;
                 }
             }
+            if (window.planDisplay && !(await window.planDisplay.flush())) return false;
             if (current.applyArea && !(await current.applyArea())) return false;
             const data = await post(current.plan.save_project_url);
             if (data.plan && active === current) {
@@ -226,8 +235,10 @@
     async function deletePlan(target = active) {
         if (!target || isBusy() || !canDelete(target.kind, target.plan)) return;
         const { kind, plan } = target;
-        if (!window.confirm(`¿Eliminar «${plan.name}» de la aplicación? Se quitarán sus botones y desaparecerá de Planos guardados.`)) return;
-        if (!(await window.workbookEditor.requestClose())) return;
+        if (!(await window.confirmAppAction('Eliminar plano',
+            `¿Eliminar «${plan.name}» de la aplicación? Se quitarán sus botones y desaparecerá de Planos guardados.`,
+            'Eliminar plano', { danger: true }))) return;
+        if (isBusy() || !(await window.workbookEditor.requestClose())) return;
         deleting = true;
         libraryRequestVersion += 1;
         libraryLoading = false;
@@ -252,10 +263,62 @@
         fullMenu.hidden = !open;
         byId('btnPlanFullscreenMenu').setAttribute('aria-expanded', String(open));
     }
+
+    function mountButtonList({kind, viewport}) {
+        if (viewport.parentElement.classList.contains('plan-view-frame')) return;
+        const list = byId(kind === 'pdf' ? 'pdfMarkerList' : 'motorList');
+        const frame = document.createElement('div');
+        frame.className = 'plan-view-frame';
+        const sidebar = document.createElement('aside');
+        sidebar.className = 'plan-button-sidebar';
+        sidebar.setAttribute('aria-label', 'Botones del plano');
+        sidebar.innerHTML = `<div class="plan-button-sidebar-content">
+            <div class="plan-button-sidebar-header">
+                <button type="button" class="plan-button-list-toggle" aria-expanded="true">⋮</button>
+                <strong>Botones</strong>
+            </div>
+            <div class="plan-button-sidebar-actions">
+                <button type="button" class="plan-button-sidebar-action" data-button-action="assign" aria-label="Opciones del botón" title="Opciones del botón" aria-haspopup="dialog" hidden><i class="bi bi-gear" aria-hidden="true"></i></button>
+                <button type="button" class="plan-button-sidebar-action" data-button-action="remove" aria-label="Eliminar botón" title="Eliminar botón" aria-haspopup="dialog" hidden><i class="bi bi-trash" aria-hidden="true"></i></button>
+            </div>
+        </div>`;
+        const toggle = sidebar.querySelector('.plan-button-list-toggle');
+        const heading = sidebar.querySelector('strong');
+        toggle.setAttribute('aria-controls', list.id);
+        function collapse(collapsed) {
+            sidebar.classList.toggle('is-collapsed', collapsed);
+            list.hidden = heading.hidden = collapsed;
+            toggle.setAttribute('aria-expanded', String(!collapsed));
+            toggle.setAttribute('aria-label', collapsed ? 'Mostrar listado de botones' : 'Minimizar listado de botones');
+            toggle.title = toggle.getAttribute('aria-label');
+        }
+        toggle.onclick = () => collapse(!list.hidden);
+        for (const button of sidebar.querySelectorAll('[data-button-action]')) {
+            button.onclick = () => selectedActions?.[button.dataset.buttonAction]?.();
+        }
+        collapse(false);
+        sidebar.firstElementChild.append(list);
+        viewport.before(frame);
+        frame.append(sidebar, viewport);
+    }
+
+    function renderSidebarActions() {
+        const sidebar = active?.viewport.closest('.plan-view-frame')?.querySelector('.plan-button-sidebar');
+        if (!sidebar) return;
+        const busy = isBusy();
+        for (const [action, allowed] of [['assign', rights().can_assign], ['remove', canDeleteMarker()]]) {
+            const button = sidebar.querySelector(`[data-button-action="${action}"]`);
+            const available = Boolean(selectedActions?.[action]);
+            button.hidden = !allowed || !available;
+            button.disabled = busy;
+        }
+    }
+
     async function enterFullscreen() {
         if (!active || full) return;
+        resetOutsideClicks();
         full = true;
-        originalViewport = active.viewport;
+        originalViewport = active.viewport.parentElement;
         placeholder = document.createComment('plan-viewport');
         originalViewport.before(placeholder);
         byId('fullscreenPlanViewport').append(originalViewport);
@@ -275,6 +338,7 @@
     }
     function exitFullscreen() {
         if (!full) return;
+        resetOutsideClicks();
         full = false;
         setMenu(false);
         if (placeholder?.parentNode && originalViewport) {
@@ -291,42 +355,87 @@
         if (fullscreenOwned && document.fullscreenElement) document.exitFullscreen().catch(() => {});
         fullscreenOwned = false;
         active?.viewer.fit();
+        window.planDisplay?.render(active, selectedActions);
     }
     function selection(configuration) {
+        if (selectedActions?.buttonId !== configuration?.buttonId) resetOutsideClicks();
         selectedActions = configuration;
+        for (const [kind, id] of [['pdf', 'btnPdfCopyButton'], ['dxf', 'btnCadCopyButton']]) {
+            byId(id).disabled = active?.kind !== kind || !configuration || !active.plan.permissions?.can_assign;
+        }
         window.pieceLibrary?.setTarget(configuration?.target || null);
         window.planDisplay?.render(active, configuration);
+        renderSidebarActions();
         byId('fullscreenSelection').hidden = !configuration;
-        byId('fullscreenDeleteMarker').hidden = !configuration?.remove || !canDeleteMarker();
         if (!configuration) return;
         byId('fullscreenSelectionName').textContent = configuration.name;
-        byId('fullscreenAssignExcel').hidden = !configuration.assign;
-        byId('fullscreenAssignExcel').onclick = configuration.assign;
-        byId('fullscreenOpenExcel').hidden = !configuration.workbook;
-        byId('fullscreenOpenExcel').onclick = configuration.open;
-        byId('fullscreenDeleteMarker').onclick = configuration.remove;
         byId('fullscreenAdjustArea').hidden = !configuration.adjustArea;
         byId('fullscreenAdjustArea').onclick = configuration.adjustArea;
     }
 
-    function deselectOutsideDocument(event) {
-        if (!active || !selectedActions || !(event.target instanceof Element)) return;
-        if (event.type === 'pointerdown' && (event.button !== 0 || !event.isPrimary)) return;
-        const target = event.target;
-        const documentSurface = active.kind === 'pdf' ? active.viewer.stage : active.viewer.svg;
-        if (documentSurface?.contains(target)) return;
+    const outsideClickInterval = 500;
+    const clickMovementLimit = 6;
+    let outsidePress = null, lastOutsideClick = null, pendingDeselection = null;
+    function canDeselectAt(target) {
+        if (!active || !selectedActions || !(target instanceof Element)) return false;
+        if (target.closest('[data-pdf-marker-id], [data-motor-id]')) return false;
+        if (active.viewport.contains(target) &&
+            (active.viewer.placing || window.planSectors?.editing || target.closest('.sector-selectable, [data-sector-handle]'))) return false;
         // Keep controls that operate on the current button usable while editing.
-        if (window.workbookEditor?.visible || document.querySelector('.modal.show') || !byId('pdfMarkerDialog').hidden) return;
-        if (target.closest('button, input, select, textarea, label, a') && target.closest(
-            '#pdfSelectedMarker, #selectedMotorCard, #fullscreenSelection, #pdfAreaPanel, #pdfMarkerList, #motorList, #btnPdfAdjustArea, #btnMoveCadMarker, #btnAssignExcelCorner'
-        )) return;
+        if (window.workbookEditor?.visible || document.querySelector('.modal.show, .app-confirm[open]') || !byId('pdfMarkerDialog').hidden) return false;
+        return !(target.closest('button, input, select, textarea, label, a') && target.closest(
+            '#fullscreenSelection, #pdfAreaPanel, .plan-button-sidebar, #btnPdfAdjustArea, #btnMoveCadMarker, #btnPdfCopyButton, #btnCadCopyButton, .plan-size-control'
+        ));
+    }
+    function resetOutsideClicks() {
+        outsidePress = lastOutsideClick = pendingDeselection = null;
+    }
+    function movedFromPress(event, press) {
+        return Math.hypot(event.clientX - press.x, event.clientY - press.y) > clickMovementLimit;
+    }
+    function finishOutsideDeselection(press) {
+        if (!press || pendingDeselection !== press) return;
+        pendingDeselection = null;
+        if (press.plan !== active?.plan || press.buttonId !== selectedActions?.buttonId) return;
         const workflow = active.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow;
         workflow?.deselect();
     }
-    document.addEventListener('pointerdown', deselectOutsideDocument, true);
-    document.addEventListener('click', event => {
-        if (event.detail === 0) deselectOutsideDocument(event);
+    document.addEventListener('pointerdown', event => {
+        pendingDeselection = null;
+        if (event.button !== 0 || !event.isPrimary || !canDeselectAt(event.target)) {
+            resetOutsideClicks();
+            return;
+        }
+        outsidePress = {id: event.pointerId, x: event.clientX, y: event.clientY,
+            plan: active.plan, buttonId: selectedActions.buttonId, type: event.pointerType};
     }, true);
+    document.addEventListener('pointermove', event => {
+        if (outsidePress?.id === event.pointerId && movedFromPress(event, outsidePress)) resetOutsideClicks();
+    }, true);
+    document.addEventListener('pointerup', event => {
+        const press = outsidePress;
+        if (!press || press.id !== event.pointerId) return;
+        outsidePress = null;
+        const target = document.elementFromPoint(event.clientX, event.clientY);
+        if (movedFromPress(event, press) || press.plan !== active?.plan || press.buttonId !== selectedActions?.buttonId || !canDeselectAt(target)) {
+            resetOutsideClicks();
+            return;
+        }
+        const now = performance.now();
+        if (lastOutsideClick?.plan === press.plan && lastOutsideClick.buttonId === press.buttonId &&
+            lastOutsideClick.type === press.type && now - lastOutsideClick.time <= outsideClickInterval) {
+            resetOutsideClicks();
+            pendingDeselection = press;
+            // Let the tap finish before removing controls that can shift the view.
+            setTimeout(() => finishOutsideDeselection(press), 350);
+        } else {
+            lastOutsideClick = {...press, time: now};
+        }
+    }, true);
+    document.addEventListener('click', () => finishOutsideDeselection(pendingDeselection));
+    document.addEventListener('pointercancel', resetOutsideClicks, true);
+    document.addEventListener('wheel', resetOutsideClicks, {capture: true, passive: true});
+    for (const id of ['btnPdfCopyButton', 'btnCadCopyButton']) byId(id).onclick = () => window.planExcel?.copySelectedButton();
 
     async function openListing() { await window.planExcel?.openListings(); }
     async function configureListing() { await window.planExcel?.listings(); }
@@ -429,7 +538,7 @@
             badge.textContent = [kind.toUpperCase(), local ? 'En este PC' : 'Sin copia en este PC',
                 local?.cloud_status === 'pending' ? 'Subiendo a la nube…' : cloud && 'En la nube',
                 local?.cloud_status === 'partial' && 'Confirmación pendiente',
-                local?.cloud_status === 'uploaded' && 'Archivos en Drive · Registrando',
+                local?.cloud_status === 'uploaded' && 'Archivos en la nube · Confirmando registro',
                 cloud?.date && new Date(cloud.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
             open.append(title, badge);
             open.addEventListener('click', () => openLibraryEntry(entry, !local));
@@ -475,8 +584,10 @@
         const { cloud, copies, name } = entry;
         if (!localOnly && !cloud) return deletePlan({ kind: copies[0].kind, plan: { ...copies[0], id: copies[0].plan_id } });
         const message = localOnly ? `¿Limpiar «${name}» de este PC? ${cloud ? 'La copia en la nube seguirá disponible.' : 'Se quitará la copia guardada en este PC.'}` :
-            `¿Eliminar «${name}» de todos los equipos? Se retirarán el PDF, el Excel y el registro de Supabase.`;
-        if (!window.confirm(message) || !(await window.workbookEditor.requestClose())) return;
+            `¿Eliminar «${name}» de todos los equipos? Se retirarán el PDF y el Excel de la nube y su registro de la base de datos.`;
+        const action = localOnly ? 'Limpiar copia local' : 'Eliminar plano';
+        if (!(await window.confirmAppAction(action, message, action, { danger: true }))) return;
+        if (isBusy() || cloudOpening || !(await window.workbookEditor.requestClose())) return;
         deleting = true;
         update();
         try {
@@ -560,8 +671,9 @@
     byId('fullscreenMoveMarkerQuick').addEventListener('click', () => {
         if (active && !isBusy() && canMove()) active.setMode(byId('fullscreenMoveMarkerQuick').getAttribute('aria-pressed') === 'true' ? 'explore' : 'move');
     });
-    function modeChanged(mode) {
+    function modeChanged(mode, copying = false) {
         for (const [id, value] of [['fullscreenAddMarker', 'add'], ['fullscreenMoveMarkerQuick', 'move']]) byId(id).setAttribute('aria-pressed', String(mode === value));
+        if (copying) status('Elige dónde colocar la copia del botón.');
     }
     byId('fullscreenPage').addEventListener('change', async (event) => {
         try { await active?.viewer.setPage(Number(event.target.value)); } catch (error) { status(error.message, true); }

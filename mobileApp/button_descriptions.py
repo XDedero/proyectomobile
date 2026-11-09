@@ -170,6 +170,8 @@ def snapshot_details(button, reader):
     data = {'descriptions': rows} if rows is not None else {}
     data.update(area_shape=button.area_shape, has_area=button.has_area,
                 area_radius_x=button.area_radius_x, area_radius_y=button.area_radius_y)
+    if button.button_scale != 1:
+        data['button_scale'] = button.button_scale
     if button.piece_source:
         data['piece_source'] = True
     if button.button_color:
@@ -180,12 +182,13 @@ def snapshot_details(button, reader):
 
 
 def imported_details(item):
-    from .display_settings import clean_shape
+    from .display_settings import clean_shape, clean_button_scale
     rows = item.get('descriptions')
     enabled = item.get('show_description', False)
     if type(enabled) is not bool:
         raise ValidationError('La configuración de la ficha de descripción no es válida.')
     return {'descriptions': None if rows is None else clean_rows(rows, snapshot=True),
+            'button_scale': clean_button_scale(item.get('button_scale', 1)),
             'piece_source':item.get('piece_source') is True,
             'area_shape': clean_shape(item.get('area_shape', 'ellipse')),
             'button_color': clean_color(item.get('button_color', '')), 'show_description': enabled}

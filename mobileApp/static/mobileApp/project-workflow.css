@@ -42,7 +42,25 @@
 .fullscreen-zoom-actions { display: flex; border-top: 1px solid #e2e8f0; margin-top: 4px; padding-top: 4px; }
 .fullscreen-zoom-actions button { flex: 1; text-align: center; }
 .fullscreen-plan-viewport { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
-.fullscreen-plan-viewport > #pdfViewport, .fullscreen-plan-viewport > #dxfViewport { width: 100%; height: 100%; min-height: 0; max-height: none; border-radius: 0; border: 0; flex: 1; }
+.fullscreen-plan-viewport > .plan-view-frame { flex: 1; border-radius: 0; }
+.fullscreen-plan-viewport :is(#pdfViewport, #dxfViewport) { width: 100%; height: 100%; min-height: 0; max-height: none; border-radius: 0; border: 0; }
+.plan-view-frame { display: flex; min-width: 0; min-height: 0; overflow: hidden; border-radius: 14px; background: #334155; }
+.plan-view-frame > :is(#pdfViewport, #dxfViewport) { flex: 1; min-width: 0; border-radius: 0; }
+.plan-button-sidebar { position: relative; flex: 0 0 clamp(128px, 24%, 250px); background: #f1f5f9; color: #172337; border-right: 1px solid #cbd5e1; }
+.plan-button-sidebar.is-collapsed { flex-basis: 44px; }
+.plan-button-sidebar-content { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.plan-button-sidebar-header { display: flex; align-items: center; gap: 6px; padding-right: 6px; border-bottom: 1px solid #cbd5e1; font-size: .85rem; }
+.plan-button-sidebar :is(.plan-button-list-toggle, .plan-button-sidebar-action) { width: 43px; min-height: 42px; border: 0; background: transparent; color: #17324d; line-height: 1; }
+.plan-button-list-toggle { flex: 0 0 43px; font-size: 1.6rem; }
+.plan-button-sidebar-actions { display: flex; flex-direction: column; align-items: flex-start; }
+.plan-button-sidebar-action { font-size: 1.1rem; }
+.plan-button-sidebar :is(.plan-button-list-toggle, .plan-button-sidebar-action):enabled:is(:hover, :focus-visible) { background: #e0eafb; }
+.plan-button-sidebar-action:disabled { opacity: .65; }
+.plan-button-sidebar .plan-button-sidebar-action[data-button-action="remove"] { color: #b42334; }
+.plan-button-sidebar .plan-button-sidebar-action[data-button-action="remove"]:enabled:is(:hover, :focus-visible) { background: #fde6e8; }
+.plan-button-sidebar :is(.pdf-marker-list, .motor-list) { flex: 1; max-height: none; align-content: start; padding: 6px; overscroll-behavior: contain; }
+.plan-button-sidebar :is(.pdf-marker-list, .motor-list)[hidden] { display: none; }
+.plan-button-sidebar .motor-list button { overflow-wrap: anywhere; }
 .fullscreen-selection { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: #172337; }
 .fullscreen-selection[hidden] { display: none; }
 .fullscreen-selection > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
@@ -53,7 +71,7 @@
 .plan-quick-actions button > i { font-size: 1rem; }
 .plan-quick-actions .quick-save { background: #1d4ed8; border-color: #3b82f6; }
 .plan-quick-actions button[aria-pressed="true"] { background: #e0ecff; border-color: #60a5fa; color: #172337; }
-.plan-quick-actions .quick-danger, .fullscreen-selection .quick-danger { border-color: #f87171; color: #fecaca; }
+.plan-quick-actions .quick-danger { border-color: #f87171; color: #fecaca; }
 .plan-quick-actions button:disabled { opacity: .45; }
 .wbe-delete-marker { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 44px; min-height: 44px; border: 1px solid #fca5a5; border-radius: 9px; background: #fff1f2; color: #be123c; font-size: .75rem !important; padding: 7px 10px; }
 @media (max-width: 600px) {
@@ -72,14 +90,40 @@
 .plan-update-warning { color: #ac1827; border: 1px solid #f0a9b1; background: #fff0f2; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
 .plan-update-warning h2 { font-size: 1.25rem; margin: .5rem 0; }
 .plan-update-warning p { margin: 0; }
-/* Only the live opacity slider sits beside the drawing. */
-.plan-display-dock { position: relative; z-index: 8; display: flex; justify-content: flex-end; padding: .4rem 0; }
-.plan-display-dock[hidden] { display: none; }
+.app-confirm {
+    width: min(430px, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto;
+    padding: 1.25rem; border: 1px solid #dce4ef; border-radius: 16px; background: #fff;
+    color: #17324d; box-shadow: 0 16px 42px #17233740;
+}
+.app-confirm::backdrop { background: #17233780; }
+.app-confirm h2 { margin: 0 0 .6rem; font-size: 1.1rem; font-weight: 700; }
+.app-confirm p { margin: 0; color: #475569; overflow-wrap: anywhere; }
+.app-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: 1.1rem; }
+.app-confirm-actions .btn { min-height: 44px; }
+.plan-display-dock { position: relative; z-index: 8; display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; padding: .4rem 0; }
+.plan-display-dock[hidden], .plan-size-control[hidden] { display: none; }
 .plan-opacity-control { margin: 0; width: 220px; max-width: 100%; padding: .5rem .65rem; border-radius: 10px; background: #fffffff2; color: #17324d; font-size: .85rem; }
 .plan-opacity-control input { display: block; width: 100%; margin-top: .35rem; }
 .plan-fullscreen .plan-display-dock { position: absolute; right: .5rem; top: 65px; max-width: min(240px, 65vw); }
-:is(.motor-layer, .pdf-plan-marker-layer, .plan-sectors-layer) { opacity: var(--plan-annotation-opacity, 1); }
-.plan-annotations-hidden :is(.motor-layer, .pdf-plan-marker-layer, .plan-sectors-layer) { visibility: hidden; pointer-events: none; }
-.motor-hover-name { display: none; }
+:is(.motor-target, .pdf-plan-marker, .pdf-marker-coverage-area, .plan-sectors-layer) { opacity: var(--plan-annotation-opacity, 1); }
+.pdf-marker-coverage-area { opacity: calc(var(--plan-annotation-opacity, 1) * .18); }
+.plan-annotations-hidden .plan-sectors-layer { visibility: hidden; pointer-events: none; }
+:is(.pdf-plan-marker, .motor-target):is(.selected, :focus-visible) { opacity: 1; }
+.motor-hover-name { display: none; text-anchor: middle; fill: #17324d; stroke: white; stroke-width: 3px; paint-order: stroke; pointer-events: none; }
+.pdf-plan-marker::after {
+    display: none; content: attr(data-hover-name); position: absolute; top: 110%; left: 50%;
+    transform: translateX(-50%); max-width: 180px; width: max-content; padding: 4px 7px;
+    border-radius: 5px; background: #17324d; color: white; font-size: 12px;
+    line-height: 1.25; overflow-wrap: anywhere; pointer-events: none;
+}
+.pdf-plan-marker.selected { transform: translate(-50%, -50%) scale(1.3); z-index: 20; }
+.pdf-plan-marker:is(.selected, :focus-visible)::after, .motor-target:is(.selected, :focus-visible) .motor-hover-name { display: block; }
+.motor-target.selected .motor-pin { transform-box: fill-box; transform-origin: center; transform: scale(1.3); }
+@media (hover: hover) {
+    :is(.pdf-plan-marker, .motor-target):hover { opacity: 1; }
+    .pdf-plan-marker:hover { transform: translate(-50%, -50%) scale(1.3); z-index: 20; }
+    .pdf-plan-marker:hover::after, .motor-target:hover .motor-hover-name { display: block; }
+    .motor-target:hover .motor-pin { transform-box: fill-box; transform-origin: center; transform: scale(1.3); }
+}
 .pdf-marker-coverage-area { border-width: 1px; }
 @media(max-width:600px) { .plan-fullscreen .plan-display-dock { top: 65px; max-width: 55vw; } }

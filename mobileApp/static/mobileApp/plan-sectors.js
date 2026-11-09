@@ -52,14 +52,7 @@
         <button type="button" id="btnSectorUndo" class="btn btn-outline-secondary btn-sm">Deshacer trazo</button>
         <label class="small">Pincel <input type="range" id="sectorBrushWidth" min="4" max="120" value="30" aria-label="Grosor del pincel"></label>
       </div>
-      <details><summary class="small">Posición, tamaño, rotación y color</summary><div class="sector-numeric-controls mt-2">
-        <label>X (%)<input type="number" id="sectorX" min="0" max="100" step="0.1"></label>
-        <label>Y (%)<input type="number" id="sectorY" min="0" max="100" step="0.1"></label>
-        <label>Ancho (%)<input type="number" id="sectorWidth" min="0.1" max="200" step="0.1"></label>
-        <label>Alto (%)<input type="number" id="sectorHeight" min="0.1" max="200" step="0.1"></label>
-        <label>Rotación (°)<input type="number" id="sectorRotation" min="-360" max="360" step="1"></label>
-        <label>Color<input type="color" id="sectorEditColor"></label>
-      </div></details>`;
+      <label class="small d-flex align-items-center gap-2">Color del sector <input type="color" id="sectorEditColor" class="form-control form-control-color"></label>`;
     document.body.append(dock);
     let current=null,layer=null,editing=null,gesture=null,saving=false,paint=false,memberSector=null,configTarget=null;
     const editable=()=>Boolean(current?.plan.permissions?.can_assign);
@@ -143,8 +136,7 @@
     }
     function syncFields() {
         if(!editing) return;
-        const s=editing.draft,d=dimensions();
-        for(const [id,value] of [['X',s.x/d.width*100],['Y',s.y/d.height*100],['Width',s.width/d.width*100],['Height',s.height/d.height*100],['Rotation',s.rotation]]) byId('sector'+id).value=Number(value.toFixed(2));
+        const s=editing.draft;
         byId('sectorEditColor').value=s.color;
         byId('sectorEditingName').textContent=s.name;
         byId('sectorBrushTools').hidden=s.shape!=='brush';
@@ -204,11 +196,11 @@
         const d=dimensions();
         if(current.kind==='pdf') {
             const element=current.viewer.buttons.get(button.id),stage=current.viewer.stage.getBoundingClientRect();
-            const radius=element && button.page===d.page ? element.offsetWidth/2/stage.width*d.width : 17;
+            const radius=element && button.page===d.page ? element.offsetWidth/2/stage.width*d.width : 17 * (button.button_scale ?? 1);
             return {page:button.page,x:button.x*d.width,y:button.y*d.height,radius};
         }
         const scale=current.viewer.svg.getScreenCTM()?.a||1;
-        return {page:1,x:(button.svg_x-current.viewer.initial.x)/d.unit,y:(button.svg_y-current.viewer.initial.y)/d.unit,radius:12/scale/d.unit};
+        return {page:1,x:(button.svg_x-current.viewer.initial.x)/d.unit,y:(button.svg_y-current.viewer.initial.y)/d.unit,radius:12*(button.button_scale ?? 1)/scale/d.unit};
     }
     async function showMembers(sector) {
         // Load the selected PDF page so membership uses the same geometry and
@@ -306,26 +298,11 @@
         if(['circle','square'].includes(editing.draft.shape)) editing.draft.height=editing.draft.width;
         syncFields();draw();
     };
-    for(const key of ['X','Y','Width','Height','Rotation','EditColor']) byId('sector'+key).oninput=()=>{
+    byId('sectorEditColor').oninput = event => {
         if(!editing||saving) return;
-        const s=editing.draft,d=dimensions(),value=byId('sector'+key).value;
-        if(key==='EditColor') s.color=value;
-        else {
-            const number=Number(value);if(!value||!Number.isFinite(number)) return;
-            if(key==='Rotation') s.rotation=Math.max(-360,Math.min(360,number));
-            else {
-                const axis=key==='X'||key==='Width'?'width':'height';
-                const field=key.toLowerCase(),previous=s[field];
-                s[field]=Math.max(field==='width'||field==='height'?1:0,Math.min(field==='width'||field==='height'?2000:d[axis],number*d[axis]/100));
-                if(byId('sectorKeepRatio').checked&&(key==='Width'||key==='Height')) {
-                    const other=key==='Width'?'height':'width';
-                    s[other]=Math.max(1,Math.min(2000,s[other]*s[field]/previous));
-                }
-            }
-        }
+        editing.draft.color = event.target.value;
         draw();
     };
-    for(const key of ['X','Y','Width','Height','Rotation']) byId('sector'+key).onchange=syncFields;
     function localPoint(p,s) {
         const angle=-s.rotation*Math.PI/180,dx=p.x-s.x,dy=p.y-s.y;
         return [(dx*Math.cos(angle)-dy*Math.sin(angle))/s.width,(dx*Math.sin(angle)+dy*Math.cos(angle))/s.height];

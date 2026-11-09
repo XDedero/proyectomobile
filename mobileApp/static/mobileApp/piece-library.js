@@ -54,7 +54,7 @@
         const title = document.createElement('strong');
         title.textContent = record.name;
         const meta = document.createElement('small');
-        meta.textContent = `${record.category_name || 'Sin categoría'} · ${record.cloud_status === 'synced' ? 'En Drive y Supabase' : record.cloud_status === 'uploaded' ? 'En Drive · Confirmando registro' : 'Guardado en este PC · Subida pendiente'}`;
+        meta.textContent = `${record.category_name || 'Sin categoría'} · ${record.cloud_status === 'synced' ? 'Guardado en la base de datos y almacenado en la nube' : record.cloud_status === 'uploaded' ? 'Almacenado en la nube · Confirmando registro' : 'Guardado en este PC · Subida pendiente'}`;
         const actions = document.createElement('div');
         actions.className = 'saved-motor-actions';
         const open = document.createElement('button');
@@ -83,7 +83,9 @@
             };
             const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-sm btn-outline-danger'; remove.textContent='Eliminar';
             remove.onclick=async () => {
-                if (!window.confirm(`¿Eliminar «${record.name}» del catálogo, su registro de Supabase y su hoja de piezas.xlsx? Las fichas ya incorporadas a los planos conservarán sus copias.`)) return;
+                if (!(await window.confirmAppAction('Eliminar pieza',
+                    `¿Eliminar «${record.name}» del catálogo, su registro de la base de datos y su hoja de la nube? Las fichas ya incorporadas a los planos conservarán sus copias.`,
+                    'Eliminar pieza', { danger: true }))) return;
                 remove.disabled=true; edit.disabled=true;
                 try {
                     await post(record.delete_url,{revision:record.workbook.revision});
@@ -123,7 +125,7 @@
             nextOffset = data.next_offset;
             byId('btnMoreSavedMotors').hidden = nextOffset === null;
             status.textContent = data.total ? `${data.total} piezas guardadas` : 'Todavía no hay piezas guardadas. Rellene una ficha y use Guardar pieza, o importe una ficha del dispositivo.';
-            if (data.pending_deletions) status.textContent += ' Eliminando piezas de Drive y Supabase…';
+            if (data.pending_deletions) status.textContent += ' Eliminando piezas de la nube y la base de datos…';
             if (data.cloud_error) status.textContent += ' '+data.cloud_error;
             clearTimeout(refreshTimer);
             if (data.pending_deletions || data.pieces.some(item=>item.cloud_status !== 'synced')) refreshTimer=setTimeout(()=>{
@@ -281,7 +283,10 @@
         const file=replacementInput.files[0], context=replacementContext; replacementInput.value=''; replacementContext=null;
         const editor=window.workbookEditor;
         if (!file || !context || !editor.visible || editor.epoch !== context.epoch) return;
-        if (!window.confirm(`Importar «${file.name}» reemplazará la ficha que está editando. Los cambios sin guardar se descartarán. Si contiene varias hojas, solo se guardará la que seleccione al pulsar Guardar pieza. ¿Continuar?`)) return;
+        if (!(await window.confirmAppAction('Reemplazar ficha',
+            `Importar «${file.name}» reemplazará la ficha que está editando y descartará los cambios sin guardar. Al guardar la pieza, solo se conservará la hoja que seleccione.`,
+            'Reemplazar ficha', { danger: true }))) return;
+        if (!editor.visible || editor.epoch !== context.epoch || editor.busy) return;
         editor.setBusy(true);editor.setStatus('Abriendo el archivo de reemplazo…');
         try {
             const body=new FormData();body.append('category_id',context.category);body.append('file',await window.workbookFields.normalizeUpload(file));

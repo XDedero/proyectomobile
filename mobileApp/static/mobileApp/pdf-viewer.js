@@ -412,7 +412,6 @@ class PdfPlanViewer {
                 area.style.width = `${rx * 200}%`;
                 area.style.height = `${ry * 200}%`;
                 area.style.backgroundColor = marker.button_color || '#2563eb';
-                area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
                 area.style.borderColor = marker.button_color || '#2563eb';
                 area.style.borderRadius = marker.area_shape === 'rectangle' ? '0' : '50%';
                 area.style.boxShadow = 'none';
@@ -424,7 +423,7 @@ class PdfPlanViewer {
             button.className = `pdf-plan-marker${marker.workbook ? ' has-workbook' : ''}`;
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
-            button.style.opacity = this.displaySettings?.opacity ?? 1;
+            button.style.setProperty('--button-scale', marker.button_scale ?? 1);
             const buttonColor = marker.button_color || '#2563eb';
             if (buttonColor) {
                 button.style.backgroundColor = buttonColor;
@@ -436,6 +435,7 @@ class PdfPlanViewer {
                 button.style.color = luminance > .179 ? '#111' : '#fff';
             }
             const label = marker.label || `Botón ${index + 1}`;
+            button.dataset.hoverName = label;
             button.title = `${label} · ${marker.workbook ? marker.workbook.name : 'Sin Excel asignado'}`;
             button.setAttribute('aria-label', button.title);
             this.positionButton(button, marker.x, marker.y);
@@ -495,7 +495,6 @@ class PdfPlanViewer {
         area.style.height = `${(ry || 0.05) * 200}%`;
         area.style.backgroundColor = marker?.button_color || '#2563eb';
         area.style.borderColor = marker?.button_color || '#2563eb';
-        area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
         area.style.borderRadius = marker?.area_shape === 'rectangle' ? '0' : '50%';
         area.style.boxShadow = 'none';
         area.classList.toggle('selected', Number(markerId) === this.selectedId);

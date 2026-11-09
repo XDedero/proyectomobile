@@ -696,6 +696,49 @@ class ProjectTests(TestCase):
         self.assertEqual(shared_sheets(), ['Controladores'])
         self.assertEqual(replacement.json()['marker']['category_name'], 'Controladores')
 
+    def test_copy_button_preserves_configuration_and_creates_an_independent_sheet(self):
+        from .xlsx_package import sheet_names
+        category = ButtonCategory.objects.get(name='Motores')
+        for kind in ('pdf', 'dxf'):
+            with self.subTest(kind=kind):
+                plan = self.plan(kind)
+                key, workbook_key = ('marker', 'workbook') if kind == 'pdf' else ('motor', 'excel')
+                if kind == 'pdf':
+                    position = {'page': 1, 'x': .25, 'y': .3}
+                    destination = {**position, 'x': .65}
+                else:
+                    first = plan['motors'][0]
+                    position = {'svg_x': first['svg_x'], 'svg_y': first['svg_y']}
+                    destination = position
+                response = self.post(plan['markers_url'], {**position, 'origin':'blank', 'category_id':str(category.pk),
+                    'button_color':'#ac3210', 'show_description':True, 'descriptions':[{'key':'Equipo','value':'Bomba'}]})
+                self.assertEqual(response.status_code,201,response.content)
+                original = response.json()[key]
+                self.assertEqual(self.post(plan['display_url'], {'button_id':original['id'],'button_scale':1.51}).status_code,400)
+                self.assertEqual(self.post(plan['display_url'], {'button_id':original['id'],'button_scale':.25}).status_code,200)
+                response = self.post(plan['markers_url'], {**destination, 'origin':'copy', 'copy_button_id':original['id']})
+                self.assertEqual(response.status_code,201,response.content)
+                clone = response.json()[key]
+                self.assertNotEqual(clone['id'],original['id'])
+                self.assertEqual((clone['button_scale'],clone['button_color'],clone['category_name']),(.25,'#ac3210','Motores'))
+                model = PdfMarker if kind == 'pdf' else Motor
+                copied = model.objects.get(pk=clone['id'])
+                source = model.objects.get(pk=original['id'])
+                self.assertEqual(copied.descriptions,source.descriptions)
+                self.assertTrue(copied.show_description)
+                self.assertNotEqual(clone[workbook_key]['id'],original[workbook_key]['id'])
+                self.assertEqual(sheet_names(copied.source_workbook.content),[source.sheet_name])
+                result = self.post(plan['save_project_url'])
+                self.assertEqual(result.status_code,200,result.content)
+                copied.refresh_from_db()
+                source.refresh_from_db()
+                self.assertNotEqual(copied.sheet_name, source.sheet_name)
+                portable = self.download(plan['export_project_url'])
+                restored = self.client.post(reverse('upload_project'), {'file':SimpleUploadedFile('Copia.planproj',portable)})
+                self.assertEqual(restored.status_code,201,restored.content)
+                buttons = restored.json()['plan']['markers' if kind == 'pdf' else 'motors']
+                self.assertEqual(buttons[-1]['button_scale'],.25)
+
     def test_pdf_project_round_trip_keeps_pages_positions_listing_and_shared_xlsx_bytes(self):
         original, content = self.bundle('pdf')
         with ZipFile(BytesIO(content)) as archive:

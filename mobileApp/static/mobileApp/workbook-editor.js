@@ -372,8 +372,12 @@
             if (!this.visible) return true;
             this.commitAll();
             if (this.busy) return false;
-            if (this.pieceEdit) return this.close();
-            if (this.hasUnsavedChanges && !(await this.save())) return false;
+            if (this.pieceEdit) {
+                const epoch = this.epoch;
+                if ((this.hasUnsavedChanges || this.pieceUnpublished) &&
+                    !(await window.confirmAppAction('Descartar cambios', 'Hay cambios sin guardar en esta ficha.', 'Descartar y cerrar', { danger: true }))) return false;
+                if (epoch !== this.epoch) return !this.visible;
+            } else if (this.hasUnsavedChanges && !(await this.save())) return false;
             return this.close(true);
         }
 
@@ -381,7 +385,7 @@
             if (!this.visible) return true;
             this.commitAll();
             if (!force && this.busy) { this.setStatus('Espere a que termine la operación antes de cerrar.'); return false; }
-            if (!force && (this.hasUnsavedChanges || this.pieceUnpublished) && !window.confirm('Hay cambios sin guardar. ¿Desea cerrar y descartarlos?')) return false;
+            if (!force && (this.hasUnsavedChanges || this.pieceUnpublished)) return false;
             this.visible = false;
             this.epoch += 1;
             this.selectionRevision += 1;
@@ -1027,7 +1031,7 @@
                 this.sheetSelect.value = this.sheet;
                 const plan = window.projectWorkspace?.active?.plan;
                 const savedForPlan = this.metadata.id === plan?.workbook?.id || this.context === 'button-source';
-                this.setStatus(savedForPlan ? 'Cambios de Excel guardados. Usa «Guardar plano» para publicarlos en Drive.' : 'Cambios de Excel guardados.', 'success');
+                this.setStatus(savedForPlan ? 'Cambios de Excel guardados. Usa «Guardar plano» para almacenarlos en la nube.' : 'Cambios de Excel guardados.', 'success');
                 this.updateCanvasSize();
                 this.updateSelectionInputs();
                 this.render();
@@ -1105,7 +1109,10 @@
         async reload() {
             if (this.busy || !this.metadata) return;
             this.commitAll();
-            if (this.hasUnsavedChanges && !window.confirm('Recargar descartará sus cambios sin guardar. ¿Desea continuar?')) return;
+            const epoch = this.epoch;
+            if (this.hasUnsavedChanges &&
+                !(await window.confirmAppAction('Recargar ficha', 'Al recargar se descartarán los cambios sin guardar.', 'Recargar ficha', { danger: true }))) return;
+            if (epoch !== this.epoch || this.busy) return;
             const metadata = { ...this.metadata, context: this.context, preferred_sheet: this.sheet,
                 piece_edit:this.pieceEdit, piece_unpublished:this.pieceUnpublished, piece_name:this.pieceDraftName, piece_category_id:this.pieceCategoryId,
                 removeMarker: this.removeMarker, select_source_url: this.selectSourceUrl };
@@ -1162,7 +1169,7 @@
         }
 
         dialogKeydown(event) {
-            if (!this.visible) return;
+            if (!this.visible || event.target.closest?.('.app-confirm')) return;
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (this.pieceEdit) window.pieceLibrary?.registerCurrent(this); else this.save(); return; }
             if (event.key === 'Escape' && !this.activeEdit && event.target !== this.formula) { event.preventDefault(); this.requestClose(); return; }
             if (event.key !== 'Tab' || event.target === this.viewport || event.target === this.activeEdit?.input) return;

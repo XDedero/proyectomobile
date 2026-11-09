@@ -58,7 +58,7 @@
 .pdf-tool-action:hover:not(:disabled) { background: #eaf4ff; border-color: #c3daf2; color: #174e83; }
 .pdf-tool-action:disabled { opacity: .35; background: #f1f5f9; }
 .pdf-page-controls select { min-width: 0; min-height: 40px; border: 1px solid #dbe2ea; border-radius: 10px; font-size: .77rem; color: #475569; background-color: white; }
-.pdf-mode-toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.pdf-mode-toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); gap: 7px; }
 .pdf-mode-action { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 68px; padding: 10px 4px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; color: #64748b; font-size: .69rem; font-weight: 650; line-height: 1.3; }
 .pdf-mode-action > i { font-size: 1.1rem; }
 .pdf-mode-action:hover, .pdf-mode-action.active { background: #eaf4ff; color: #174e83; border-color: #9fc3e5; }

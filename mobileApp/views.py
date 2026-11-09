@@ -111,6 +111,7 @@ def motor_data(motor):
         'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
         'button_color': motor.button_color, 'show_description': motor.show_description,
         'has_area': motor.has_area, 'area_shape': motor.area_shape,
+        'button_scale': motor.button_scale,
         'area_radius_x': motor.area_radius_x, 'area_radius_y': motor.area_radius_y,
         'details_url': reverse('button_details', args=['dxf', motor.pk]),
         'source_sheet': motor.source_sheet,
@@ -399,7 +400,7 @@ def create_cad_marker(request, plan_id):
     from .plan_workbook import initialize_button, new_button_options, WorkbookConflict
     plan = get_object_or_404(Plan, pk=plan_id)
     try:
-        data, category, origin, upload = new_button_options(request)
+        data, category, origin, upload = new_button_options(request, plan)
         sx, sy = data.get('svg_x'), data.get('svg_y')
         if any(type(value) not in (float, int) or not math.isfinite(value) for value in (sx, sy)):
             raise ValidationError('Seleccione una ubicación válida dentro del plano.')

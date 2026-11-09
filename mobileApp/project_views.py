@@ -43,7 +43,7 @@ def project_plan_data(kind, plan):
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,
         'project_version': saved.saved_at.isoformat() if saved else '',
         'cloud_status': saved.cloud_status if saved else 'local',
-        'cloud_error': saved.cloud_error if saved else '',
+        'cloud_error': public_cloud_error(saved.cloud_error) if saved else '',
         'cloud_stage': saved.cloud_stage if saved else 'local',
         'cloud_progress': saved.cloud_progress if saved else 0,
         'version_url': reverse('project_version', args=[kind, plan.pk]),
@@ -60,7 +60,7 @@ def project_plan_data(kind, plan):
 @require_POST
 @api_permissions()
 def project_display(request, kind, plan_id):
-    from .display_settings import clean_display, clean_shape
+    from .display_settings import clean_display, clean_shape, clean_button_scale
     from .plan_workbook import markers
     plan = get_plan(kind, plan_id)
     if not can_edit_plan(request.user, plan):
@@ -72,6 +72,10 @@ def project_display(request, kind, plan_id):
             plan.save(update_fields=['display_settings'])
         if 'button_id' in data:
             marker = get_object_or_404(markers(plan), pk=positive_integer(data['button_id'], 'Botón'))
+            if 'button_scale' in data:
+                marker.button_scale = clean_button_scale(data['button_scale'])
+                marker.save(update_fields=['button_scale'])
+                return JsonResponse({'button_scale': marker.button_scale})
             values = {}
             for key in ('area_radius_x', 'area_radius_y'):
                 value = data.get(key, .05)
@@ -90,6 +94,13 @@ def project_display(request, kind, plan_id):
         return error_response(exc)
 
 
+def public_cloud_error(message):
+    # Saved projects can retain an error recorded by an older version.
+    if 'Supabase' in message and 'CLI' in message:
+        return 'No se pudo consultar la base de datos. Revisa la conexión y los permisos.'
+    return message.replace('Google Drive', 'la nube').replace('Drive', 'la nube').replace('Supabase', 'la base de datos')
+
+
 def local_copy_data(kind, plan, user):
     return {
         'plan_id': plan.pk, 'kind': kind, 'name': plan.name,
@@ -106,7 +117,7 @@ def saved_data(saved, user):
     return {
         **local_copy_data(kind, plan, user), 'id': saved.pk,
         'date': saved.saved_at.isoformat(),
-        'cloud_status': saved.cloud_status, 'cloud_error': saved.cloud_error,
+        'cloud_status': saved.cloud_status, 'cloud_error': public_cloud_error(saved.cloud_error),
         'cloud_stage': saved.cloud_stage, 'cloud_progress': saved.cloud_progress,
         'export_url': reverse('download_saved_project', args=[saved.pk]),
         'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[plan.pk]),
@@ -246,10 +257,10 @@ def delete_cloud_project(request, pdf_id):
     try:
         project = next((item for item in list_cloud_projects() if item['id'] == pdf_id), None)
         if not project:
-            return error_response('El proyecto ya no está en Drive.', status=404)
+            return error_response('El proyecto ya no está en la nube.', status=404)
         excel_id = project['excelId']
         if not all(value and all(char.isascii() and (char.isalnum() or char in '_-') for char in value) for value in (pdf_id, excel_id)):
-            return error_response('Identificador de Drive inválido.')
+            return error_response('El identificador del archivo en la nube no es válido.')
         supabase_query('SELECT 1;', read_only=True)
         drive_command('--delete-project', '--drive-id', pdf_id, '--excel-id', excel_id)
         try:

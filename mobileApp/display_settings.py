@@ -21,3 +21,9 @@ def clean_shape(value):
     if value not in ('ellipse', 'rectangle'):
         raise ValidationError('El área debe ser circular o rectangular.')
     return value
+
+
+def clean_button_scale(value):
+    if type(value) not in (float, int) or not .25 <= value <= 1.5:
+        raise ValidationError('El tamaño del botón debe estar entre 25 % y 150 %.')
+    return value

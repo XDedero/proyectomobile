@@ -551,7 +551,7 @@ def _sync_marker_snapshot(pdf_id, manifest, sql_only=False):
     DELETE FROM public.pdf_markers WHERE plan_id IN
         (SELECT id FROM public.pdf_plans WHERE drive_file_id = '{pdf_id}');
     INSERT INTO public.pdf_markers(plan_id, page, x, y, label, sheet_name, workbook_id,
-        category_id, has_area, area_radius_x, area_radius_y, area_color, area_shape, button_color, show_description, piece_source)
+        category_id, has_area, area_radius_x, area_radius_y, area_color, area_shape, button_color, show_description, piece_source, button_scale)
     SELECT p.id, (item->>'page')::int, (item->>'x')::float, (item->>'y')::float,
         COALESCE(item->>'label', ''), COALESCE(item->>'sheet', ''),
         CASE WHEN COALESCE(item->>'sheet', '') <> '' THEN p.workbook_id END,
@@ -559,7 +559,7 @@ def _sync_marker_snapshot(pdf_id, manifest, sql_only=False):
          WHERE c.id::text = item->>'category_id' OR lower(c.name) = lower(item->>'category_name') LIMIT 1),
         COALESCE((item->>'has_area')::boolean, false), (item->>'area_radius_x')::float,
         (item->>'area_radius_y')::float, COALESCE(item->>'area_color', 'rgba(59, 130, 246, 0.25)'),
-        COALESCE(item->>'area_shape', 'ellipse'), COALESCE(item->>'button_color', ''), COALESCE((item->>'show_description')::boolean, false), COALESCE((item->>'piece_source')::boolean,false)
+        COALESCE(item->>'area_shape', 'ellipse'), COALESCE(item->>'button_color', ''), COALESCE((item->>'show_description')::boolean, false), COALESCE((item->>'piece_source')::boolean,false), COALESCE((item->>'button_scale')::float,1)
     FROM public.pdf_plans p, jsonb_array_elements('{payload}'::jsonb) item
     WHERE p.drive_file_id = '{pdf_id}';
     """
@@ -587,7 +587,7 @@ def _verify_saved_registration(kind, manifest, source, content, pdf_id, excel_id
         'has_area': button.get('has_area', False), 'area_radius_x': button.get('area_radius_x'),
         'area_radius_y': button.get('area_radius_y'), 'area_color': button.get('area_color') or 'rgba(59, 130, 246, 0.25)',
         'area_shape':button.get('area_shape', 'ellipse'), 'button_color':button.get('button_color', ''), 'show_description':button.get('show_description', False),
-        'piece_source':button.get('piece_source',False),
+        'piece_source':button.get('piece_source',False), 'button_scale':button.get('button_scale',1),
         'workbook_drive_id': excel_id if button.get('sheet') else None,
     } for button in manifest['markers']] if kind == 'pdf' else []
     pdf_ok, markers_ok = 'TRUE', 'TRUE'
@@ -598,7 +598,7 @@ def _verify_saved_registration(kind, manifest, source, content, pdf_id, excel_id
             'category_name', c.name, 'has_area', m.has_area, 'area_radius_x', m.area_radius_x,
             'area_radius_y', m.area_radius_y, 'area_color', m.area_color, 'workbook_drive_id', w.drive_file_id
             , 'area_shape', m.area_shape, 'button_color', m.button_color, 'show_description', m.show_description
-            , 'piece_source', m.piece_source
+            , 'piece_source', m.piece_source, 'button_scale', m.button_scale
         ) ORDER BY m.id) FROM public.pdf_markers m
             JOIN public.pdf_plans p ON p.id=m.plan_id
             LEFT JOIN public.button_categories c ON c.id=m.category_id
@@ -656,7 +656,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     SavedProject.objects.filter(**target).update(cloud_status='pending', cloud_error='', cloud_stage='queued', cloud_progress=5)
 
     def publish():
-        state, error = 'error', 'No se pudo publicar el proyecto completo en Drive. Vuelva a pulsar Guardar plano.'
+        state, error = 'error', 'No se pudo almacenar el proyecto completo en la nube. Vuelva a pulsar Guardar plano.'
         completed = 5
         def progress(stage, value):
             nonlocal completed
@@ -672,11 +672,11 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                 progress('preparing', 10)
                 if shared:
                     if not pdf_id:
-                        raise CloudUnavailable('Vuelve a abrir la versión de la nube para vincular el Excel original de Drive.')
+                        raise CloudUnavailable('Vuelve a abrir la versión de la nube para vincular el Excel original.')
                     remote = shared_publish_target(plan_pk, pdf_id, source)
                     key = remote['projectKey']
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', key):
-                        raise CloudUnavailable('El proyecto original tiene una asociación no válida en Drive.')
+                        raise CloudUnavailable('El proyecto original tiene una asociación no válida en la nube.')
                     pdf_options['drive_target'] = {'id': pdf_id, 'modifiedTime': remote['pdfVersion'], 'force': True}
                     if remote.get('excelId'):
                         workbook_options['drive_target'] = {'id': remote['excelId'], 'modifiedTime': remote['date'], 'force': True}

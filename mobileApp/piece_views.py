@@ -54,7 +54,7 @@ def saved_pieces(request):
             if SavedPiece.objects.exclude(cloud_status='synced').exists() or PieceDeletion.objects.filter(synced=False).exists():
                 queue_catalog_sync()
         except Exception:
-            cloud_error = 'No se pudo actualizar el catálogo de Drive. Se muestran las piezas de este PC.'
+            cloud_error = 'No se pudo actualizar el catálogo de la nube. Se muestran las piezas de este PC.'
     query = ' '.join(request.GET.get('q', '').split()).casefold()[:120]
     records = SavedPiece.objects.select_related('workbook', 'category').defer('workbook__content')
     if query:
