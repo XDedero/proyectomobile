@@ -105,7 +105,24 @@
         }
         return Math.max(0,Math.min(1,unionArea(parts)/area(circle)));
     }
-    const api={coverage, contains:(sector,button)=>coverage(sector,button)>.5+1e-8, polygons, transform};
+    function resize(sector,handle,point,keepRatio=false) {
+        const directions={nw:[-1,-1],n:[0,-1],ne:[1,-1],e:[1,0],se:[1,1],s:[0,1],sw:[-1,1],w:[-1,0]};
+        const direction=directions[handle];if(!direction) return sector;
+        const [sx,sy]=direction,angle=sector.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
+        const dx=point.x-sector.x,dy=point.y-sector.y,u=dx*c+dy*s,v=-dx*s+dy*c;
+        const anchorX=-sx*sector.width/2,anchorY=-sy*sector.height/2;
+        let width=sx?Math.max(1,Math.min(2000,sx*(u-anchorX))):sector.width;
+        let height=sy?Math.max(1,Math.min(2000,sy*(v-anchorY))):sector.height;
+        if(keepRatio) {
+            let scale=sx?width/sector.width:height/sector.height;
+            if(sx&&sy&&Math.abs(height/sector.height-1)>Math.abs(scale-1)) scale=height/sector.height;
+            scale=Math.max(1/Math.min(sector.width,sector.height),Math.min(2000/Math.max(sector.width,sector.height),scale));
+            width=sector.width*scale;height=sector.height*scale;
+        }
+        const cx=sx?anchorX+sx*width/2:0,cy=sy?anchorY+sy*height/2:0;
+        return {...sector,width,height,x:sector.x+cx*c-cy*s,y:sector.y+cx*s+cy*c};
+    }
+    const api={coverage, contains:(sector,button)=>coverage(sector,button)>.5+1e-8, polygons, transform, resize};
     if(typeof module!=='undefined') module.exports=api;
     else root.SectorGeometry=api;
 })(typeof window!=='undefined'?window:globalThis);

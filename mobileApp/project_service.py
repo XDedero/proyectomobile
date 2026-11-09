@@ -63,6 +63,7 @@ def open_plan_source(kind, plan):
 
 
 def export_project(kind, plan):
+    from .display_settings import clean_display
     from .button_descriptions import TemplateReader, snapshot_details
     from .plan_workbook import ensure_workbook
     from .xlsx_package import sheet_names
@@ -86,7 +87,7 @@ def export_project(kind, plan):
                        for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
-        'display_settings': plan.display_settings,
+        'display_settings': clean_display(plan.display_settings),
         'sectors': plan.sectors,
         'owner_username': plan.owner_username or (plan.imported_by.get_username() if plan.imported_by_id else ''),
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',

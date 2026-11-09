@@ -44,8 +44,6 @@ def clean_sectors(value, *, pages=None):
             if type(number) not in (int, float) or not math.isfinite(number) or not lower <= number <= upper:
                 raise ValidationError('La posición, rotación o tamaño del sector no es válido.')
             row[key] = number
-        if shape in ('square', 'circle') and abs(row['width'] - row['height']) > .001:
-            raise ValidationError('El círculo y el cuadrado deben mantener sus proporciones.')
         if shape == 'brush':
             size, strokes = item.get('brush_size'), item.get('strokes')
             if type(size) not in (int, float) or not math.isfinite(size) or not .001 <= size <= 2:

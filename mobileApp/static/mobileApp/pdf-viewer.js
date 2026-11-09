@@ -425,8 +425,6 @@ class PdfPlanViewer {
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
             button.style.opacity = this.displaySettings?.opacity ?? 1;
-            button.dataset.hoverName = marker.label || `Botón ${index + 1}`;
-            button.classList.toggle('enable-peek', this.displaySettings?.hover !== false);
             const buttonColor = marker.button_color || '#2563eb';
             if (buttonColor) {
                 button.style.backgroundColor = buttonColor;
@@ -445,7 +443,6 @@ class PdfPlanViewer {
             this.buttons.set(Number(marker.id), button);
         }
         this.select(this.selectedId);
-        window.planDisplay?.restorePeek();
     }
 
     positionButton(button, x, y) {

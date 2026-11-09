@@ -181,14 +181,12 @@
         const alreadySelected = selectedId === marker.id;
         selectedId = marker.id;
         updateMarkers();
-        window.planDisplay?.peekButton('pdf',marker.id);
         if (!open || !alreadySelected || mode === 'move') return;
         await openSelectedButton(marker);
     }
 
     function deselectMarker() {
         selectedId = null;
-        window.planDisplay?.clearPeek();
         updateMarkers();
     }
 

@@ -50,7 +50,9 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 **Añadir botón** reúne la categoría, el nombre opcional, las descripciones, el color y el origen de la ficha Excel en un único modal sobre el plano. Permite usar un formato vacío, importar Excel/CSV, vincular una hoja del plano o elegir una pieza o plantilla de categoría. Después de confirmar, se toca la ubicación del botón.
 
-**Crear sector** permite pintar una zona con varios trazos de pincel o elegir un círculo, cuadrado, rectángulo o triángulo. El sector tiene nombre y color, con paleta y selector personalizado. Sobre el plano se arrastra para moverlo, se usan las esquinas para cambiar su tamaño y el control superior para girarlo; también hay controles numéricos. En el pincel se puede deshacer el último trazo y alternar entre pintar y transformar. **Guardar sector** confirma el dibujo; **Cancelar** descarta la edición.
+**Opacidad** es el único control de visualización junto al plano: la barra y su porcentaje permiten atenuar los botones y sectores, hasta ocultarlos por completo al 0 %. Está disponible también para lectores. Su valor solo afecta al visor abierto; se reinicia al 100 % al volver a abrirlo y no se guarda en el plano, los proyectos exportados ni la nube. Las preferencias de visualización de versiones anteriores se descartan mediante la migración `0026`.
+
+**Crear sector** permite pintar una zona con varios trazos de pincel o elegir un círculo, cuadrado, rectángulo o triángulo. El sector tiene nombre y color, con paleta y selector personalizado. Las figuras existentes se seleccionan directamente con un clic o una pulsación sobre su imagen y se pueden arrastrar desde ese primer gesto. Sus bordes y esquinas permiten estirar cada dimensión, el control superior permite girarlas y el selector **Forma** permite cambiarlas. **Mantener proporciones**, o Mayús al arrastrar, conserva su relación de aspecto; también hay controles numéricos. Las zonas de pincel no se seleccionan directamente desde el dibujo: se editan desde **Sectores**, donde se pueden añadir y deshacer trazos o transformar la zona. **Guardar sector** confirma la edición; **Cancelar** la descarta.
 
 **Sectores** abre los sectores del plano y, al elegir uno, muestra sus botones. La pertenencia se calcula por la superficie del botón que queda dentro de la figura o la zona pintada: debe ser estrictamente mayor al 50 %. El contacto exterior o exactamente la mitad no cuentan. Se vuelve a calcular al consultar el sector, incluidos los cambios de posición y tamaño. Las zonas superpuestas pueden compartir botones y los sectores PDF pertenecen a su página.
 
@@ -145,6 +147,7 @@ La detección entre navegadores de la misma instalación funciona tanto con PDF 
 .\.venv\Scripts\python.exe scripts/management_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/sectors_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/plan_visuals_browser_smoke.py
 node --test scripts/sector-geometry.test.js
 .\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/multi_device_deletion_browser_smoke.py

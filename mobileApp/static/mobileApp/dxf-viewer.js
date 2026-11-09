@@ -81,7 +81,6 @@ class DxfViewer {
             this.updateButtonAppearance(motor);
         }
         this.update();
-        window.planDisplay?.restorePeek();
     }
 
     updateButtonAppearance(motor) {
@@ -91,7 +90,6 @@ class DxfViewer {
         pin.group.setAttribute('aria-label', `${motor.name}, X ${motor.x}, Y ${motor.y}`);
         pin.circle.style.fill = motor.button_color || '#2563eb';
         pin.hover.textContent = motor.name;
-        pin.group.classList.toggle('enable-peek', this.displaySettings?.hover !== false);
         for (const node of [pin.circle, pin.label, pin.hover, pin.group.querySelector('.motor-bounds')]) node.style.opacity = this.displaySettings?.opacity ?? 1;
         pin.area.style.fill = motor.button_color || '#2563eb';
         pin.area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;

@@ -29,6 +29,7 @@ def get_plan(kind, plan_id):
 
 
 def project_plan_data(kind, plan):
+    from .display_settings import clean_display
     from .plan_workbook import workspace_data
     try:
         saved = plan.saved_project
@@ -37,7 +38,7 @@ def project_plan_data(kind, plan):
     return {
         'sectors': plan.sectors,
         'sectors_url': reverse('plan_sectors', args=[kind, plan.pk]),
-        'display_settings': plan.display_settings,
+        'display_settings': clean_display(plan.display_settings),
         'display_url': reverse('project_display', args=[kind, plan.pk]),
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,
         'project_version': saved.saved_at.isoformat() if saved else '',

@@ -79,7 +79,7 @@ class PieceCatalogTests(TestCase):
             piece_service.sync_catalog()
         self.assertEqual(len(result['index']),2)
 
-    def test_display_and_rectangular_area_survive_portable_save(self):
+    def test_only_rectangular_area_survives_portable_save(self):
         plan=self.client.post(reverse('import_pdf'),{'file':pdf_upload()}).json()
         marker=self.client.post(plan['markers_url'],json.dumps({'page':1,'x':.3,'y':.4}),content_type='application/json').json()['marker']
         response=self.post('project_display',{'display_settings':{'opacity':0,'legend':True,'hover':True},'button_id':marker['id'],'has_area':True,'area_shape':'rectangle','area_radius_x':.2,'area_radius_y':.1},args=['pdf',plan['id']])
@@ -88,7 +88,7 @@ class PieceCatalogTests(TestCase):
         source=PdfPlan.objects.get(pk=plan['id'])
         archive=export_project('pdf',source)
         kind, restored=import_project(SimpleUploadedFile('copia.planproj',archive),self.user)
-        self.assertEqual(restored.display_settings,{'opacity':0,'legend':True,'hover':True})
+        self.assertEqual(restored.display_settings,{})
         self.assertEqual(restored.markers.get().area_shape,'rectangle')
         bad=self.post('project_display',{'display_settings':{'opacity':2}},args=['pdf',plan['id']])
         self.assertEqual(bad.status_code,400)

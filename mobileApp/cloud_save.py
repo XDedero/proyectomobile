@@ -97,7 +97,7 @@ def capture_base_state(plan, content=None):
 
 
 def added_buttons(base, current):
-    if not base or any(base.get(key, [] if key == 'sectors' else None) != current.get(key) for key in ('name', 'mode', 'source', 'display', 'sectors')):
+    if not base or any(base.get(key, [] if key == 'sectors' else None) != current.get(key) for key in ('name', 'mode', 'source', 'sectors')):
         return []
     for group in ('buttons', 'sheets'):
         if any(current[group].get(key) != value for key, value in base[group].items()):

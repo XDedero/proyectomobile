@@ -39,6 +39,12 @@
     dock.setAttribute('aria-label','Editar sector sobre el plano');
     dock.innerHTML=`<div class="d-flex flex-wrap align-items-center gap-2"><strong id="sectorEditingName" class="text-break me-auto"></strong>
       <button id="btnSectorSave" type="button" class="btn btn-success btn-sm">Guardar sector</button><button id="btnSectorCancel" type="button" class="btn btn-outline-secondary btn-sm">Cancelar</button></div>
+      <div id="sectorFigureTools" class="d-flex flex-wrap align-items-center gap-2 mt-2">
+        <label class="small d-flex align-items-center gap-2">Forma <select id="sectorEditShape" class="form-select form-select-sm">
+          <option value="circle">Círculo / óvalo</option><option value="square">Cuadrado</option><option value="rectangle">Rectángulo</option><option value="triangle">Triángulo</option>
+        </select></label>
+        <label class="small"><input type="checkbox" id="sectorKeepRatio"> Mantener proporciones</label>
+      </div>
       <p id="sectorDrawingHint" class="small my-2" role="status"></p>
       <div id="sectorBrushTools" class="d-flex flex-wrap align-items-center gap-2 mb-2" hidden>
         <button type="button" id="btnSectorPaint" class="btn btn-outline-primary btn-sm" aria-pressed="true">Pintar</button>
@@ -57,6 +63,8 @@
     document.body.append(dock);
     let current=null,layer=null,editing=null,gesture=null,saving=false,paint=false,memberSector=null,configTarget=null;
     const editable=()=>Boolean(current?.plan.permissions?.can_assign);
+    const selectable=sector=>sector?.shape!=='brush' && editable() && !editing && !saving && !current.isBusy?.() &&
+        !current.viewer.placing && !current.viewer.moving && !current.viewport.classList.contains('plan-annotations-hidden');
     const valid=context=>context && appState.user && window.projectWorkspace?.active?.plan===context.plan;
     const clone=value=>JSON.parse(JSON.stringify(value));
     const status=(target,text)=>{target.node.querySelector('[role=status]').textContent=text;};
@@ -93,7 +101,12 @@
     }
     function drawSector(sector,selected=false) {
         const group=svgNode('g',{'data-sector-id':sector.id,'class':'plan-sector',transform:`translate(${sector.x} ${sector.y}) rotate(${sector.rotation})`});
-        const content=svgNode('g',{transform:`scale(${sector.width} ${sector.height})`,fill:sector.color});
+        if(selectable(sector)) {
+            group.classList.add('sector-selectable');
+            group.setAttribute('tabindex','0');group.setAttribute('role','button');
+            group.setAttribute('aria-label',`Seleccionar sector ${sector.name}`);
+        }
+        const content=svgNode('g',{'class':'sector-figure',transform:`scale(${sector.width} ${sector.height})`,fill:sector.color});
         if(sector.shape==='brush') {
             // One path paints overlapping strokes once, keeping opacity uniform.
             const path=svgNode('path',{d:(sector.strokes||[]).map(stroke=>stroke.length===1?`M ${stroke[0]} l .000001 0`:`M ${stroke.map(p=>p.join(' ')).join(' L ')}`).join(' '),
@@ -111,7 +124,8 @@
             group.append(rect);
             const pixel=1/(layer.getScreenCTM()?.a?Math.hypot(layer.getScreenCTM().a,layer.getScreenCTM().b):1);
             const handleSize=9*pixel;
-            for(const [id,x,y] of [['nw',-width/2,-height/2],['ne',width/2,-height/2],['se',width/2,height/2],['sw',-width/2,height/2]]) {
+            for(const [id,x,y] of [['nw',-width/2,-height/2],['n',0,-height/2],['ne',width/2,-height/2],['e',width/2,0],
+                ['se',width/2,height/2],['s',0,height/2],['sw',-width/2,height/2],['w',-width/2,0]]) {
                 group.append(svgNode('rect',{x:x-handleSize,y:y-handleSize,width:handleSize*2,height:handleSize*2,'class':'sector-handle','data-sector-handle':id}));
             }
             const rotateY=-height/2-32*pixel;
@@ -134,9 +148,17 @@
         byId('sectorEditColor').value=s.color;
         byId('sectorEditingName').textContent=s.name;
         byId('sectorBrushTools').hidden=s.shape!=='brush';
+        byId('sectorFigureTools').hidden=s.shape==='brush';
+        if(s.shape!=='brush') byId('sectorEditShape').value=s.shape;
         byId('btnSectorPaint').setAttribute('aria-pressed',String(paint));
         byId('btnSectorTransform').setAttribute('aria-pressed',String(!paint));
-        byId('sectorDrawingHint').textContent=paint?'Dibuja sobre el plano. Puedes añadir varios trazos; «Mover / ajustar» permite transformar el sector.':'Arrastra el sector para moverlo, las esquinas para cambiar su tamaño y el punto superior para girarlo. Puedes navegar fuera de la figura.';
+        byId('sectorDrawingHint').textContent=paint?'Dibuja sobre el plano. Puedes añadir varios trazos; «Mover / ajustar» permite transformar el sector.':'Arrastra la figura para moverla, sus bordes o esquinas para estirarla y el punto superior para girarla. Mayús mantiene las proporciones.';
+    }
+    function beginEditing(draft,previous) {
+        editing={context:current,previous,draft};paint=draft.shape==='brush';
+        byId('sectorKeepRatio').checked=false;
+        current.viewport.classList.add('sector-editing');dock.hidden=false;syncFields();draw();
+        window.projectWorkspace.update();
     }
     function stopEditing() {
         gesture=null;editing=null;paint=false;dock.hidden=true;
@@ -210,7 +232,7 @@
                         window.projectWorkspace.dirty();byId('btnSectorBack').click();
                     }
                 } catch(error){status(list,error.message);}
-                finally{saving=false;remove.disabled=false;}
+                finally{saving=false;remove.disabled=false;draw();}
             };
             actions.append(edit,remove);body.append(actions);
         }
@@ -256,12 +278,10 @@
             if(center) {draft.x=Math.max(0,Math.min(d.width,center.x));draft.y=Math.max(0,Math.min(d.height,center.y));}
         }
         if(shape==='brush' && previous?.shape!=='brush') {draft.strokes=[];draft.brush_size=.1;}
-        if(shape==='circle'||shape==='square') draft.height=draft.width;
+        if((!previous||shape!==previous.shape)&&(shape==='circle'||shape==='square')) draft.height=draft.width;
         if(shape==='rectangle' && !previous) draft.height=draft.width*.6;
         Object.assign(draft,{shape,name,color});
-        editing={context:current,previous,draft};paint=shape==='brush';
-        current.viewport.classList.add('sector-editing');dock.hidden=false;syncFields();draw();
-        window.projectWorkspace.update();
+        beginEditing(draft,previous);
     };
     byId('btnCreatePlanSector').onclick=()=>configure();
     byId('btnSectorBack').onclick=()=>{memberSector=null;byId('planSectorMembers').hidden=true;byId('planSectorRows').hidden=false;byId('btnSectorBack').hidden=true;renderList();status(list,'');};
@@ -269,17 +289,23 @@
     byId('btnSectorSave').onclick=async()=>{
         const draft=editing;if(!draft||saving||gesture) return;
         if(draft.draft.shape==='brush'&&!draft.draft.strokes?.length) {byId('sectorDrawingHint').textContent='Dibuja al menos un trazo antes de guardar.';return;}
-        saving=true;dock.querySelectorAll('button,input').forEach(node=>{node.disabled=true;});
+        saving=true;dock.querySelectorAll('button,input,select').forEach(node=>{node.disabled=true;});
         try {
             if(await request(draft.context,{action:'save',sector:draft.draft,previous:draft.previous})) {
                 window.projectWorkspace.dirty();stopEditing();
             }
         }catch(error){byId('sectorDrawingHint').textContent=error.message;}
-        finally{saving=false;dock.querySelectorAll('button,input').forEach(node=>{node.disabled=false;});}
+        finally{saving=false;dock.querySelectorAll('button,input,select').forEach(node=>{node.disabled=false;});draw();}
     };
     byId('btnSectorPaint').onclick=()=>{paint=true;syncFields();draw();};
     byId('btnSectorTransform').onclick=()=>{paint=false;syncFields();draw();};
     byId('btnSectorUndo').onclick=()=>{editing?.draft.strokes?.pop();draw();};
+    byId('sectorEditShape').onchange=()=>{
+        if(!editing||saving||editing.draft.shape==='brush') return;
+        editing.draft.shape=byId('sectorEditShape').value;
+        if(['circle','square'].includes(editing.draft.shape)) editing.draft.height=editing.draft.width;
+        syncFields();draw();
+    };
     for(const key of ['X','Y','Width','Height','Rotation','EditColor']) byId('sector'+key).oninput=()=>{
         if(!editing||saving) return;
         const s=editing.draft,d=dimensions(),value=byId('sector'+key).value;
@@ -289,20 +315,34 @@
             if(key==='Rotation') s.rotation=Math.max(-360,Math.min(360,number));
             else {
                 const axis=key==='X'||key==='Width'?'width':'height';
-                const field=key.toLowerCase();s[field]=Math.max(field==='width'||field==='height'?1:0,Math.min(field==='width'||field==='height'?2000:d[axis],number*d[axis]/100));
-                if((s.shape==='circle'||s.shape==='square')&&(key==='Width'||key==='Height')) {s.width=s[field];s.height=s[field];}
+                const field=key.toLowerCase(),previous=s[field];
+                s[field]=Math.max(field==='width'||field==='height'?1:0,Math.min(field==='width'||field==='height'?2000:d[axis],number*d[axis]/100));
+                if(byId('sectorKeepRatio').checked&&(key==='Width'||key==='Height')) {
+                    const other=key==='Width'?'height':'width';
+                    s[other]=Math.max(1,Math.min(2000,s[other]*s[field]/previous));
+                }
             }
         }
         draw();
     };
+    for(const key of ['X','Y','Width','Height','Rotation']) byId('sector'+key).onchange=syncFields;
     function localPoint(p,s) {
         const angle=-s.rotation*Math.PI/180,dx=p.x-s.x,dy=p.y-s.y;
         return [(dx*Math.cos(angle)-dy*Math.sin(angle))/s.width,(dx*Math.sin(angle)+dy*Math.cos(angle))/s.height];
     }
     function pointerDown(event) {
-        if(!editing||saving||!valid(editing.context)||event.button!==0||!layer) return;
+        if(!current||saving||!valid(current)||event.button!==0||!layer) return;
+        if(gesture) {event.preventDefault();event.stopImmediatePropagation();return;}
+        let handle=event.target.closest('[data-sector-handle]')?.dataset.sectorHandle;
+        if(!editing) {
+            const id=event.target.closest('.sector-selectable')?.dataset.sectorId;
+            const sector=current.plan.sectors?.find(row=>row.id===id);
+            if(!sector||!selectable(sector)) return;
+            // Select and start moving on the initial press: no modal or second click.
+            current.setMode('explore');
+            beginEditing(clone(sector),clone(sector));handle='move';
+        }
         const p=point(event),d=dimensions();if(!p) return;
-        const handle=event.target.closest('[data-sector-handle]')?.dataset.sectorHandle;
         if(!paint&&!handle) return;
         if(paint&&(p.x<0||p.y<0||p.x>d.width||p.y>d.height)) return;
         event.preventDefault();event.stopImmediatePropagation();
@@ -339,9 +379,8 @@
             const a=Math.atan2(g.start.y-b.y,g.start.x-b.x),angle=Math.atan2(p.y-b.y,p.x-b.x);
             s.rotation=((b.rotation+(angle-a)*180/Math.PI+540)%360)-180;
         } else {
-            const local=localPoint(p,b);
-            s.width=Math.max(1,Math.min(2000,Math.abs(local[0])*2*b.width));s.height=Math.max(1,Math.min(2000,Math.abs(local[1])*2*b.height));
-            if(s.shape==='circle'||s.shape==='square') s.width=s.height=Math.max(s.width,s.height);
+            Object.assign(s,SectorGeometry.resize(b,g.handle,p,byId('sectorKeepRatio').checked||event.shiftKey));
+            s.x=Math.max(0,Math.min(d.width,s.x));s.y=Math.max(0,Math.min(d.height,s.y));
         }
         draw();syncFields();
     }
@@ -371,6 +410,17 @@
             context.viewport.addEventListener('pointermove',pointerMove,true);
             context.viewport.addEventListener('pointerup',pointerUp,true);
             context.viewport.addEventListener('pointercancel',pointerUp,true);
+            context.viewport.addEventListener('contextmenu',event=>{
+                if(event.target.closest('.sector-selectable,[data-sector-handle]')) event.preventDefault();
+            });
+            context.viewport.addEventListener('keydown',event=>{
+                if(!['Enter',' '].includes(event.key)||editing) return;
+                const id=event.target.closest('.sector-selectable')?.dataset.sectorId;
+                const sector=current?.plan.sectors?.find(row=>row.id===id);
+                if(!sector||!selectable(sector)) return;
+                event.preventDefault();event.stopImmediatePropagation();
+                current.setMode('explore');beginEditing(clone(sector),clone(sector));byId('btnSectorSave').focus();
+            },true);
             context.viewport.addEventListener('plan-view-changed',()=>{if(current?.viewport===context.viewport)draw();});
         }
         if(editing && dimensions()?.page!==editing.draft.page) stopEditing();

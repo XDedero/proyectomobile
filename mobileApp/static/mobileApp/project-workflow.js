@@ -187,7 +187,6 @@
                 }
             }
             if (current.applyArea && !(await current.applyArea())) return false;
-            await window.planDisplay?.flush();
             const data = await post(current.plan.save_project_url);
             if (data.plan && active === current) {
                 if (editor?.visible) editor.close(true);
@@ -319,7 +318,7 @@
         // Keep controls that operate on the current button usable while editing.
         if (window.workbookEditor?.visible || document.querySelector('.modal.show') || !byId('pdfMarkerDialog').hidden) return;
         if (target.closest('button, input, select, textarea, label, a') && target.closest(
-            '#pdfSelectedMarker, #selectedMotorCard, #fullscreenSelection, #pdfAreaPanel, .display-area, .plan-color-legend, #pdfMarkerList, #motorList, #btnPdfAdjustArea, #btnMoveCadMarker, #btnAssignExcelCorner'
+            '#pdfSelectedMarker, #selectedMotorCard, #fullscreenSelection, #pdfAreaPanel, #pdfMarkerList, #motorList, #btnPdfAdjustArea, #btnMoveCadMarker, #btnAssignExcelCorner'
         )) return;
         const workflow = active.kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow;
         workflow?.deselect();

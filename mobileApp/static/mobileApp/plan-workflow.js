@@ -126,7 +126,6 @@
         resetPreview();
         appState.selectedMotorId = id;
         viewer.select(id);
-        window.planDisplay?.peekButton('dxf',id);
         if (center) viewer.focusMotor(id);
         for (const button of motorList.querySelectorAll('button')) button.setAttribute('aria-pressed', String(Number(button.dataset.motorId) === id));
         updateMotorCard();
@@ -143,7 +142,6 @@
 
     function deselectMotor() {
         appState.selectedMotorId = null;
-        window.planDisplay?.clearPeek();
         viewer.select(null);
         for (const button of motorList.querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
         updateMotorCard();

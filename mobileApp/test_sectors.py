@@ -107,7 +107,7 @@ class SectorTests(TestCase):
     def test_rejects_invalid_geometry_strokes_page_and_limits(self):
         for changes in [dict(x=float('nan')), dict(width=-1), dict(rotation=float('inf')),
                         dict(shape='unknown'), dict(color='javascript:bad'), dict(name=''),
-                        dict(page=3), dict(shape='circle'), dict(strokes='bad', shape='brush')]:
+                        dict(page=3), dict(strokes='bad', shape='brush')]:
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
                 clean_sectors([dict(self.sector(), **changes)], pages=2)
         valid = dict(self.sector(), shape='brush', brush_size=.1, strokes=[[[-.5, 0], [.5, 0]]])
@@ -117,6 +117,46 @@ class SectorTests(TestCase):
                 clean_sectors([dict(valid, strokes=strokes)])
         with self.assertRaises(ValidationError):
             clean_sectors([self.sector()] * 201)
+
+    def test_figures_can_be_stretched_and_their_dimensions_survive_export(self):
+        for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
+            plan = self.import_plan(kind)
+            for shape in ('circle', 'square', 'rectangle', 'triangle'):
+                sector = dict(self.sector(), shape=shape, width=240, height=80)
+                result = self.post(plan['sectors_url'], {'action': 'save', 'sector': sector})
+                self.assertEqual(result.status_code, 200, result.content)
+            source = model.objects.get(pk=plan['id'])
+            _, restored = import_project(SimpleUploadedFile('figuras.planproj', export_project(kind, source)), self.reader)
+            self.assertEqual(restored.sectors, source.sectors)
+
+    def test_opacity_is_never_exposed_saved_exported_or_restored_as_plan_data(self):
+        for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
+            with self.subTest(kind=kind):
+                data = self.import_plan(kind)
+                plan = model.objects.get(pk=data['id'])
+                # Previously saved preferences are ignored even before migration.
+                plan.display_settings = {'opacity': .15, 'legend': True, 'hover': True}
+                plan.save(update_fields=['display_settings'])
+                self.assertEqual(self.client.get(data['detail_url']).json()['display_settings'], {})
+                content = export_project(kind, plan)
+                with ZipFile(BytesIO(content)) as archive:
+                    manifest = json.loads(archive.read('manifest.json'))
+                self.assertEqual(manifest['display_settings'], {})
+                result = self.post(data['display_url'], {'display_settings': {'opacity': .3}})
+                self.assertEqual(result.status_code, 200, result.content)
+                plan.refresh_from_db()
+                self.assertEqual(plan.display_settings, {})
+                # Opening an archive from an older app cannot restore its opacity.
+                output = BytesIO()
+                with ZipFile(BytesIO(content)) as original, ZipFile(output, 'w', ZIP_DEFLATED) as archive:
+                    for name in original.namelist():
+                        payload = original.read(name)
+                        if name == 'manifest.json':
+                            manifest['display_settings'] = {'opacity': 0, 'legend': True}
+                            payload = json.dumps(manifest).encode()
+                        archive.writestr(name, payload)
+                _, restored = import_project(SimpleUploadedFile('legado.planproj', output.getvalue()), self.reader)
+                self.assertEqual(restored.display_settings, {})
 
     def test_new_button_saves_all_options_atomically_for_pdf_and_dxf(self):
         category = ButtonCategory.objects.create(name='Bombas de sector')
