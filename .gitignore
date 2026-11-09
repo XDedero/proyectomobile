@@ -19,3 +19,4 @@ conexion*.txt
 *.sqlite3-*
 .local-backup/
 cambios.zip
+*.zip
