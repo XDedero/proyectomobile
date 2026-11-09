@@ -89,7 +89,7 @@ def capture_base_state(plan, content=None):
         item.pop('workbook', None)
         item['sheet'] = by_name.get(item['sheet'])
         buttons[str(button.pk)] = item
-    return {'name': manifest['name'], 'mode': manifest['workbook_mode'], 'source': source_hash, 'display': manifest.get('display_settings', {}),
+    return {'name': manifest['name'], 'mode': manifest['workbook_mode'], 'source': source_hash, 'display': manifest.get('display_settings', {}), 'sectors': manifest.get('sectors', []),
             'buttons': buttons, 'sheets': {str(row.pk): {
                 'hash': hashes[str(row.pk)], 'listing': row.is_listing, 'primary': row.is_primary,
                 'protected': row.is_protected, 'order': row.listing_order, 'origin': str(row.origin_uuid or ''),
@@ -97,7 +97,7 @@ def capture_base_state(plan, content=None):
 
 
 def added_buttons(base, current):
-    if not base or any(base.get(key) != current.get(key) for key in ('name', 'mode', 'source', 'display')):
+    if not base or any(base.get(key, [] if key == 'sectors' else None) != current.get(key) for key in ('name', 'mode', 'source', 'display', 'sectors')):
         return []
     for group in ('buttons', 'sheets'):
         if any(current[group].get(key) != value for key, value in base[group].items()):
@@ -172,9 +172,10 @@ def merge_only_additions(plan, user):
         PdfMarker.objects.bulk_create([PdfMarker(plan=plan, workbook=document, **item) for item in restored])
         plan.name, plan.owner_username = remote.name, remote.owner_username
         plan.display_settings = remote.display_settings
+        plan.sectors = remote.sectors
         plan.cloud_workbook_version = remote.cloud_workbook_version
         plan.workbook = document
-        plan.save(update_fields=['name', 'owner_username', 'cloud_workbook_version', 'display_settings'])
+        plan.save(update_fields=['name', 'owner_username', 'cloud_workbook_version', 'display_settings', 'sectors'])
         organize_project_sheets(plan, user)
         return True
     finally:

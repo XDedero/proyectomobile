@@ -87,6 +87,7 @@ def export_project(kind, plan):
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
         'display_settings': plan.display_settings,
+        'sectors': plan.sectors,
         'owner_username': plan.owner_username or (plan.imported_by.get_username() if plan.imported_by_id else ''),
         'source': f'plan/source.{kind}', 'markers': markers, 'workbook': 'w1',
         'workbook_mode': document.plan_mode,
@@ -145,6 +146,8 @@ def finite(value):
 
 @transaction.atomic
 def import_shared_project(plan, kind, source, svg, markers, books, manifest, user):
+    from .sectors import clean_sectors
+    plan.sectors = clean_sectors(manifest.get('sectors', []), pages=len(plan.pages) if kind == 'pdf' else 1)
     from .button_descriptions import imported_details
     from .display_settings import clean_display
     plan.display_settings = clean_display(manifest.get('display_settings', {}))

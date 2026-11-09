@@ -196,6 +196,7 @@ class PdfPlanViewer {
         this.stage.style.width = `${this.baseViewport.width * this.scale}px`;
         this.stage.style.height = `${this.baseViewport.height * this.scale}px`;
         this.container.dataset.pdfZoom = (this.scale / this.fitScale()).toFixed(4);
+        this.container.dispatchEvent(new Event('plan-view-changed'));
     }
 
     releaseCanvas(canvas) {
@@ -393,6 +394,7 @@ class PdfPlanViewer {
     setDisplaySettings(settings) { this.displaySettings = settings; }
 
     renderMarkers() {
+        this.container.dispatchEvent(new Event('plan-view-changed'));
         this.layer.replaceChildren();
         this.buttons.clear();
         for (const [index, marker] of this.markers.entries()) {

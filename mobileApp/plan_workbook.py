@@ -263,11 +263,15 @@ def new_button_options(request):
         if not isinstance(data, dict):
             raise ValidationError('La ubicación del botón no es válida.')
     origin = data.get('origin')
+    from .button_descriptions import clean_color, clean_rows
+    data['button_color'] = clean_color(data.get('button_color', ''))
+    if 'descriptions' in data:
+        data['descriptions'] = clean_rows(data['descriptions'])
     if 'show_description' in data and type(data['show_description']) is not bool:
         raise ValidationError('Indica si el botón mostrará su descripción.')
     if origin is None and upload is None and 'category_id' not in data:
         return data, None, None, None
-    if origin not in ('blank', 'upload', 'category', 'piece') or (origin == 'upload') != (upload is not None):
+    if origin not in ('blank', 'upload', 'category', 'piece', 'sheet') or (origin == 'upload') != (upload is not None):
         raise ValidationError('Elija una ficha predeterminada o un archivo para importar.')
     category = button_category(data.get('category_id'))
     if origin == 'piece':
@@ -282,11 +286,17 @@ def new_button_options(request):
             raise ValidationError('Elija un Excel permanente de esta categoría.')
         upload = SimpleUploadedFile(template.name, bytes(template.content))
         origin = ('category', template.sheet)
+    if origin == 'sheet':
+        if not isinstance(data.get('sheet'), str) or not data['sheet']:
+            raise ValidationError('Elija una hoja del plano.')
+        origin = ('sheet', data['sheet'])
     return data, category, origin, upload
 
 
 def initialize_button(marker, user, origin, upload):
-    if isinstance(origin, tuple) and origin[0] == 'piece':
+    if isinstance(origin, tuple) and origin[0] == 'sheet':
+        assign_marker(marker, user, {'sheet': origin[1]})
+    elif isinstance(origin, tuple) and origin[0] == 'piece':
         stage_piece_source(marker, user, origin[1])
     elif isinstance(origin, tuple) and origin[0] == 'category':
         stage_button_source(marker, user, upload, selected=origin[1])

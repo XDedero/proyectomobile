@@ -137,7 +137,7 @@ def snapshot_identity(project, metadata, portable):
 
 
 def manifest_metadata(manifest):
-    return {'name': manifest.get('name'), 'plan_mode': manifest.get('workbook_mode'), 'markers': manifest.get('markers'), 'display_settings':manifest.get('display_settings', {})}
+    return {'name': manifest.get('name'), 'plan_mode': manifest.get('workbook_mode'), 'markers': manifest.get('markers'), 'display_settings':manifest.get('display_settings', {}), 'sectors': manifest.get('sectors', [])}
 
 
 def read_cloud_snapshot(pdf_id):

@@ -6,8 +6,10 @@ from . import motor_views
 from . import piece_views
 from . import button_views
 from . import management_views
+from . import sector_views
 
 urlpatterns = [
+    path('api/projects/<str:kind>/<int:plan_id>/sectors/', sector_views.plan_sectors, name='plan_sectors'),
     path('api/piece-library/', piece_views.saved_pieces, name='saved_pieces'),
     path('api/piece-library/<int:piece_id>/edit/', piece_views.edit_piece, name='edit_piece'),
     path('api/piece-library/<int:piece_id>/update/', piece_views.update_piece, name='update_piece'),

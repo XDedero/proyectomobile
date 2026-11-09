@@ -1,0 +1,21 @@
+.plan-sectors-layer { pointer-events: none; overflow: hidden; }
+svg.plan-sectors-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; }
+.pdf-plan-marker-layer { z-index: 3; }
+.plan-sectors-layer.editing { pointer-events: all; }
+.sector-editing .pdf-plan-marker-layer { pointer-events: none; }
+.sector-editing .pdf-plan-marker { pointer-events: none; }
+.sector-editing .motor-layer { pointer-events: none; }
+.sector-label { fill: #172554; font-size: 13px; paint-order: stroke; stroke: white; stroke-width: 2px; stroke-linejoin: round; pointer-events: none; }
+.sector-selection { fill: transparent; stroke: #1d4ed8; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; cursor: move; }
+.sector-handle { fill: white; stroke: #1d4ed8; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+.sector-rotation { fill: #bfdbfe; cursor: grab; }
+.sector-editor-dock { position: fixed; z-index: 1045; bottom: max(12px, env(safe-area-inset-bottom)); right: 12px; width: min(540px, calc(100vw - 24px)); max-height: 45dvh; overflow: auto; padding: 12px; border: 1px solid #bfdbfe; border-radius: 12px; background: #fffffff5; color: #172554; box-shadow: 0 8px 28px #0f172a33; }
+.sector-editor-dock[hidden], #sectorBrushTools[hidden] { display: none !important; }
+.sector-numeric-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sector-numeric-controls label { font-size: 12px; }
+.sector-numeric-controls input { display: block; width: 100%; min-width: 0; border: 1px solid #94a3b8; border-radius: 5px; padding: 4px; }
+.sector-list { display: grid; gap: 8px; }
+.sector-row { display: flex; align-items: center; gap: 10px; overflow-wrap: anywhere; }
+.sector-swatch { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; }
+.sector-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+.sector-palette button { width: 26px; height: 26px; border: 1px solid #64748b; border-radius: 50%; }

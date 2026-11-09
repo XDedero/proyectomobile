@@ -413,6 +413,7 @@ def create_cad_marker(request, plan_id):
             motor = Motor.objects.create(
                 plan=plan, entity_key=f'manual/{uuid4().hex}', name=name.strip(), category=category,
                 show_description=data.get('show_description', False),
+                button_color=data['button_color'], descriptions=data.get('descriptions'),
                 x=x, y=y, z=0, svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0],
             )
             initialize_button(motor, request.user, origin, upload)

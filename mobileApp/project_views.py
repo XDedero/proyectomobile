@@ -35,6 +35,8 @@ def project_plan_data(kind, plan):
     except SavedProject.DoesNotExist:
         saved = None
     return {
+        'sectors': plan.sectors,
+        'sectors_url': reverse('plan_sectors', args=[kind, plan.pk]),
         'display_settings': plan.display_settings,
         'display_url': reverse('project_display', args=[kind, plan.pk]),
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,

@@ -22,6 +22,7 @@ def new_cloud_key():
 
 
 class Plan(models.Model):
+    sectors = models.JSONField(default=list, blank=True)
     display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)
@@ -135,6 +136,7 @@ class Motor(ButtonSource):
 
 
 class PdfPlan(models.Model):
+    sectors = models.JSONField(default=list, blank=True)
     display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
     cloud_key = models.CharField(max_length=80, default=new_cloud_key, unique=True, editable=False)

@@ -48,6 +48,14 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 ## Guardar y abrir
 
+**Añadir botón** reúne la categoría, el nombre opcional, las descripciones, el color y el origen de la ficha Excel en un único modal sobre el plano. Permite usar un formato vacío, importar Excel/CSV, vincular una hoja del plano o elegir una pieza o plantilla de categoría. Después de confirmar, se toca la ubicación del botón.
+
+**Crear sector** permite pintar una zona con varios trazos de pincel o elegir un círculo, cuadrado, rectángulo o triángulo. El sector tiene nombre y color, con paleta y selector personalizado. Sobre el plano se arrastra para moverlo, se usan las esquinas para cambiar su tamaño y el control superior para girarlo; también hay controles numéricos. En el pincel se puede deshacer el último trazo y alternar entre pintar y transformar. **Guardar sector** confirma el dibujo; **Cancelar** descarta la edición.
+
+**Sectores** abre los sectores del plano y, al elegir uno, muestra sus botones. La pertenencia se calcula por la superficie del botón que queda dentro de la figura o la zona pintada: debe ser estrictamente mayor al 50 %. El contacto exterior o exactamente la mitad no cuentan. Se vuelve a calcular al consultar el sector, incluidos los cambios de posición y tamaño. Las zonas superpuestas pueden compartir botones y los sectores PDF pertenecen a su página.
+
+Los sectores son opcionales y se guardan dentro del propio plano, con sus mismos permisos de edición. Se incluyen al guardar, exportar e importar proyectos y al transportar su configuración en el Excel de nube. Al eliminar un plano desaparecen sus sectores; eliminar solo un sector conserva los botones. No existe una biblioteca independiente de sectores. La migración `0025` añade estos datos a los planos existentes sin exigir sectores.
+
 **Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Aparece para el creador del plano y para los administradores. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
 
 **Ver planos guardados** en el menú principal, el menú de usuario y el módulo PDF abre una biblioteca común. Cada registro muestra **PDF** o **DXF** en pequeño. Volver a guardar el mismo plano actualiza su registro; no crea otra copia. Los planos existentes antes de esta actualización se conservan mediante la migración `0006`.
@@ -136,6 +144,8 @@ La detección entre navegadores de la misma instalación funciona tanto con PDF 
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe scripts/management_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/sectors_browser_smoke.py
+node --test scripts/sector-geometry.test.js
 .\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/multi_device_deletion_browser_smoke.py
 .\.venv\Scripts\python.exe -m playwright install webkit

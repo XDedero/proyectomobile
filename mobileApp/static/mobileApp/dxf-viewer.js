@@ -146,6 +146,7 @@ class DxfViewer {
 
     updatePins() {
         if (!this.svg) return;
+        this.container.dispatchEvent(new Event('plan-view-changed'));
         const scale = this.svg.getScreenCTM()?.a;
         if (!scale) return;
         for (const { circle, label, hover, area, motor } of this.pins.values()) {

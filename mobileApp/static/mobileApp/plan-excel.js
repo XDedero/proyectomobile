@@ -87,40 +87,47 @@
         <label class="form-label small" for="planPrimaryListingSheet">Hoja del listado original</label>
         <div class="input-group"><select id="planPrimaryListingSheet" class="form-select"></select><button type="button" id="btnChangePrimaryListing" class="btn btn-outline-secondary">Cambiar</button></div>`);
     const newButtonModal = modal('newPlanButton', 'Añadir botón', `
-        <div id="newButtonCategoryStep">
-          <label class="form-label" for="newButtonCategory">Categoría</label>
-          <select id="newButtonCategory" class="form-select mb-3"></select>
-          <button type="button" id="btnNewButtonNext" class="btn btn-success">Continuar</button>
+        <label class="form-label" for="newButtonCategory">Categoría</label>
+        <select id="newButtonCategory" class="form-select mb-3" required></select>
+        <label class="form-label" for="newButtonName">Nombre <small class="text-muted">(opcional)</small></label>
+        <input id="newButtonName" class="form-control mb-3" maxlength="120" placeholder="Se usará el número del botón">
+        <label class="form-label" for="newButtonColor">Color del botón</label>
+        <input type="color" id="newButtonColor" class="form-control form-control-color mb-3" value="#2563eb">
+        <div class="form-check form-switch mb-2">
+          <input type="checkbox" class="form-check-input" id="newButtonDescriptionEnabled">
+          <label class="form-check-label" for="newButtonDescriptionEnabled">Añadir descripción al botón</label>
         </div>
-        <div id="newButtonDescriptionStep" hidden>
-          <p class="form-label">¿Añadir una descripción al botón?</p>
-          <div class="excel-choice-actions">
-            <button type="button" id="btnNewButtonWithDescription" class="btn btn-success">Con descripción</button>
-            <button type="button" id="btnNewButtonWithoutDescription" class="btn btn-outline-secondary">Sin descripción</button>
-          </div>
-          <button type="button" id="btnNewButtonBackCategory" class="btn btn-link px-0 mt-2">Volver a categoría</button>
+        <div id="newButtonDescriptionOptions" class="border rounded p-2 mb-3" hidden>
+          <div id="newButtonDescriptions"></div>
+          <button type="button" id="btnNewButtonAddDescription" class="btn btn-outline-secondary btn-sm">Añadir campo</button>
         </div>
-        <div id="newButtonSourceStep" hidden>
-          <p class="form-label">Origen de la ficha</p>
-          <div class="excel-choice-actions">
-            <button type="button" id="btnNewButtonBlank" class="btn btn-outline-success">Formato predeterminado</button>
-            <button type="button" id="btnNewButtonImport" class="btn btn-success">Importar Excel o CSV</button>
-            <button type="button" id="btnNewButtonPiece" class="btn btn-outline-primary">Elegir pieza</button>
-          </div>
-          <div id="newButtonPieceOptions" class="mt-3" hidden>
-            <label for="newButtonPiece" class="form-label">Pieza guardada</label>
-            <select id="newButtonPiece" class="form-select mb-2"></select>
-            <p class="small text-muted">Se abrirá una copia para este botón. Podrá cambiar de pieza desde el selector de hojas sin modificar el catálogo.</p>
-            <button type="button" id="btnConfirmNewButtonPiece" class="btn btn-primary">Usar pieza</button>
-          </div>
-          <div id="newButtonCategoryTemplates" class="mt-3" hidden>
-            <label for="newButtonTemplate" class="form-label">Excel permanente de la categoría</label>
-            <select id="newButtonTemplate" class="form-select mb-2"></select>
-            <button type="button" id="btnNewButtonCategoryTemplate" class="btn btn-outline-primary">Usar Excel de esta categoría</button>
-          </div>
-          <input type="file" id="newButtonFile" accept=".xlsx,.csv" hidden>
-          <button type="button" id="btnNewButtonBack" class="btn btn-link px-0 mt-2">Volver a descripción</button>
-        </div>`);
+        <label class="form-label" for="newButtonOrigin">Origen de la ficha Excel</label>
+        <select id="newButtonOrigin" class="form-select mb-3">
+          <option value="blank">Formato predeterminado vacío</option>
+          <option value="upload">Importar Excel o CSV</option>
+          <option value="sheet">Hoja del Excel del plano</option>
+          <option value="piece">Pieza guardada</option>
+          <option value="category">Excel permanente de la categoría</option>
+        </select>
+        <div id="newButtonUploadOptions" class="mb-3" hidden>
+          <label for="newButtonFile" class="form-label">Archivo Excel o CSV</label>
+          <input type="file" id="newButtonFile" class="form-control" accept=".xlsx,.csv">
+        </div>
+        <div id="newButtonSheetOptions" class="mb-3" hidden>
+          <label for="newButtonSheet" class="form-label">Hoja del plano</label>
+          <select id="newButtonSheet" class="form-select"></select>
+        </div>
+        <div id="newButtonPieceOptions" class="mb-3" hidden>
+          <label for="newButtonPiece" class="form-label">Pieza guardada</label>
+          <select id="newButtonPiece" class="form-select"></select>
+        </div>
+        <div id="newButtonCategoryTemplates" class="mb-3" hidden>
+          <label for="newButtonTemplate" class="form-label">Excel permanente</label>
+          <select id="newButtonTemplate" class="form-select"></select>
+        </div>
+        <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
+        <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
+    newButtonModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     let newButton = null;
 
     function message(dialog, text, error = false) {
@@ -129,7 +136,7 @@
         node.classList.toggle('text-danger', error);
     }
     function busy(dialog, value) {
-        dialog.element.querySelectorAll('button,select,input').forEach(node => { node.disabled = value; });
+        dialog.element.querySelectorAll('button,select,input,textarea').forEach(node => { node.disabled = value; });
     }
     async function hide(dialog) {
         await dialog.ready;
@@ -183,10 +190,15 @@
         const context = target();
         if (!context) return null;
         const selection = new Promise(resolve => { newButton = { context, resolve, result: null }; });
-        byId('newButtonCategoryStep').hidden = false;
-        byId('newButtonDescriptionStep').hidden = true;
-        byId('newButtonSourceStep').hidden = true;
-        byId('newButtonPieceOptions').hidden = true;
+        byId('newButtonName').value = '';
+        byId('newButtonName').maxLength = context.kind === 'dxf' ? 255 : 120;
+        byId('newButtonColor').value = '#2563eb';
+        byId('newButtonDescriptionEnabled').checked = false;
+        byId('newButtonDescriptionOptions').hidden = true;
+        byId('newButtonDescriptions').replaceChildren();
+        byId('newButtonFile').value = '';
+        byId('newButtonOrigin').value = 'blank';
+        for (const id of ['UploadOptions', 'SheetOptions', 'PieceOptions', 'CategoryTemplates']) byId('newButton' + id).hidden = true;
         byId('newButtonCategory').replaceChildren(new Option('Elija una categoría', ''));
         message(newButtonModal, '');
         newButtonModal.controller.show();
@@ -196,6 +208,7 @@
             if (newButton?.context === context) {
                 newButton.categories = data.button_categories;
                 for (const item of data.button_categories) byId('newButtonCategory').append(new Option(item.name, item.id));
+                byId('newButtonSheet').replaceChildren(new Option('Elija una hoja', ''), ...data.sheet_options.filter(row => !row.is_listing).map(row => new Option(row.name, row.name)));
                 if (!data.button_categories.length) message(newButtonModal, 'Un administrador debe crear una categoría primero.', true);
             }
         } catch (error) {
@@ -206,14 +219,28 @@
         return selection;
     }
 
-    async function chooseNewButtonSource(origin, file) {
+    async function chooseNewButtonSource() {
         const draft = newButton;
         if (!draft || !valid(draft.context)) return;
+        const origin = byId('newButtonOrigin').value;
+        const file = origin === 'upload' ? byId('newButtonFile').files[0] : undefined;
+        if (!byId('newButtonCategory').value) return message(newButtonModal, 'Seleccione una categoría.', true);
+        if (origin === 'upload' && !file) return message(newButtonModal, 'Seleccione un archivo Excel o CSV.', true);
+        if (origin === 'piece' && !byId('newButtonPiece').value) return message(newButtonModal, 'Seleccione una pieza.', true);
+        if (origin === 'category' && !byId('newButtonTemplate').value) return message(newButtonModal, 'Esta categoría no tiene un Excel permanente seleccionado.', true);
+        if (origin === 'sheet' && !byId('newButtonSheet').value) return message(newButtonModal, 'Seleccione una hoja.', true);
+        const descriptions = [...byId('newButtonDescriptions').children].map(row => ({key: row.querySelector('input').value.trim(), value: row.querySelector('textarea').value}));
+        if (descriptions.some(row => !row.key) || new Set(descriptions.map(row => row.key.toLocaleLowerCase())).size !== descriptions.length) return message(newButtonModal, 'Cada descripción necesita una clave distinta.', true);
         busy(newButtonModal, true);
         try {
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
-            draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined, template_id: Number(byId('newButtonTemplate').value) || undefined, category_id: byId('newButtonCategory').value, show_description: draft.showDescription === true, file: upload };
+            draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined,
+                template_id: origin === 'category' ? Number(byId('newButtonTemplate').value) : undefined,
+                sheet: origin === 'sheet' ? byId('newButtonSheet').value : undefined,
+                category_id: byId('newButtonCategory').value, show_description: byId('newButtonDescriptionEnabled').checked,
+                button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined,
+                name: byId('newButtonName').value.trim() || undefined, label: byId('newButtonName').value.trim() || undefined, file: upload };
             await hide(newButtonModal);
         } catch (error) {
             if (newButton === draft) message(newButtonModal, error.message, true);
@@ -448,38 +475,27 @@
         newButton = null;
         draft?.resolve(valid(draft.context) ? draft.result : null);
     });
-    byId('btnNewButtonNext').onclick = () => {
-        if (!byId('newButtonCategory').value) {
-            message(newButtonModal, 'Seleccione una categoría para el botón.', true);
-            return;
-        }
-        message(newButtonModal, '');
+    function updateNewButtonTemplates() {
         const category = newButton?.categories?.find(item => item.id === byId('newButtonCategory').value);
         byId('newButtonTemplate').replaceChildren();
         for (const item of category?.templates || []) byId('newButtonTemplate').append(new Option(`${item.name} · ${item.sheet}`, item.id));
-        byId('newButtonCategoryTemplates').hidden = !category?.templates?.length;
-        byId('newButtonCategoryStep').hidden = true;
-        byId('newButtonDescriptionStep').hidden = false;
-    };
-    for (const [id, enabled] of [['btnNewButtonWithDescription', true], ['btnNewButtonWithoutDescription', false]]) {
-        byId(id).onclick = () => {
-            if (!newButton) return;
-            newButton.showDescription = enabled;
-            byId('newButtonDescriptionStep').hidden = true;
-            byId('newButtonSourceStep').hidden = false;
-        };
     }
-    byId('btnNewButtonBackCategory').onclick = () => {
-        byId('newButtonDescriptionStep').hidden = true;
-        byId('newButtonCategoryStep').hidden = false;
+    byId('newButtonCategory').onchange = updateNewButtonTemplates;
+    byId('newButtonDescriptionEnabled').onchange = event => {
+        byId('newButtonDescriptionOptions').hidden = !event.target.checked;
     };
-    byId('btnNewButtonBack').onclick = () => {
-        byId('newButtonSourceStep').hidden = true;
-        byId('newButtonDescriptionStep').hidden = false;
+    byId('btnNewButtonAddDescription').onclick = () => {
+        const rows = byId('newButtonDescriptions');
+        if (rows.children.length >= 64) return;
+        const row = document.createElement('div'); row.className = 'button-details-edit-row mb-2';
+        row.innerHTML = '<input class="form-control form-control-sm" maxlength="100" placeholder="Clave" aria-label="Clave de descripción"><textarea class="form-control form-control-sm" maxlength="2000" rows="1" placeholder="Valor" aria-label="Valor de descripción"></textarea><button type="button" class="btn btn-outline-danger btn-sm" aria-label="Quitar descripción">Quitar</button>';
+        row.querySelector('button').onclick = () => row.remove(); rows.append(row); row.querySelector('input').focus();
     };
-    byId('btnNewButtonCategoryTemplate').onclick = () => chooseNewButtonSource('category');
-    byId('btnNewButtonBlank').onclick = () => chooseNewButtonSource('blank');
-    byId('btnNewButtonPiece').onclick = async () => {
+    byId('newButtonOrigin').onchange = async () => {
+        const origin = byId('newButtonOrigin').value;
+        for (const [id, value] of [['UploadOptions','upload'], ['SheetOptions','sheet'], ['PieceOptions','piece'], ['CategoryTemplates','category']]) byId('newButton' + id).hidden = origin !== value;
+        updateNewButtonTemplates();
+        if (origin !== 'piece') return;
         const draft=newButton;if(!draft) return;
         busy(newButtonModal,true);
         try {
@@ -495,21 +511,11 @@
                 for(const piece of more.pieces) byId('newButtonPiece').append(new Option(`${piece.category_name} - ${piece.name}`,piece.id));
                 offset=more.next_offset;
             }
-            byId('newButtonPieceOptions').hidden=false;
             message(newButtonModal,data.total ? '' : 'Todavía no hay piezas guardadas.');
         } catch(error) {if(newButton===draft) message(newButtonModal,error.message,true);}
         finally {if(newButton===draft) busy(newButtonModal,false);}
     };
-    byId('btnConfirmNewButtonPiece').onclick = () => {
-        if(!byId('newButtonPiece').value) {message(newButtonModal,'Seleccione una pieza.',true);return;}
-        chooseNewButtonSource('piece');
-    };
-    byId('btnNewButtonImport').onclick = () => byId('newButtonFile').click();
-    byId('newButtonFile').onchange = event => {
-        const file = event.target.files[0];
-        event.target.value = '';
-        if (file) chooseNewButtonSource('upload', file);
-    };
+    byId('btnConfirmNewButton').onclick = chooseNewButtonSource;
     byId('btnAssignmentImportWorkbook').onclick = () => byId('buttonWorkbookInput').click();
     byId('buttonWorkbookInput').onchange = event => {
         const file = event.target.files[0];
@@ -589,7 +595,8 @@
     fullButton.before(fullSheets);
     window.planExcel = { manage, assign, listings, openListings, newButtonOptions, sourceSelected,
         createButton(url, position, { file, ...options }) {
-            return request(url, { ...position, ...options }, file);
+            const values = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
+            return request(url, { ...position, ...values }, file);
         },
         reset() {
             epoch++; bookTarget = assignment = listingTarget = null;

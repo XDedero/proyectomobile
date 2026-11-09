@@ -256,7 +256,8 @@ def create_marker(request, plan_id):
         values, category, origin, upload = new_button_options(request)
         data = validated_marker(plan, values)
         with transaction.atomic():
-            marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False), **data)
+            marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False),
+                button_color=values['button_color'], descriptions=values.get('descriptions'), **data)
             initialize_button(marker, request.user, origin, upload)
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)

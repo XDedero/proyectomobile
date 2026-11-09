@@ -106,6 +106,7 @@
     function canDeleteMarker() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_delete_pdf_marker' : 'can_delete_cad_marker']); }
     function isBusy() { return saving || deleting || active?.plan.cloud_status === 'pending' || Boolean(active?.isBusy?.()); }
     function update() {
+        window.planSectors?.render(active);
         window.planDisplay?.render(active, selectedActions);
         byId('cadProjectActions').hidden = !appState.currentPlan;
         for (const button of byId('savedPlansContainer').querySelectorAll('[data-delete-plan]')) button.disabled = isBusy();
@@ -595,7 +596,7 @@
         }
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || !byId('pdfMarkerDialog').hidden || document.querySelector('#excelListingManager.show, #excelBookManager.show, #excelSheetAssignment.show, #newPlanButton.show')) return;
+        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || window.planSectors?.editing || !byId('pdfMarkerDialog').hidden || document.querySelector('.modal.show')) return;
         event.preventDefault();
         if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
     });
