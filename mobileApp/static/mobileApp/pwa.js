@@ -13,7 +13,7 @@
       <p id="pwaConnection" role="status"></p>
       <div id="pwaInstallHelp"><p>Instala la app para abrir tus planos desde la pantalla de inicio.</p><ol><li>Abre esta dirección en Safari.</li><li>Toca Compartir y luego <strong>Agregar a pantalla de inicio</strong>.</li><li>Activa <strong>Abrir como app</strong> si aparece y toca Agregar.</li></ol></div>
       <button type="button" id="pwaInstall" class="btn btn-primary" hidden>Instalar Reloncaví</button>
-      <hr><h3>Trabajo sin conexión</h3><p>Descarga el plano abierto antes de salir a terreno. Los datos y hojas de Excel que hayas consultado también se conservan en este dispositivo.</p>
+      <hr><h3>Trabajo sin conexión</h3><p>Descarga el plano abierto y su Excel antes de salir a terreno. Encuentra, actualiza o quita la copia en «Planos guardados».</p>
       <p>Sin señal puedes consultar lo descargado y guardar cambios de sectores y celdas de Excel como pendientes. La sincronización se realiza al recuperar conexión con la app abierta. Importar, mover botones, cambiar la estructura del Excel y guardar en la nube requieren conexión.</p>
       <button type="button" id="pwaDownload" class="btn btn-outline-primary">Descargar plano abierto</button>
       <p id="pwaPending"></p><div class="pwa-actions"><button type="button" id="pwaSync" class="btn btn-primary">Sincronizar pendientes</button><button type="button" id="pwaExport" class="btn btn-outline-secondary">Exportar borradores</button><button type="button" id="pwaDiscard" class="btn btn-outline-danger">Descartar borradores</button></div>
@@ -55,7 +55,10 @@
     window.addEventListener('appinstalled',()=>{installPrompt=null;refresh();});
     $('pwaDownload').onclick=async()=>{
         $('pwaDownload').disabled=true;message('Descargando el plano…');
-        try {await window.relOffline.downloadPlan(window.projectWorkspace?.active);message('Plano descargado para consulta sin conexión. Abre las hojas de Excel que necesitarás antes de desconectarte.');}
+        try {
+            const copy=await window.relOffline.downloadPlan(window.projectWorkspace?.active);
+            message((copy.workbook_url?'Plano y Excel descargados.':'Plano descargado.')+' Para consultar hojas en el visor sin señal, ábrelas antes de desconectarte.');
+        }
         catch(error){message(error.message);}finally{refresh();}
     };
     $('pwaSync').onclick=async()=>{

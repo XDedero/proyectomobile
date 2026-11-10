@@ -1,13 +1,19 @@
 /* Account-scoped offline reads and an explicit, version-checked edit outbox. */
 (() => {
     const nativeFetch=window.fetch.bind(window), DB='reloncavi-offline-v1';
+    const MiB=1024*1024, maxFile=40*MiB, maxDownloads=240*MiB;
     const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('reloncavi-account'):null;
     let account=null, unavailable=false, syncing=false, disconnected=!navigator.onLine;
     const emit=()=>window.dispatchEvent(new Event('pwa-state-changed'));
     const opening=new Promise((resolve,reject)=>{
-        const request=indexedDB.open(DB,2);
+        const request=indexedDB.open(DB,3);
         request.onupgradeneeded=()=>{
-            for(const name of ['meta','reads','readinfo','outbox']) if(!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name,{keyPath:'key'});
+            const db=request.result;
+            for(const name of ['meta','reads','readinfo','outbox']) if(!db.objectStoreNames.contains(name)) db.createObjectStore(name,{keyPath:'key'});
+            if(!db.objectStoreNames.contains('downloads')) {
+                db.createObjectStore('downloads',{keyPath:'key'}).createIndex('user','user');
+                db.createObjectStore('downloadFiles',{keyPath:'key'}).createIndex('accountUrl','accountUrl');
+            }
         };
         request.onsuccess=()=>{
             request.result.onversionchange=()=>{request.result.close();unavailable=true;emit();};
@@ -29,6 +35,17 @@
     const put=(store,value)=>storage(store,'readwrite',s=>s.put(value));
     const remove=(store,key)=>storage(store,'readwrite',s=>s.delete(key));
     const all=store=>storage(store,'readonly',s=>s.getAll());
+    async function updateStores(names,action) {
+        const db=await opening;
+        if(!db) throw new Error('No se puede guardar en este dispositivo.');
+        return new Promise((resolve,reject)=>{
+            const tx=db.transaction(names,'readwrite');
+            let failure;
+            tx.oncomplete=resolve;
+            tx.onabort=()=>reject(failure||tx.error||new Error('No se pudo actualizar el almacenamiento local.'));
+            action(tx,message=>{failure=new Error(message);tx.abort();});
+        });
+    }
     async function writeRead(row) {
         const db=await opening;
         if(!db) throw new Error('No se puede guardar en este dispositivo.');
@@ -39,39 +56,135 @@
             tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error);
         });
     }
-    async function removeRead(key) {await remove('reads',key);await remove('readinfo',key);}
+    function removeRead(key) {
+        return updateStores(['reads','readinfo'],tx=>{
+            tx.objectStore('reads').delete(key);tx.objectStore('readinfo').delete(key);
+        });
+    }
     const ready=get('meta','session').then(row=>{account=row?.user||null;}).catch(()=>{});
-    channel?.addEventListener('message',()=>{get('meta','session').then(row=>{account=row?.user||null;emit();}).catch(()=>{});});
+    channel?.addEventListener('message',event=>{
+        if(event.data==='downloads') window.dispatchEvent(new Event('pwa-downloads-changed'));
+        else get('meta','session').then(row=>{account=row?.user||null;emit();}).catch(()=>{});
+    });
     const key=url=>`${account.id}|${new URL(url,location.href).href}`;
-    const eligible=path=>/^\/api\/(?:plans\/(?:\d+\/(?:drawing\.svg)?)?|pdf\/plans\/(?:\d+\/(?:source\.pdf)?)?|pdf\/workbooks\/(?:\d+\/(?:metadata\/|cells\/))?|projects\/|projects\/(?:pdf|dxf)\/\d+\/(?:sectors\/|version\/)|buttons\/(?:pdf|dxf)\/\d+\/details\/)$/u.test(path);
+    const eligible=path=>/^\/api\/(?:plans\/(?:\d+\/(?:drawing\.svg)?)?|pdf\/plans\/(?:\d+\/(?:source\.pdf)?)?|pdf\/workbooks\/(?:\d+\/(?:metadata\/|cells\/|download\/))?|projects\/|projects\/(?:pdf|dxf)\/\d+\/(?:sectors\/|version\/)|buttons\/(?:pdf|dxf)\/\d+\/details\/)$/u.test(path);
+    const proxyUnavailable=response=>[502,503,504].includes(response.status)&&!response.headers.has('X-Reloncavi-User');
     const pending=async()=>account?(await all('outbox')).filter(row=>row.user===account.id):[];
+    const downloadedFile=(owner,url)=>storage('downloadFiles','readonly',
+        store=>store.index('accountUrl').get(owner+'|'+new URL(url,location.href).href));
+    async function downloadedPlans() {
+        await ready;
+        const owner=account?.id;
+        if(!owner) return [];
+        const rows=await storage('downloads','readonly',store=>store.index('user').getAll(owner));
+        return account?.id===owner?rows:[];
+    }
+    async function writeDownload(plan,files) {
+        await updateStores(['meta','downloads','downloadFiles'],(tx,abort)=>{
+            const session=tx.objectStore('meta').get('session');
+            session.onsuccess=()=>{
+                if(session.result?.user.id!==plan.user) {
+                    abort('La sesión cambió durante la descarga.');return;
+                }
+                const downloads=tx.objectStore('downloads'), objects=tx.objectStore('downloadFiles');
+                const listing=downloads.getAll();
+                listing.onsuccess=()=>{
+                    const samePlan=row=>row.user===plan.user&&row.kind===plan.kind&&(
+                        row.key===plan.key||row.plan_id===plan.plan_id||(row.cloud_key&&row.cloud_key===plan.cloud_key)
+                    );
+                    const previous=listing.result.filter(samePlan);
+                    if(previous.some(row=>row.time>plan.time)) {
+                        abort('Ya hay una descarga más reciente de este plano.');return;
+                    }
+                    const total=listing.result.reduce((bytes,row)=>bytes+(samePlan(row)?0:row.size),plan.size);
+                    if(total>maxDownloads) {
+                        abort('Libera espacio quitando una copia descargada antes de guardar este plano.');return;
+                    }
+                    for(const copy of previous) {
+                        for(const url of copy.urls) objects.delete(copy.key+'|'+url);
+                        downloads.delete(copy.key);
+                    }
+                    for(const {url,body} of files) objects.put({key:plan.key+'|'+url,accountUrl:plan.user+'|'+url,time:plan.time,body});
+                    downloads.put(plan);
+                };
+            };
+        });
+        channel?.postMessage('downloads');
+        window.dispatchEvent(new Event('pwa-downloads-changed'));
+    }
+    async function clearDownloadedPlan(copy) {
+        await ready;
+        const owner=account?.id;
+        if(!owner||copy.user!==owner) throw new Error('Abre la sesión de esta copia para quitarla.');
+        await updateStores(['downloads','downloadFiles','reads','readinfo'],tx=>{
+            const downloads=tx.objectStore('downloads'), query=downloads.get(copy.key);
+            query.onsuccess=()=>{
+                const row=query.result;
+                if(!row||row.user!==owner) return;
+                const objects=tx.objectStore('downloadFiles');
+                for(const url of row.urls) objects.delete(row.key+'|'+url);
+                downloads.delete(row.key);
+                const info=tx.objectStore('readinfo'), reads=tx.objectStore('reads');
+                const cursor=info.openCursor(IDBKeyRange.bound(owner+'|',owner+'|\uffff'));
+                cursor.onsuccess=()=>{
+                    const item=cursor.result;
+                    if(!item) return;
+                    const pathname=new URL(item.key.slice(String(owner).length+1)).pathname;
+                    if(row.paths.some(path=>pathname===path||(path.endsWith('/')&&pathname.startsWith(path)))) {
+                        reads.delete(item.key);item.delete();
+                    }
+                    item.continue();
+                };
+            };
+        });
+        channel?.postMessage('downloads');
+        window.dispatchEvent(new Event('pwa-downloads-changed'));
+    }
+    async function forgetUnavailable(owner,url) {
+        const rows=await downloadedPlans();
+        for(const row of rows) {
+            if(row.user===owner && [row.detail_url,row.source_url].some(item=>new URL(item,location.href).pathname===url.pathname)) {
+                await clearDownloadedPlan(row);
+            }
+        }
+    }
     async function rememberSession(response) {
         const data=await response.clone().json();
+        const previous=account?.id;
         account=data.user||null;
-        if(account) await put('meta',{key:'session',user:account});
-        else {
-            await remove('meta','session');
-            await storage('reads','readwrite',s=>s.clear());
-            await storage('readinfo','readwrite',s=>s.clear());
-        }
+        await updateStores(['meta','reads','readinfo','downloads','downloadFiles'],tx=>{
+            if(account) tx.objectStore('meta').put({key:'session',user:account});
+            else tx.objectStore('meta').delete('session');
+            if(!account||(previous&&previous!==account.id)) {
+                for(const store of ['reads','readinfo','downloads','downloadFiles']) tx.objectStore(store).clear();
+            }
+        });
         channel?.postMessage('session');
         emit();
     }
     async function remember(url,response,owner) {
         if(!account||account.id!==owner||!response.ok||response.status===206) return;
         const body=await response.clone().arrayBuffer();
-        if(body.byteLength>40*1024*1024) return;
+        if(body.byteLength>maxFile) return;
         // Inspect only lightweight metadata; never load every PDF to cache one cell tile.
         const rows=await all('readinfo');
         let total=rows.reduce((sum,row)=>sum+row.size,0);
         for(const row of rows.sort((a,b)=>a.time-b.time)) {
-            if(total+body.byteLength<=80*1024*1024) break;
+            if(total+body.byteLength<=80*MiB) break;
             await removeRead(row.key);total-=row.size;
         }
         await writeRead({key:`${owner}|${url}`,body,type:response.headers.get('Content-Type')||'',time:Date.now()});
     }
     function offlineResponse(data) {
         return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json','X-Reloncavi-Offline':'1'}});
+    }
+    async function offlineRead(owner,url) {
+        const saved=await downloadedFile(owner,url);
+        const row=saved||await get('reads',owner+'|'+url.href);
+        if(!row||account?.id!==owner) return null;
+        return overlay(url,new Response(row.body,{headers:{
+            'Content-Type':row.type||row.body.type,'X-Reloncavi-Offline':'1',
+        }}));
     }
     async function overlay(url,response) {
         if(!account||!response.headers.get('Content-Type')?.includes('json')) return response;
@@ -95,11 +208,12 @@
         if(url.origin!==location.origin) return nativeFetch(input,options);
         const method=(options.method||(input instanceof Request?input.method:'GET')).toUpperCase();
         const auth=/^\/api\/auth\/(?:session|login|logout)\/$/.test(url.pathname);
+        const statusOnly=url.pathname==='/api/projects/'&&url.searchParams.get('status')==='1';
         if(!navigator.onLine && !auth && method!=='GET') throw new TypeError('Esta acción requiere conexión. Los sectores y las celdas de Excel pueden conservarse como borradores.');
-        if(!auth && (method!=='GET'||!eligible(url.pathname))) {
+        if(!auth && (method!=='GET'||statusOnly||!eligible(url.pathname))) {
             try {
                 const response=await nativeFetch(input,options);
-                if(url.pathname.startsWith('/api/')) {disconnected=false;emit();}
+                if(url.pathname.startsWith('/api/')) {disconnected=proxyUnavailable(response);emit();}
                 return response;
             } catch(error) {
                 if(error.name!=='AbortError' && url.pathname.startsWith('/api/')) {disconnected=true;emit();}
@@ -109,14 +223,17 @@
         await ready;
         const owner=account?.id;
         let response;
-        try { response=await nativeFetch(input,options); }
+        try {
+            response=await nativeFetch(input,options);
+            if(proxyUnavailable(response)) throw new TypeError('La aplicación está temporalmente sin conexión.');
+        }
         catch(error) {
             if(error.name==='AbortError') throw error;
             disconnected=true;emit();
             if(auth && url.pathname==='/api/auth/session/' && account) return offlineResponse({user:account,csrf_token:'',offline:true});
-            if(method==='GET' && account && eligible(url.pathname)) {
-                const row=await get('reads',key(url));
-                if(row) return overlay(url,new Response(row.body,{headers:{'Content-Type':row.type,'X-Reloncavi-Offline':'1'}}));
+            if(method==='GET' && owner && account?.id===owner && eligible(url.pathname)) {
+                const cached=await offlineRead(owner,url);
+                if(cached) return cached;
                 throw new Error('Este contenido aún no está descargado. Ábrelo con conexión antes de consultarlo sin señal.');
             }
             throw error;
@@ -124,9 +241,12 @@
         disconnected=false;
         if(auth && response.ok) await rememberSession(response).catch(()=>{unavailable=true;emit();});
         else if(account && owner===account.id) {
-            if([401,403,404].includes(response.status)) await removeRead(key(url)).catch(()=>{});
+            if([401,403,404].includes(response.status)) {
+                await removeRead(key(url)).catch(()=>{});
+                if(response.status!==401) await forgetUnavailable(owner,url).catch(()=>{});
+            }
             if(response.status===401) await rememberSession(offlineResponse({user:null})).catch(()=>{});
-            if(response.ok && response.headers.get('X-Reloncavi-User')===String(owner)) await remember(url.href,response,owner).catch(()=>{unavailable=true;emit();});
+            if(response.ok && !url.pathname.endsWith('/download/') && response.headers.get('X-Reloncavi-User')===String(owner)) await remember(url.href,response,owner).catch(()=>{unavailable=true;emit();});
         }
         emit();
         return response.ok && method==='GET' && !auth?overlay(url,response):response;
@@ -173,6 +293,24 @@
         return {...metadata,offline_pending:true};
     }
     async function applyResult(row,result) {
+        if(row.kind==='sector') {
+            const detail=await downloadedFile(row.user,row.detail);
+            if(detail) {
+                const data=JSON.parse(await detail.body.text());
+                data.sectors=result.sectors;
+                await updateStores(['downloadFiles'],tx=>{
+                    const files=tx.objectStore('downloadFiles');
+                    for(const [url,value] of [[row.detail,data],[row.url,{sectors:result.sectors}]]) {
+                        const query=files.index('accountUrl').get(row.user+'|'+new URL(url,location.href).href);
+                        query.onsuccess=()=>{
+                            if(query.result?.time===detail.time) {
+                                files.put({...query.result,body:new Blob([JSON.stringify(value)],{type:'application/json'})});
+                            }
+                        };
+                    }
+                });
+            }
+        }
         for(const info of await all('readinfo')) {
             if(!info.key.startsWith(`${row.user}|`) || !info.type.includes('json')) continue;
             const url=new URL(info.key.slice(info.key.indexOf('|')+1));
@@ -222,7 +360,7 @@
                     throw new Error(result.error||'La sincronización no se completó. El borrador se conserva.');
                 }
                 const result=await response.json();
-                await applyResult(row,result);
+                await applyResult(row,result).catch(()=>{unavailable=true;});
                 // Remove only the sent revision, never a newer edit from another tab.
                 const latest=await get('outbox',row.key);
                 if(JSON.stringify(latest?.body)===JSON.stringify(row.body)) await remove('outbox',row.key);
@@ -234,37 +372,122 @@
         const url=metadata.save_url||`/api/pdf/workbooks/${metadata.id}/save/`;
         return (await pending()).find(row=>row.url===url);
     }
+    async function checkedDownload(url,owner,{optionalExport=false}={}) {
+        const target=new URL(url,location.href);
+        if(target.origin!==location.origin||!eligible(target.pathname)) throw new Error('El archivo no pertenece a este plano.');
+        const response=await nativeFetch(target,{credentials:'same-origin',cache:'no-store'});
+        if(optionalExport&&response.status===403&&response.headers.get('X-Reloncavi-User')===String(owner)) return null;
+        if(!response.ok||response.status===206||response.headers.get('X-Reloncavi-User')!==String(owner)) {
+            throw new Error('No se pudo descargar el plano completo. Comprueba tu conexión y sesión.');
+        }
+        return response;
+    }
+    async function fileBody(response) {
+        if(Number(response.headers.get('Content-Length'))>maxFile) {
+            await response.body?.cancel();
+            throw new Error('La copia admite archivos de hasta 40 MiB.');
+        }
+        if(!response.body) throw new Error('El archivo descargado está vacío.');
+        const reader=response.body.getReader(), chunks=[];
+        let size=0;
+        for(;;) {
+            const {done,value}=await reader.read();
+            if(done) break;
+            size+=value.byteLength;
+            if(size>maxFile) {
+                await reader.cancel();
+                throw new Error('La copia admite archivos de hasta 40 MiB.');
+            }
+            chunks.push(value);
+        }
+        if(!size) throw new Error('El archivo descargado está vacío.');
+        return new Blob(chunks,{type:response.headers.get('Content-Type')||''});
+    }
+    async function downloadPlan(context) {
+        if(!context) throw new Error('Abre primero el plano que quieres consultar sin señal.');
+        if(!navigator.onLine) throw new Error('Conéctate para descargar el plano.');
+        if(!window.isSecureContext||!('serviceWorker' in navigator)) throw new Error('Abre la app desde HTTPS para preparar el uso sin conexión.');
+        // Request browser persistence during the user gesture when supported.
+        navigator.storage?.persist?.().catch(()=>{});
+        await ready;
+        const owner=account?.id;
+        if(!owner) throw new Error('Inicia sesión para descargar el plano.');
+        await new Promise((resolve,reject)=>{
+            const timer=setTimeout(()=>reject(new Error('La app todavía está preparando su primera descarga. Vuelve a intentarlo en unos segundos.')),30000);
+            navigator.serviceWorker.ready.then(()=>{clearTimeout(timer);resolve();},error=>{clearTimeout(timer);reject(error);});
+        });
+        const {plan,kind}=context;
+        const started=Date.now();
+        const detail=await (await checkedDownload(plan.detail_url,owner)).json();
+        if(detail.id!==plan.id||detail.kind!==kind) throw new Error('El plano cambió. Vuelve a abrirlo antes de descargarlo.');
+        const urls=[], files=[];
+        function append(url,body) {
+            const absolute=new URL(url,location.href).href;
+            urls.push(absolute);files.push({url:absolute,body});
+        }
+        const json=data=>new Blob([JSON.stringify(data)],{type:'application/json'});
+        const source=detail.source_url||detail.svg_url;
+        append(detail.detail_url,json(detail));
+        append(detail.sectors_url,json({sectors:detail.sectors||[]}));
+        append(source,await fileBody(await checkedDownload(source,owner)));
+        const book=detail.workbook;
+        let workbookUrl;
+        if(book?.download_url&&detail.permissions?.can_export!==false) {
+            const response=await checkedDownload(book.download_url,owner,{optionalExport:true});
+            if(response) {
+                if(response.headers.get('X-Reloncavi-Workbook-Revision')!==String(book.revision)) {
+                    throw new Error('El Excel cambió durante la descarga. Vuelve a intentarlo.');
+                }
+                append(book.download_url,await fileBody(response));
+                workbookUrl=book.download_url;
+            }
+        }
+        const buttons=detail.markers||detail.motors||[];
+        const paths=[detail.detail_url,detail.sectors_url,detail.version_url,source,
+            ...(book?[book.metadata_url,book.cells_url,book.download_url]:[]),
+            ...buttons.flatMap(button=>[button.details_url,button.workbook?.metadata_url,button.workbook?.cells_url])];
+        const download={
+            key:[owner,kind,detail.cloud_origin||detail.cloud_key||detail.id].join('|'),
+            user:owner,kind,plan_id:detail.id,name:detail.name,version:detail.project_version,
+            date:detail.saved_at||detail.date,time:started,cloud_key:detail.cloud_key,cloud_origin:detail.cloud_origin,
+            detail_url:detail.detail_url,source_url:source,workbook_url:workbookUrl,workbook_name:book?.name,
+            urls,paths:[...new Set(paths.filter(Boolean).map(url=>new URL(url,location.href).pathname))],
+            size:files.reduce((size,file)=>size+file.body.size,0),
+        };
+        try {
+            await writeDownload(download,files);
+        } catch(error) {
+            if(error.name==='QuotaExceededError') throw new Error('El navegador se quedó sin espacio. Quita alguna copia descargada y vuelve a intentarlo.');
+            throw error;
+        }
+        return download;
+    }
+    async function downloadSavedWorkbook(copy) {
+        await ready;
+        const owner=account?.id;
+        if(!owner||owner!==copy.user||!copy.workbook_url) throw new Error('No hay un Excel descargado para esta sesión.');
+        const file=await get('downloadFiles',copy.key+'|'+new URL(copy.workbook_url,location.href).href);
+        if(!file||account?.id!==owner) throw new Error('El Excel ya no está disponible en este dispositivo.');
+        const url=URL.createObjectURL(file.body), link=document.createElement('a');
+        link.href=url;link.download=/\.xlsx$/i.test(copy.workbook_name)?copy.workbook_name:(copy.workbook_name||copy.name)+'.xlsx';
+        document.body.append(link);link.click();link.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),30000);
+    }
     window.relOffline={
-        nativeFetch,sectorRequest,workbookRequest,draftsFor,
+        nativeFetch,sectorRequest,workbookRequest,draftsFor,downloadPlan,downloadedPlans,clearDownloadedPlan,downloadSavedWorkbook,
         get offline(){return disconnected||!navigator.onLine;},
         get unavailable(){return unavailable;},get syncing(){return syncing;},
-        async state(){await ready;return {user:account,count:(await pending()).length,rows:await pending(),syncing,unavailable};},
+        async state(){
+            await ready;
+            const rows=await pending();
+            return {user:account,count:rows.length,rows,syncing,unavailable};
+        },
         sync:async()=>navigator.locks?navigator.locks.request('reloncavi-outbox',sync):sync(),
         async exportDrafts(){return JSON.stringify({app:'Reloncaví',exported:new Date().toISOString(),changes:await pending()},null,2);},
         async discard(){for(const row of await pending()) await remove('outbox',row.key);emit();},
         async canLogout(){
             if((await pending()).length){window.relPWA?.open();window.relPWA?.message('Hay cambios pendientes. Sincronízalos o exporta y descarta los borradores antes de cerrar sesión.');return false;}
             return true;
-        },
-        async downloadPlan(context) {
-            if(!context) throw new Error('Abre primero el plano que quieres consultar sin señal.');
-            if(!navigator.onLine) throw new Error('Conéctate para descargar el plano.');
-            if(!window.isSecureContext||!('serviceWorker' in navigator)) throw new Error('Abre la app desde HTTPS para preparar el uso sin conexión.');
-            await new Promise((resolve,reject)=>{
-                const timer=setTimeout(()=>reject(new Error('La app todavía está preparando su primera descarga. Vuelve a intentarlo en unos segundos.')),30000);
-                navigator.serviceWorker.ready.then(()=>{clearTimeout(timer);resolve();},error=>{clearTimeout(timer);reject(error);});
-            });
-            const {plan,kind}=context;
-            for(const url of [kind==='pdf'?'/api/pdf/plans/':'/api/plans/',plan.detail_url,plan.sectors_url,plan.source_url||plan.svg_url]) {
-                if(!url) continue;
-                const started=Date.now();
-                const response=await window.fetch(url,{credentials:'same-origin',cache:'no-store'});
-                if(!response.ok) throw new Error('No se pudo descargar todo el plano. Vuelve a intentarlo.');
-                const saved=await get('reads',key(url));
-                if(!saved||saved.time<started) throw new Error('No se pudo conservar todo el plano en el dispositivo. Comprueba el espacio y el límite de 40 MiB por archivo.');
-            }
-            if(unavailable) throw new Error('No se completó el guardado local. Comprueba el espacio disponible.');
-            await navigator.storage?.persist?.();
         },
     };
     window.addEventListener('online',()=>{disconnected=false;window.relOffline.sync().catch(error=>window.relPWA?.message(error.message));});

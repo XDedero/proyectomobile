@@ -6,7 +6,7 @@
     let previousOverflow = '', fullscreenOwned = false;
     let pickingFile = false;
     let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
-    let localRows = [], cloudRows = [];
+    let localRows = [], cloudRows = [], deviceRows = [];
     let ownHistory = false;
     let cloudRequestVersion = 0, cloudLoading = false, cloudOpening = false, cloudCheckedAt = 0;
     let localCheckedAt = 0;
@@ -251,6 +251,7 @@
         try {
             try { await post(plan.delete_url); }
             catch (error) { if (error.status !== 404) throw error; }
+            await removeMatchingDownloads(copy => matchesDevice({ ...plan, kind, plan_id: plan.id }, copy));
             libraryRequestVersion += 1;
             libraryLoading = false;
             if (kind === 'pdf') window.pdfWorkflow.removeDeleted(plan.id);
@@ -445,12 +446,13 @@
     async function openListing() { await window.planExcel?.openListings(); }
     async function configureListing() { await window.planExcel?.listings(); }
 
-    async function listSaved({ quiet = false } = {}) {
+    async function listSaved({ quiet = false, statusOnly = false } = {}) {
         const userId = appState.user?.id;
         if (!userId) return;
         const version = ++libraryRequestVersion;
         const parameters = new URLSearchParams();
         if (ownHistory) parameters.set('mine', '1');
+        if (statusOnly) parameters.set('status', '1');
         for (const [kind, workflow] of [['pdf', window.pdfWorkflow], ['dxf', window.planWorkflow]]) {
             if (workflow?.currentPlan) parameters.set(kind, workflow.currentPlan.id);
         }
@@ -458,7 +460,7 @@
         if (!quiet) {
             byId('savedPlansFeedback').textContent = '';
             librarySignature = null;
-            if (!localRows.length && !cloudRows.length) container.textContent = 'Cargando planos guardados…';
+            if (!localRows.length && !cloudRows.length && !deviceRows.length) container.textContent = 'Cargando planos guardados…';
         }
         libraryLoading = true;
         try {
@@ -472,7 +474,7 @@
                 window.planExcel?.reset();
                 status('Este plano fue eliminado de la aplicación.', false, kind);
             }
-            byId('savedCountBadge').textContent = data.plans.length;
+            if (!statusOnly) byId('savedCountBadge').textContent = data.plans.length;
             const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === active?.plan.id);
             if (currentSaved && !saving && (!active.plan.saved_at || Date.parse(currentSaved.date) >= Date.parse(active.plan.saved_at))) {
                 if (!active.plan.saved_at || Date.parse(currentSaved.date) > Date.parse(active.plan.saved_at)) active.plan._saveRequestError = '';
@@ -480,17 +482,24 @@
                 if (!active.plan._projectDirty && !active.plan._saveRequestError) status(currentSaved.cloud_error || cloudMessages[currentSaved.cloud_status] || cloudMessages.local, currentSaved.cloud_status === 'error');
                 update();
             }
-            if (quiet && !byId('modalSavedPlans').classList.contains('show')) return;
+            if (statusOnly || (quiet && !byId('modalSavedPlans').classList.contains('show'))) return;
             localRows = [...data.plans, ...(data.cached || [])];
             renderLibrary();
         } catch (error) {
             // Connection failures never mean a plan was deleted. Keep the last
             // confirmed state until this installation can be reached again.
-            if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) container.textContent = error.message;
+            if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) {
+                if (deviceRows.length) byId('savedPlansFeedback').textContent = 'Se muestran las copias descargadas en este dispositivo.';
+                else container.textContent = error.message;
+            }
             if (active?.plan.cloud_status === 'pending') { active.plan._cloudPollDelayed = true; renderUploadProgress(); }
         } finally { if (version === libraryRequestVersion) libraryLoading = false; }
     }
     const titleKey = (name) => name.replace(/\.pdf$/i, '').trim().toLocaleLowerCase('es');
+    const matchesDevice = (copy, device) => copy.kind === device.kind && (
+        copy.plan_id === device.plan_id || (copy.cloud_key && copy.cloud_key === device.cloud_key) ||
+        (copy.cloud_origin && copy.cloud_origin === device.cloud_origin)
+    );
     function libraryRows() {
         const entries = cloudRows.map(cloud => ({ name: cloud.title || cloud.name, cloud, copies: [] }));
         for (const copy of localRows) {
@@ -500,14 +509,21 @@
             if (match) match.copies.push(copy);
             else entries.push({ name: copy.name, cloud: null, copies: [copy] });
         }
+        for (const device of deviceRows) {
+            const match = entries.find(({ cloud, copies }) => copies.some(copy => matchesDevice(copy, device)) ||
+                (cloud && device.kind === 'pdf' && (device.cloud_origin === cloud.id ||
+                    (device.cloud_key && device.cloud_key === cloud.cloud_key))));
+            if (match) match.device = device;
+            else if (!ownHistory) entries.push({ name: device.name, cloud: null, copies: [], device });
+        }
         const filter = byId('savedDeviceFilter').value;
         const order = byId('savedCloudOrder').value;
         const day = byId('savedCloudDate').value;
         const localDate = new Intl.DateTimeFormat('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit' });
-        const date = entry => Date.parse(entry.cloud?.date || entry.copies[0]?.date || '') || 0;
-        return entries.filter(entry => (filter === 'all' || Boolean(entry.copies.length) === (filter === 'local')) &&
+        const date = entry => Date.parse(entry.cloud?.date || entry.copies[0]?.date || entry.device?.date || '') || 0;
+        return entries.filter(entry => (filter === 'all' || Boolean(entry.device) === (filter === 'local')) &&
             (!day || (entry.cloud?.date && Number.isFinite(Date.parse(entry.cloud.date)) && localDate.format(new Date(entry.cloud.date)) === day)))
-            .sort((a, b) => (order === 'device' ? Number(Boolean(b.copies.length)) - Number(Boolean(a.copies.length)) : 0) ||
+            .sort((a, b) => (order === 'device' ? Number(Boolean(b.device)) - Number(Boolean(a.device)) : 0) ||
                 (order === 'oldest' ? date(a) - date(b) : date(b) - date(a)));
     }
     function libraryAction(label, icon, style, callback) {
@@ -522,16 +538,17 @@
     }
     function renderLibrary() {
         const rows = libraryRows();
-        const signature = JSON.stringify(rows);
+        const offline = window.relOffline?.offline;
+        const signature = JSON.stringify([rows, offline]);
         if (signature === librarySignature) return;
         librarySignature = signature;
         const container = byId('savedPlansContainer');
         container.replaceChildren();
         if (!rows.length) container.textContent = 'No hay planos para mostrar con estos filtros.';
         for (const entry of rows) {
-            const { copies, cloud, name } = entry;
+            const { copies, cloud, name, device } = entry;
             const local = copies[0];
-            const kind = local?.kind || 'pdf';
+            const kind = local?.kind || device?.kind || 'pdf';
             const row = document.createElement('div');
             row.className = 'list-group-item saved-plan-row rounded-3';
             const open = document.createElement('button');
@@ -541,22 +558,31 @@
             title.textContent = name;
             const badge = document.createElement('small');
             badge.className = 'project-kind-badge';
-            badge.textContent = [kind.toUpperCase(), local ? 'En este PC' : 'Sin copia en este PC',
+            badge.textContent = [kind.toUpperCase(), device ? 'Descargado en este dispositivo' : local ? 'En esta instalación' : 'Sin copia en este dispositivo',
                 local?.cloud_status === 'pending' ? 'Subiendo a la nube…' : cloud && 'En la nube',
                 local?.cloud_status === 'partial' && 'Confirmación pendiente',
                 local?.cloud_status === 'uploaded' && 'Archivos en la nube · Confirmando registro',
                 (cloud?.date || local?.date) && new Date(cloud?.date || local.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
             open.append(title, badge);
-            open.addEventListener('click', () => openLibraryEntry(entry, !local));
+            open.addEventListener('click', () => openLibraryEntry(entry, !local && !device));
             row.append(open);
-            if (cloud && local) row.append(libraryAction('Abrir versión de la nube', 'bi-cloud-arrow-down', 'primary', () => openLibraryEntry(entry, true)));
-            if (local?.export_url && local.permissions?.can_export !== false) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
-            if (copies.length && copies.every(copy => copy.clear_url)) {
-                const clear = libraryAction('Limpiar copia de este PC', 'bi-pc-display', 'secondary', () => removeLibraryEntry(entry, true));
+            if (cloud && (local || device) && !offline) row.append(libraryAction('Abrir versión de la nube', 'bi-cloud-arrow-down', 'primary', () => openLibraryEntry(entry, true)));
+            if (local?.export_url && !offline && local.permissions?.can_export !== false) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
+            if ((local || cloud || device) && !offline && window.relOffline) {
+                row.append(libraryAction(device ? 'Actualizar copia descargada' : 'Descargar para usar sin conexión',
+                    'bi-hdd', 'primary', () => downloadLibraryEntry(entry)));
+            }
+            if (device) {
+                if (device.workbook_url) row.append(libraryAction('Descargar Excel de la copia', 'bi-file-earmark-spreadsheet', 'secondary',
+                    () => window.relOffline.downloadSavedWorkbook(device).catch(error => { byId('savedPlansFeedback').textContent = error.message; })));
+                row.append(libraryAction('Quitar copia de este dispositivo', 'bi-x-circle', 'secondary', () => removeDeviceCopy(device)));
+            }
+            if (!offline && copies.length && copies.every(copy => copy.clear_url)) {
+                const clear = libraryAction('Quitar copia de esta instalación local', 'bi-pc-display', 'secondary', () => removeLibraryEntry(entry, true));
                 clear.dataset.deletePlan = local.plan_id;
                 row.append(clear);
             }
-            if ((local ? canDelete(kind, local) : appState.user?.permissions?.can_administer) && (cloud?.delete_url || local?.delete_url)) {
+            if (!offline && (local ? canDelete(kind, local) : appState.user?.permissions?.can_administer) && (cloud?.delete_url || local?.delete_url)) {
                 const remove = libraryAction('Eliminar proyecto completo', 'bi-trash', 'danger', () => removeLibraryEntry(entry, false));
                 remove.dataset.deletePlan = local?.plan_id || cloud.id;
                 row.append(remove);
@@ -565,13 +591,49 @@
         }
         update();
     }
+    async function readDeviceRows() {
+        const user = appState.user?.id;
+        const rows = await window.relOffline?.downloadedPlans().catch(() => []);
+        if (user !== appState.user?.id || !byId('modalSavedPlans').classList.contains('show')) return;
+        deviceRows = rows || [];
+        renderLibrary();
+    }
+    async function removeMatchingDownloads(match) {
+        const rows = await window.relOffline?.downloadedPlans().catch(() => []);
+        for (const copy of (rows || []).filter(match)) {
+            await window.relOffline.clearDownloadedPlan(copy).catch(() => {});
+        }
+    }
+    async function downloadLibraryEntry(entry) {
+        if (isBusy() || cloudOpening) return;
+        const feedback = byId('savedPlansFeedback');
+        const local = entry.copies[0] || entry.device;
+        cloudOpening = true;
+        feedback.textContent = 'Descargando el plano y su Excel…';
+        try {
+            const plan = entry.cloud ? (await post(entry.cloud.open_url)).plan : await request(local.detail_url);
+            await window.relOffline.downloadPlan({ kind: plan.kind, plan });
+            feedback.textContent = 'Copia descargada en este dispositivo.';
+        } catch (error) { feedback.textContent = error.message; }
+        finally { cloudOpening = false; }
+    }
+    async function removeDeviceCopy(device) {
+        if (cloudOpening || deleting) return;
+        if (!(await window.confirmAppAction('Quitar copia del dispositivo',
+            'Se liberará el espacio de esta descarga. El plano de la nube y tus borradores se conservan.',
+            'Quitar copia'))) return;
+        try {
+            await window.relOffline.clearDownloadedPlan(device);
+            byId('savedPlansFeedback').textContent = 'Copia retirada de este dispositivo.';
+        } catch (error) { byId('savedPlansFeedback').textContent = error.message; }
+    }
     async function openLibraryEntry(entry, remote) {
         if (isBusy() || cloudOpening || !(await window.workbookEditor.requestClose())) return;
         const user = appState.user?.id;
-        const local = entry.copies[0];
+        const local = entry.copies[0] || entry.device;
         const feedback = byId('savedPlansFeedback');
         cloudOpening = true;
-        feedback.textContent = remote ? 'Descargando el plano, sus hojas y botones…' : 'Abriendo copia de este PC…';
+        feedback.textContent = remote ? 'Abriendo el plano, sus hojas y botones…' : 'Abriendo el plano…';
         try {
             const result = remote ? await post(entry.cloud.open_url) : { plan: await request(local.detail_url) };
             if (appState.user?.id !== user) return;
@@ -589,9 +651,9 @@
         if (isBusy() || cloudOpening) return;
         const { cloud, copies, name } = entry;
         if (!localOnly && !cloud) return deletePlan({ kind: copies[0].kind, plan: { ...copies[0], id: copies[0].plan_id } });
-        const message = localOnly ? `¿Limpiar «${name}» de este PC? ${cloud ? 'La copia en la nube seguirá disponible.' : 'Se quitará la copia guardada en este PC.'}` :
+        const message = localOnly ? `¿Quitar «${name}» de esta instalación local? ${cloud ? 'La copia en la nube seguirá disponible.' : 'Se quitará el registro guardado en esta instalación.'}` :
             `¿Eliminar «${name}» de todos los equipos? Se retirarán el PDF y el Excel de la nube y su registro de la base de datos.`;
-        const action = localOnly ? 'Limpiar copia local' : 'Eliminar plano';
+        const action = localOnly ? 'Quitar copia de la instalación' : 'Eliminar plano';
         if (!(await window.confirmAppAction(action, message, action, { danger: true }))) return;
         if (isBusy() || cloudOpening || !(await window.workbookEditor.requestClose())) return;
         deleting = true;
@@ -606,6 +668,9 @@
                 const result = await post(cloud.delete_url);
                 for (const id of result.local_ids || []) window.pdfWorkflow.removeDeleted(id);
                 cloudRows = cloudRows.filter(item => item.id !== cloud.id);
+                await removeMatchingDownloads(device => device.kind === 'pdf' &&
+                    (device.cloud_origin === cloud.id || (cloud.cloud_key && device.cloud_key === cloud.cloud_key) ||
+                        copies.some(copy => matchesDevice(copy, device))));
             }
         } catch (error) { byId('savedPlansFeedback').textContent = error.message; }
         finally {
@@ -619,7 +684,7 @@
         ownHistory = mine && Boolean(appState.user?.permissions?.can_history);
         libraryRequestVersion++;
         cloudRequestVersion++;
-        localRows = []; cloudRows = []; librarySignature = null;
+        localRows = []; cloudRows = []; deviceRows = []; librarySignature = null;
         byId('savedDeviceFilter').value = 'all';
         byId('savedCloudDate').value = '';
         byId('modalSavedPlans').querySelector('.modal-title').textContent = ownHistory ? 'Historial de mis planos' : 'Planos guardados';
@@ -627,8 +692,11 @@
         for (const id of ['savedDeviceFilter', 'savedCloudDate', 'btnCloudProjects']) {
             byId(id).closest('.col-6').hidden = ownHistory;
         }
-        modalSavedPlans.show(); listSaved();
-        if (!ownHistory) showCloudProjects();
+        modalSavedPlans.show();
+        if (navigator.onLine) {
+            listSaved();
+            if (!ownHistory) showCloudProjects();
+        }
     }
     async function showCloudProjects({ quiet = false } = {}) {
         const user = appState.user?.id;
@@ -659,27 +727,33 @@
         event.preventDefault(); showSaved({ mine: true });
     });
     for (const id of ['savedDeviceFilter', 'savedCloudOrder', 'savedCloudDate']) byId(id).addEventListener('change', renderLibrary);
+    window.addEventListener('pwa-downloads-changed', readDeviceRows);
+    window.addEventListener('offline', readDeviceRows);
+    byId('modalSavedPlans').addEventListener('shown.bs.modal', readDeviceRows);
     byId('modalSavedPlans').addEventListener('hidden.bs.modal', () => {
         ownHistory = false;
         libraryRequestVersion++;
         cloudRequestVersion++;
         cloudRows = [];
         localRows = [];
+        deviceRows = [];
         librarySignature = null;
     });
-    function synchronize() {
-        if (!appState.user || document.hidden || saving || deleting || active?.isBusy?.() || libraryLoading) return;
+    function synchronize(refreshCloud = false) {
+        if (!appState.user || !navigator.onLine || document.hidden || saving || deleting || active?.isBusy?.() || libraryLoading) return;
+        const showingLibrary = byId('modalSavedPlans').classList.contains('show');
+        if (!showingLibrary && !active) return;
         localCheckedAt = Date.now();
-        listSaved({ quiet: true });
-        if (byId('modalSavedPlans').classList.contains('show') && Date.now() - cloudCheckedAt > 15000) showCloudProjects({ quiet: true });
+        listSaved({ quiet: true, statusOnly: !showingLibrary });
+        if (showingLibrary && refreshCloud && Date.now() - cloudCheckedAt > 15000) showCloudProjects({ quiet: true });
     }
-    window.addEventListener('focus', synchronize);
-    window.addEventListener('pageshow', synchronize);
-    window.addEventListener('online', synchronize);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
+    window.addEventListener('focus', () => synchronize(true));
+    window.addEventListener('pageshow', () => synchronize(true));
+    window.addEventListener('online', () => synchronize(true));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(true); });
     setInterval(() => {
-        if ((active?.plan.cloud_status === 'pending' || Date.now() - localCheckedAt >= 5000) &&
-            (window.pdfWorkflow?.currentPlan || window.planWorkflow?.currentPlan || byId('modalSavedPlans').classList.contains('show'))) synchronize();
+        const pending = ['pending', 'uploaded', 'partial'].includes(active?.plan.cloud_status);
+        if (Date.now() - localCheckedAt >= (pending ? 2000 : 15000)) synchronize();
     }, 1000);
     async function openPlan(kind, plan) {
         if (kind === 'pdf') return window.pdfWorkflow.open(plan);
@@ -770,7 +844,7 @@
         reset() {
             libraryRequestVersion += 1;
             libraryLoading = false;
-            librarySignature = null;
+            localRows = []; cloudRows = []; deviceRows = []; librarySignature = null;
             exitFullscreen(); active = null; selection(null); window.planExcel?.reset(); update();
         },
     };

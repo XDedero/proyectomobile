@@ -420,10 +420,12 @@ def workbook_save(request, workbook_id):
 @api_permissions()
 def workbook_download(request, workbook_id):
     document = get_object_or_404(WorkbookDocument, pk=workbook_id)
-    return FileResponse(
+    response = FileResponse(
         BytesIO(bytes(document.content)), as_attachment=True, filename=document.name,
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
+    response['X-Reloncavi-Workbook-Revision'] = str(document.revision)
+    return response
 
 
 @require_POST

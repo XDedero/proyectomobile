@@ -95,6 +95,32 @@ planificar por separado una migración a PostgreSQL y almacenamiento externo de 
 con pruebas y migración de datos. En planes que se suspenden por inactividad, el primer
 acceso puede ser más lento y no se corrige mediante cambios al visor.
 
+## Migración al catálogo central
+
+La primera etapa separa las descargas del dispositivo en IndexedDB. El visor consulta
+solo el estado de los planos abiertos, cada dos segundos durante una publicación y
+cada quince segundos en reposo. La consulta al catálogo completo se limita a la biblioteca.
+El sondeo no vuelve a listar las carpetas de la nube. Si el servicio devuelve un error
+temporal de infraestructura, la PWA instalada puede abrir su interfaz y copias descargadas.
+
+Antes de mover los datos de producción:
+
+1. Respaldar SQLite, media, el catálogo actual de Supabase y el inventario de Drive.
+   Reconciliar propietarios, botones, hojas e IDs de archivos por clave de proyecto.
+2. Ensayar las migraciones de Django y el traspaso de cuentas y metadatos en PostgreSQL.
+   Mover los binarios a Drive y cambiar la lectura del catálogo a la base principal.
+3. Configurar la autorización de Drive en el servidor y migrar la publicación a una cola
+   persistente. Las copias offline mantienen su flujo del navegador. Retirar la opción
+   de limpiar copias de la instalación cuando se desactive el almacenamiento local del servidor.
+4. Validar en un entorno aislado con 20 usuarios activos, archivos representativos y
+   guardados concurrentes. Probar un reinicio durante la publicación y una reapertura
+   desde otro equipo. Medir memoria, CPU y transferencia antes de elegir el plan de Render.
+5. Después de verificar el traspaso, hacer el corte con la instalación anterior en solo
+   lectura. Las descargas de localhost deben volver a descargarse desde el dominio de Render.
+
+La configuración de arranque actual sigue usando SQLite. El cambio al catálogo central
+requiere completar el traslado de archivos y la publicación antes de habilitar escrituras.
+
 Referencias oficiales: [Django en Render](https://render.com/docs/deploy-django),
 [discos persistentes](https://render.com/docs/disks),
 [variables de Render](https://render.com/docs/environment-variables) y

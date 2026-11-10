@@ -111,6 +111,23 @@ def check_browser(url, directory):
             assert 'Borrador en conflicto' in page.evaluate('relOffline.exportDrafts()')
             page.evaluate('relOffline.discard()')
             page.evaluate('switchView(viewMainMenu)')
+            context.set_offline(True)
+            page.locator('#btnSavedPlans').click()
+            row = page.locator('.saved-plan-row').filter(has_text='Descargado en este dispositivo')
+            expect(row).to_be_visible()
+            assert page.evaluate("""async url => {
+                const response = await fetch(url);
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                return response.headers.get('X-Reloncavi-Offline') === '1' && bytes[0] === 80 && bytes[1] === 75;
+            }""", plan['workbook']['download_url'])
+            row.get_by_role('button', name='Quitar copia de este dispositivo').click()
+            page.get_by_role('button', name='Quitar copia', exact=True).click()
+            expect(row).to_have_count(0)
+            assert page.evaluate('relOffline.downloadedPlans()') == []
+            context.set_offline(False)
+            assert page.request.get(url.rstrip('/') + plan['detail_url']).ok
+            page.locator('#modalSavedPlans .btn-close').click()
+            print('PASS: offline PDF and XLSX are discoverable and removing them preserves the server plan', flush=True)
             page.locator('#userMenuBtn').click()
             page.locator('#menuItemLogout').click()
             expect(page.locator('#loginForm')).to_be_visible()

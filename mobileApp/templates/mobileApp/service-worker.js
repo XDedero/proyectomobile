@@ -46,7 +46,11 @@ self.addEventListener('fetch', event => {
     const request = event.request, url = new URL(request.url);
     if (request.method !== 'GET' || url.origin !== location.origin) return;
     if (request.mode === 'navigate' && url.pathname === HOME) {
-        event.respondWith(fetch(request).catch(async () => (await caches.open(CACHE)).match(HOME)));
+        event.respondWith((async () => {
+            const response = await fetch(request).catch(() => null);
+            if (response && ![502, 503, 504].includes(response.status)) return response;
+            return (await (await caches.open(CACHE)).match(HOME)) || response || Response.error();
+        })());
     } else if (url.pathname.startsWith('/static/mobileApp/')) {
         event.respondWith((async () => {
             const cache = await caches.open(CACHE);

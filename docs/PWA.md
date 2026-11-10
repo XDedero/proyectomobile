@@ -30,10 +30,16 @@ móviles; no sustituyen una validación en Safari/iPhone físico.
 
 ## Uso sin conexión y límites
 
-- Iniciar sesión con conexión antes de salir. Abrir el plano y elegir «Descargar plano
-  abierto» en «App y conexión». Se descarga la geometría completa PDF/DXF, su detalle,
-  sectores y listado de planos locales. Las hojas y zonas del Excel deben haberse abierto
-  previamente: las celdas se descargan por bloques para evitar consumir toda la memoria.
+- Iniciar sesión con conexión antes de salir. Elegir «Descargar para usar sin conexión»
+  en «Planos guardados», o «Descargar plano abierto» en «App y conexión». La copia incluye
+  el PDF o la vista SVG del DXF, botones y sectores. Si el rol permite exportar, también
+  incluye el XLSX para descargarlo desde el catálogo aun sin señal. Para usar el editor de
+  Excel sin conexión, abrir previamente las hojas y zonas que se van a consultar.
+- En «Planos guardados», filtrar por «Descargados» para encontrar las copias. «Actualizar
+  copia descargada» reemplaza los archivos juntos al completar la descarga. «Quitar copia
+  de este dispositivo» elimina la descarga del navegador y conserva el plano compartido
+  y los borradores. La limpieza de una copia de la instalación local y el borrado completo
+  siguen siendo acciones distintas.
 - La consulta offline usa la última copia descargada. El visor avisa que no hay conexión.
   Los recursos auxiliares de PDFs (por ejemplo fuentes especiales) se conservan al usarlos;
   comprobar el plano que se va a llevar a terreno antes de desconectarse.
@@ -52,10 +58,12 @@ móviles; no sustituyen una validación en Safari/iPhone físico.
 - El cierre de sesión exige resolver, o exportar y descartar, los pendientes. Cerrar sesión
   elimina la identidad offline y las copias consultables del dispositivo. Las copias no se
   comparten entre cuentas; cada respuesta se asocia con la cuenta comprobada por el servidor.
-- iOS puede eliminar almacenamiento local. Se solicita persistencia cuando está disponible;
-  no se trata como respaldo. La caché de documentos tiene un presupuesto de 80 MiB y cada
-  respuesta un límite de 40 MiB. Se expulsan lecturas antiguas; los borradores no se expulsan.
-  Falta de espacio muestra un aviso y no confirma guardados locales fallidos.
+- iOS puede eliminar almacenamiento local. La app solicita persistencia al descargar.
+  La caché automática tiene un presupuesto de 80 MiB y expulsa lecturas antiguas. Las
+  descargas explícitas tienen un presupuesto aparte de 240 MiB y un límite de 40 MiB por
+  archivo. La app conserva esas descargas y los borradores cuando vence la caché automática.
+  Si falta espacio, avisa y conserva la copia anterior. El navegador separa los datos por
+  dirección: al pasar de la app local a la URL de Render se descargan de nuevo los planos.
 - Las actualizaciones se aceptan manualmente y se bloquean mientras hay sectores en edición,
   celdas sin guardar o borradores pendientes. La interfaz pública se almacena aparte; el
   service worker no guarda APIs privadas, archivos de usuario ni administración.

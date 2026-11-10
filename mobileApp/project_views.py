@@ -49,6 +49,7 @@ def project_plan_data(kind, plan):
         'version_url': reverse('project_version', args=[kind, plan.pk]),
         'refresh_url': reverse('refresh_project', args=[kind, plan.pk]),
         'cloud_key': plan.cloud_key,
+        'cloud_origin': getattr(plan, 'cloud_origin', ''),
         'save_project_url': reverse('save_project', args=[kind, plan.pk]),
         'export_project_url': reverse('download_project', args=[kind, plan.pk]),
         'assign_listing_url': reverse('assign_plan_listing', args=[kind, plan.pk]),
@@ -128,10 +129,10 @@ def saved_data(saved, user):
 @api_permissions()
 def saved_projects(request):
     mine = request.GET.get('mine') == '1'
+    status_only = request.GET.get('status') == '1'
     if mine and not capabilities(request.user)['can_history']:
         return error_response('El espectador no tiene historial de planos creados.', 403)
     from .terminal_monitor import retry_cloud_registrations
-    retry_cloud_registrations()
     projects = SavedProject.objects.select_related('cad_plan', 'pdf_plan').only(
         'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
         'cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress',
@@ -158,11 +159,18 @@ def saved_projects(request):
                 availability[kind] = {'id': plan_id, 'exists': model.objects.filter(pk=plan_id).exists()}
     except ValidationError as exc:
         return error_response(exc)
+    if status_only:
+        from django.db.models import Q
+        selected = Q(pk__in=[])
+        for kind, state in availability.items():
+            selected |= Q(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': state['id']})
+        projects = projects.filter(selected)
+    retry_cloud_registrations(projects.values('pk') if status_only else None)
     # Check working plans as well as saved copies: a newly imported plan is
     # intentionally absent from the library until the user saves it.
     return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects
                                   if can_access_plan(request.user, saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan)],
-                         'cached': [] if mine else cached_projects(request.user), 'availability': availability})
+                         'cached': [] if mine or status_only else cached_projects(request.user), 'availability': availability})
 
 
 def cached_projects(user):

@@ -455,7 +455,7 @@ def organize_project_sheets(plan, user):
     """Use the category and marker order as the authoritative exported tab names."""
     document = ensure_workbook(plan, user)
     rows = {row.name: row for row in document.plan_sheets.all()}
-    buttons = list(markers(plan).select_for_update().select_related('category').order_by('pk'))
+    buttons = list(markers(plan).select_for_update(of=('self',)).select_related('category').order_by('pk'))
     content = bytes(document.content)
     names = sheet_names(content)
     retained = {button.sheet_name for button in buttons if button.sheet_name}

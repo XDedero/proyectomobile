@@ -737,11 +737,14 @@ _REGISTRATION_RETRIES = {}
 _REGISTRATION_LOCK = threading.Lock()
 
 
-def retry_cloud_registrations():
+def retry_cloud_registrations(project_ids=None):
     """Resume acknowledged file uploads after a lost DB reply or an app restart."""
     if not is_monitor_enabled():
         return
-    for saved in SavedProject.objects.filter(cloud_status='uploaded').only('id', 'saved_at', 'cloud_receipt'):
+    candidates = SavedProject.objects.filter(cloud_status='uploaded')
+    if project_ids is not None:
+        candidates = candidates.filter(pk__in=project_ids)
+    for saved in candidates.only('id', 'saved_at', 'cloud_receipt'):
         sql = saved.cloud_receipt.get('sql')
         if not sql:
             continue
