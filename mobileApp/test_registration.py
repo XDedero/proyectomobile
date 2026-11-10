@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.test import Client, TestCase, override_settings
@@ -29,6 +30,13 @@ class RegistrationTests(TestCase):
         user = get_user_model().objects.create_superuser('admin', password='Zorro!Luna2026')
         UserProfile.objects.create(user=user, rut=next_test_rut(), rut_is_test=True,
                                    role='administrator', is_primary_administrator=True)
+        return user
+
+    def ordinary_administrator(self):
+        user = get_user_model().objects.create_user('supervisor', password='Zorro!Luna2026', is_staff=True)
+        UserProfile.objects.create(user=user, rut=next_test_rut(), role='administrator')
+        user.user_permissions.add(Permission.objects.get(
+            content_type__app_label='mobileApp', codename='administer_application'))
         return user
 
     def payload(self, **changes):
@@ -158,10 +166,63 @@ class RegistrationTests(TestCase):
         self.assertEqual(item.status, 'pending')
         self.assertIsNone(item.user_id)
 
+    def test_pending_requests_reach_primary_and_ordinary_administrators(self):
+        primary, ordinary = self.primary_administrator(), self.ordinary_administrator()
+        item = self.submit()
+        clients = []
+        for administrator in (primary, ordinary):
+            client = Client()
+            client.force_login(administrator)
+            clients.append(client)
+            response = client.get(reverse('management_data'))
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('no-store', response.headers['Cache-Control'])
+            data = response.json()
+            self.assertTrue(data['can_manage_administrators'])
+            self.assertEqual([request['id'] for request in data['requests']], [item.pk])
+            self.assertEqual(data['requests'][0]['name'], 'María José Muñoz Ochoa')
+            self.assertNotIn('password_hash', data['requests'][0])
+        decision = {'id': item.pk, 'action': 'approve', 'role': 'worker'}
+        self.assertEqual(self.post('manage_registration', decision, clients[1]).status_code, 200)
+        self.assertEqual(clients[0].get(reverse('management_data')).json()['requests'], [])
+        self.assertEqual(self.post('manage_registration', decision, clients[0]).status_code, 404)
+        rejected = self.submit(rut='22222222-2')
+        self.assertEqual(self.post('manage_registration', {'id': rejected.pk, 'action': 'reject'}, clients[1]).status_code, 200)
+        self.assertFalse(UserProfile.objects.filter(rut=rejected.rut).exists())
+        self.assertEqual(clients[0].get(reverse('management_data')).json()['requests'], [])
+
+    def test_every_administrator_can_approve_with_any_application_role(self):
+        for administrator in (self.admin, self.primary_administrator(), self.ordinary_administrator()):
+            client = Client()
+            client.force_login(administrator)
+            for role in UserProfile.Role.values:
+                with self.subTest(administrator=administrator.username, role=role):
+                    item = self.submit(rut=next_test_rut())
+                    response = self.post('manage_registration', {'id': item.pk, 'action': 'approve', 'role': role}, client)
+                    self.assertEqual(response.status_code, 200, response.content)
+                    profile = UserProfile.objects.select_related('user').get(rut=item.rut)
+                    self.assertEqual(profile.role, role)
+                    self.assertFalse(profile.is_primary_administrator)
+                    self.assertTrue(profile.user.check_password('Cascada!Sur2026'))
+                    login = self.post('auth_login', {'username': item.rut, 'password': 'Cascada!Sur2026'}, Client())
+                    self.assertEqual(login.status_code, 200, login.content)
+                    self.assertEqual(login.json()['user']['permissions']['can_administer'], role == 'administrator')
+                    self.assertFalse(RegistrationRequest.objects.filter(pk=item.pk).exists())
+
+    def test_invalid_approval_role_preserves_pending_request_and_does_not_create_account(self):
+        item = self.submit()
+        self.client.force_login(self.ordinary_administrator())
+        for role in ('superusuario', '', None):
+            with self.subTest(role=role):
+                response = self.post('manage_registration', {'id': item.pk, 'action': 'approve', 'role': role})
+                self.assertEqual(response.status_code, 400)
+                self.assertTrue(RegistrationRequest.objects.filter(pk=item.pk, status='pending').exists())
+                self.assertFalse(UserProfile.objects.filter(rut=item.rut).exists())
+
     def test_role_promotion_invalidates_prior_sessions_and_requires_login(self):
         client = Client()
         client.force_login(self.worker)
-        self.client.force_login(self.primary_administrator())
+        self.client.force_login(self.ordinary_administrator())
         response = self.post('manage_user', {'id': self.worker.pk, 'role': 'administrator'})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()['requires_login'])

@@ -8,6 +8,8 @@
         administrator: 'Puede administrar usuarios y categorías, y gestionar todos los planos. Al recibir este rol debe cerrar sesión y volver a entrar.',
     };
     let state = {users: [], requests: [], categories: []}, userId = null, categoryId = null, busy = false, dataRevision = 0;
+    let ready = false, refreshing = false;
+    const requestRoles = new Map();
     const initialControls = [...document.querySelectorAll('main form input, main form select, main form button, #userSearch')];
     initialControls.forEach(control => { control.disabled = true; });
     const token = () => decodeURIComponent(document.cookie.split('; ').find(x => x.startsWith('csrftoken='))?.slice(10) || '');
@@ -83,6 +85,7 @@
     }
     function renderRequests() {
         const container = $('requestRows'); container.replaceChildren();
+        for (const id of requestRoles.keys()) if (!state.requests.some(item => item.id === id)) requestRoles.delete(id);
         for (const item of state.requests) {
             const row = document.createElement('article'); row.className = 'management-row request-row';
             const copy = document.createElement('div'); copy.className = 'request-copy';
@@ -93,7 +96,20 @@
             copy.append(title, details, badge);
             row.append(copy);
             const controls = document.createElement('div'); controls.className = 'request-actions';
-            controls.append(action('Aceptar', () => mutate(() => request('/api/administration/requests/', {id: item.id, action: 'approve'}), 'Solicitud aceptada. La cuenta ya puede iniciar sesión como espectador.'), {decision: 'accept', dataAction: 'approve'}));
+            const label = document.createElement('label'); label.className = 'request-role'; label.textContent = 'Rol de la cuenta';
+            const select = document.createElement('select'); select.className = 'form-select form-select-sm';
+            select.dataset.requestRole = item.id;
+            for (const [value, name] of Object.entries(roles)) {
+                const option = document.createElement('option'); option.value = value; option.textContent = name; select.append(option);
+            }
+            select.value = requestRoles.get(item.id) || 'viewer';
+            select.onchange = () => requestRoles.set(item.id, select.value);
+            label.append(select); controls.append(label);
+            controls.append(action('Aceptar', async () => {
+                const role = select.value;
+                if (role === 'administrator' && !await confirmAction('¿Seguro que desea otorgar el rol de administrador?', `${item.name} podrá gestionar solicitudes, usuarios y categorías.`, 'Aceptar y otorgar rol')) return;
+                await mutate(() => request('/api/administration/requests/', {id: item.id, action: 'approve', role}));
+            }, {decision: 'accept', dataAction: 'approve'}));
             controls.append(action('Eliminar', async () => {
                 if (await confirmAction('¿Seguro que desea eliminar esta solicitud?', 'La solicitud se eliminará definitivamente.', 'Eliminar')) {
                     await mutate(() => request('/api/administration/requests/', {id: item.id, action: 'reject'}), 'Solicitud eliminada.');
@@ -122,7 +138,7 @@
     function roleHelp() {
         const user = state.users.find(item => item.id === userId);
         $('userRoleHelp').textContent = user?.primary_administrator
-            ? 'Es la única cuenta que puede crear, modificar y eliminar otros administradores. Debe conservar su rol.'
+            ? 'Puede modificar y eliminar otros administradores. Debe conservar su rol. Todos los administradores pueden aprobar solicitudes y otorgar roles.'
             : roleDescriptions[$('userRole').value];
     }
     function applyRolePermissions() {
@@ -177,6 +193,7 @@
         summary(); renderRequests(); renderUsers(); renderCategories();
         editUser(state.users.find(user => user.id === userId));
         editCategory(state.categories.find(category => category.id === categoryId));
+        $('requestRefreshStatus').textContent = 'Solicitudes actualizadas. Se comprueban automáticamente cada 5 segundos.';
     }
     $('userForm').onsubmit = async event => {
         event.preventDefault(); if (busy || !userId) return;
@@ -214,23 +231,48 @@
         if (button.dataset.tab === 'users') {
             $('userSearch').value = '';
             renderUsers();
-            refreshLists().catch(error => status(error.message, true));
         }
+        if (['users', 'requests'].includes(button.dataset.tab)) refresh();
     };
-    status('Cargando administración…');
-    load().then(() => { initialControls.forEach(control => { control.disabled = false; }); applyRolePermissions(); status(''); }).catch(error => status(error.message, true));
     // Refresh lists without replacing unsaved user or category forms.
     async function refreshLists() {
-        if (busy) return;
-        const revision = dataRevision;
-        const latest = await request('/api/administration/');
-        if (busy || revision !== dataRevision) return;
-        state.users = latest.users; state.requests = latest.requests;
-        if (userId && !state.users.some(user => user.id === userId && user.can_edit)) editUser();
-        summary(); renderUsers(); renderRequests();
+        if (busy || refreshing || $('managementConfirm').open) return;
+        refreshing = true;
+        $('refreshRequests').disabled = true;
+        try {
+            if (!ready) {
+                await load(); ready = true;
+                initialControls.forEach(control => { control.disabled = false; });
+                applyRolePermissions(); status('');
+                return;
+            }
+            const revision = dataRevision;
+            const latest = await request('/api/administration/');
+            if (busy || revision !== dataRevision) return;
+            const requestsChanged = JSON.stringify(state.requests) !== JSON.stringify(latest.requests);
+            state.users = latest.users; state.requests = latest.requests;
+            state.can_manage_administrators = latest.can_manage_administrators;
+            if (userId && !state.users.some(user => user.id === userId && user.can_edit)) editUser();
+            summary(); renderUsers();
+            if (requestsChanged) renderRequests();
+            applyRolePermissions();
+            $('requestRefreshStatus').textContent = 'Solicitudes actualizadas. Se comprueban automáticamente cada 5 segundos.';
+        } finally {
+            refreshing = false;
+            $('refreshRequests').disabled = busy;
+        }
     }
-    setInterval(() => {
-        if (document.hidden || $('managementConfirm').open) return;
-        refreshLists().catch(() => { /* The next explicit action displays any connection error. */ });
-    }, 15000);
+    function refresh() {
+        return refreshLists().catch(error => {
+            $('requestRefreshStatus').textContent = `No se pudieron actualizar las solicitudes: ${error.message} Pulsa Actualizar solicitudes para reintentar.`;
+            if (!ready) status(error.message, true);
+        });
+    }
+    $('refreshRequests').onclick = refresh;
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+    status('Cargando administración…');
+    refresh();
 })();

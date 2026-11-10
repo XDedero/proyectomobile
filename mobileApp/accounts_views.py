@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
-from .accounts import (application_role, can_edit_user, invalidate_user_sessions, is_primary_administrator, next_test_rut,
+from .accounts import (application_role, can_edit_user, invalidate_user_sessions, next_test_rut,
                        normalize_rut, rut_in_use, user_data, validate_name)
 from .access import is_administrator
 from .management_views import administrators_only
@@ -67,13 +67,21 @@ def manage_registration(request):
             if item.status != 'pending':
                 return error_response('La solicitud ya fue resuelta. Recargue la lista.', 409)
             if action == 'approve':
+                role = data.get('role', UserProfile.Role.VIEWER)
+                if role not in UserProfile.Role.values:
+                    raise ValidationError('Seleccione un rol válido para la cuenta.')
                 if rut_in_use(item.rut):
                     raise ValidationError('Ya existe un usuario con ese RUT.')
                 user = get_user_model().objects.create(username=f'cuenta_{uuid4().hex}', first_name=item.first_name,
-                                                       last_name=item.last_name, password=item.password_hash)
-                UserProfile.objects.create(user=user, rut=item.rut, role='viewer')
+                                                       last_name=item.last_name, password=item.password_hash,
+                                                       is_staff=role == UserProfile.Role.ADMINISTRATOR)
+                UserProfile.objects.create(user=user, rut=item.rut, role=role)
+                if role == UserProfile.Role.ADMINISTRATOR:
+                    user.user_permissions.add(Permission.objects.get(
+                        content_type__app_label='mobileApp', codename='administer_application'))
             item.delete()
-        return JsonResponse({'deleted': True, 'message': 'Cuenta creada como espectador.' if action == 'approve' else 'Solicitud eliminada.'})
+        message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
+        return JsonResponse({'deleted': True, 'message': message})
     except (ValidationError, IntegrityError) as exc:
         return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT.')
 
@@ -120,8 +128,6 @@ def manage_user(request):
                 raise ValidationError('Seleccione un rol válido.')
             if profile.is_primary_administrator and role != 'administrator':
                 raise ValidationError('El administrador principal debe conservar su rol de administrador.')
-            if role == 'administrator' and previous_role != 'administrator' and not is_primary_administrator(request.user):
-                return error_response('Solo el administrador principal puede crear u otorgar el rol de administrador.', 403)
             if rut_in_use(rut, exclude_user=user.pk):
                 raise ValidationError('Ya existe un usuario con ese RUT.')
             if RegistrationRequest.objects.filter(rut=rut, status='pending').exists() and rut != profile.rut:

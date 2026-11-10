@@ -109,13 +109,6 @@ def check_browser(url, directory):
             visitor = visitor_context.new_page()
             visitor.on('pageerror', lambda error: errors.append(str(error)))
             visitor.route('**/api/projects/cloud/', lambda route: route.fulfill(json={'plans': []}))
-            request_id = register(visitor, 'Camila', 'Fuentes', '12345678-5')
-            with visitor.expect_response('**/api/auth/login/') as denied:
-                visitor.locator('#usernameInput').fill('12345678-5')
-                visitor.locator('#passwordInput').fill(PASSWORD)
-                visitor.locator('#btnLogin').click()
-            assert denied.value.status == 401
-
             admin_context = browser.new_context(viewport={'width': 1365, 'height': 900})
             admin = admin_context.new_page()
             admin.on('pageerror', lambda error: errors.append(str(error)))
@@ -134,8 +127,35 @@ def check_browser(url, directory):
             admin.locator('[data-tab="users"]').click()
             expect(admin.locator('#userSearch')).to_have_value('')
             expect(admin.locator('#userRows .management-row')).to_have_count(4)
-            admin.locator('[data-tab="requests"]').click()
+
+            # The panel is already open when another browser submits a request.
+            request_id = register(visitor, 'Camila', 'Fuentes', '12345678-5')
+            with visitor.expect_response('**/api/auth/login/') as denied:
+                visitor.locator('#usernameInput').fill('12345678-5')
+                visitor.locator('#passwordInput').fill(PASSWORD)
+                visitor.locator('#btnLogin').click()
+            assert denied.value.status == 401
+            with admin.expect_response('**/api/administration/', timeout=3000):
+                admin.locator('[data-tab="requests"]').click()
             row = admin.locator('#requestRows .request-row').filter(has_text='Camila Fuentes')
+            expect(row).to_be_visible()
+            expect(admin.locator('#pendingCount')).to_have_text('1')
+            role_choice = row.locator('select[data-request-role]')
+            role_choice.select_option('worker')
+            with admin.expect_response('**/api/administration/'):
+                admin.locator('#refreshRequests').click()
+            expect(role_choice).to_have_value('worker')
+            role_choice.select_option('viewer')
+
+            # A failed refresh is visible and leaves confirmed pending data intact.
+            admin.route('**/api/administration/', lambda route: route.fulfill(status=503, json={'error': 'Conexión interrumpida.'}))
+            admin.locator('#refreshRequests').click()
+            expect(admin.locator('#requestRefreshStatus')).to_contain_text('No se pudieron actualizar')
+            expect(row).to_be_visible()
+            admin.unroute('**/api/administration/')
+            with admin.expect_response('**/api/administration/'):
+                admin.evaluate("window.dispatchEvent(new Event('online'))")
+            expect(admin.locator('#requestRefreshStatus')).to_contain_text('Solicitudes actualizadas')
             with admin.expect_response('**/api/administration/requests/') as approved:
                 row.locator('[data-action="approve"]').click()
             assert approved.value.status == 200, approved.value.text()
@@ -164,8 +184,8 @@ def check_browser(url, directory):
             rejected = rejected_context.new_page()
             rejected.on('pageerror', lambda error: errors.append(str(error)))
             rejected_id = register(rejected, 'Diego', 'Soto', '11111111-1')
-            admin.reload()
             rejected_row = admin.locator('#requestRows .request-row').filter(has_text='Diego Soto')
+            expect(rejected_row).to_be_visible(timeout=10000)
             rejected_row.locator('[data-action="reject"]').click()
             expect(admin.locator('#managementConfirm')).to_be_visible()
             expect(admin.locator('#managementConfirmTitle')).to_have_text('¿Seguro que desea eliminar esta solicitud?')
@@ -180,7 +200,6 @@ def check_browser(url, directory):
             assert post(admin, '/api/administration/requests/', {'id': rejected_id, 'action': 'reject'}).status == 404
             admin.reload()
             expect(admin.locator('#requestRows')).to_contain_text('No hay solicitudes pendientes.')
-            rejected_context.close()
             print('PASS: users tab shows every account; approved and deleted requests disappear without history', flush=True)
 
             # The user list searches names and changes an existing account's role.
@@ -280,8 +299,35 @@ def check_browser(url, directory):
             assert post(visitor, '/api/administration/users/', {'id': primary_id, 'action': 'delete'}).status == 403
             worker_id = next(user['id'] for user in management(visitor)['users'] if user['username'] == 'camilo')
             select_user(visitor, 'camilo')
-            expect(visitor.locator('#userRole option[value="administrator"]')).to_be_disabled()
-            assert post(visitor, '/api/administration/users/', {'id': worker_id, 'role': 'administrator'}).status == 403
+            expect(visitor.locator('#userRole option[value="administrator"]')).to_be_enabled()
+            visitor.locator('#userRut').fill('33333333-3')
+            granted = submit_role(visitor, 'administrator', confirm=True)
+            assert granted['user']['id'] == worker_id
+            assert granted['user']['role'] == 'administrator'
+
+            # An ordinary administrator can also review a new request and choose its role.
+            visitor.locator('[data-tab="requests"]').click()
+            new_request_id = register(rejected, 'Elena', 'Rojas', '22222222-2')
+            new_row = visitor.locator('#requestRows .request-row').filter(has_text='Elena Rojas')
+            expect(new_row).to_be_visible(timeout=10000)
+            assert visitor.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+            visitor.screenshot(path=str(ROOT / '.test-artifacts/registration-requests-mobile.png'), full_page=True)
+            new_row.locator('select[data-request-role]').select_option('administrator')
+            new_row.locator('[data-action="approve"]').click()
+            expect(visitor.locator('#managementConfirm')).to_be_visible()
+            visitor.locator('#managementConfirm [value="cancel"]').click()
+            assert any(item['id'] == new_request_id for item in management(visitor)['requests'])
+            new_row.locator('[data-action="approve"]').click()
+            expect(visitor.locator('#managementConfirm')).to_be_visible()
+            with visitor.expect_response('**/api/administration/requests/') as new_approval:
+                visitor.locator('#confirmManagementAction').click()
+            assert new_approval.value.status == 200, new_approval.value.text()
+            expect(new_row).to_have_count(0)
+            assert not any(item['id'] == new_request_id for item in management(visitor)['requests'])
+            login(rejected, '22222222-2')
+            assert rejected.evaluate('appState.user.role') == 'administrator'
+            expect(rejected.locator('#btnAdminister')).to_be_visible()
+            rejected_context.close()
             select_user(visitor, 'Camila')
             expect(visitor.locator('#deleteUser')).to_be_hidden()
             visitor.locator('#userLastName').fill('Fuentes Soto')
@@ -319,7 +365,7 @@ def check_browser(url, directory):
             assert deleted.value.status == 200
             assert not any(user['id'] == target_id for user in management(admin)['users'])
             assert not errors, errors
-            print('PASS: only admin can grant administrator roles and edit/delete other administrators; regular administrators retain self editing', flush=True)
+            print('PASS: requests arrive in open panels; every administrator can approve requests and grant all roles; primary account retains protection of other administrators', flush=True)
         finally:
             browser.close()
 

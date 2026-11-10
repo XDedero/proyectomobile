@@ -23,16 +23,18 @@
   </nav>
   <p id="managementStatus" role="status" aria-live="polite"></p>
   <section class="management-section" id="requestsPanel">
-    <div class="section-intro"><h2>Solicitudes de registro</h2><p>Aprueba una solicitud para habilitar la cuenta como espectador o elimínala. Solo se muestran las solicitudes pendientes.</p></div>
+    <div class="section-intro"><h2>Solicitudes de registro</h2><p>Todos los administradores pueden aceptar o eliminar solicitudes. Elige el rol que tendrá la cuenta al aceptarla. Solo se muestran las solicitudes pendientes.</p></div>
     <div class="management-card">
       <div class="section-toolbar mb-3">
         <h3 class="mb-0">Solicitudes pendientes</h3>
+        <button id="refreshRequests" class="btn btn-sm btn-outline-primary" type="button">Actualizar solicitudes</button>
       </div>
+      <p id="requestRefreshStatus" class="small text-secondary" role="status" aria-live="polite">Consultando solicitudes…</p>
       <div id="requestRows" class="management-rows" aria-live="polite"></div>
     </div>
   </section>
   <section class="management-section" id="usersPanel" hidden>
-    <div class="section-intro"><h2>Usuarios y permisos</h2><p>Solo admin, el administrador principal, puede otorgar el rol de administrador y modificar o eliminar otros administradores. Los demás administradores pueden editar su propia cuenta y gestionar trabajadores y espectadores. Las cuentas nuevas se crean al aprobar una solicitud.</p></div>
+    <div class="section-intro"><h2>Usuarios y permisos</h2><p>Todos los administradores pueden aprobar solicitudes y asignar los roles Espectador, Trabajador o Administrador a las cuentas. El administrador principal también puede modificar o eliminar otros administradores. Las cuentas nuevas se crean al aprobar una solicitud.</p></div>
     <div class="management-grid">
       <div class="management-card">
         <label for="userSearch" class="form-label fw-semibold">Buscar usuario por nombre</label>

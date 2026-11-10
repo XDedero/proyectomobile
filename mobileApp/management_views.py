@@ -42,10 +42,10 @@ def category_data(category):
 @require_GET
 @administrators_only
 def management_data(request):
-    from .accounts import can_edit_user, is_primary_administrator, user_data, registration_data
+    from .accounts import can_edit_user, user_data, registration_data
     from .models import RegistrationRequest
     return JsonResponse({
-        'can_manage_administrators': is_primary_administrator(request.user),
+        'can_manage_administrators': is_administrator(request.user),
         'users': [{**user_data(u), 'can_edit': can_edit_user(request.user, u),
                    'can_delete': u.pk != request.user.pk and can_edit_user(request.user, u)}
                   for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
