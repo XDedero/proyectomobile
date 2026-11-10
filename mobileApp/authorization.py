@@ -9,8 +9,28 @@ from django.views.decorators.cache import never_cache
 
 
 def is_administrator(user):
+    profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
+    if profile is not None and profile.role != 'administrator':
+        return False
     return bool(user.is_authenticated and user.is_active and (
         user.is_superuser or (user.is_staff and user.has_perm('mobileApp.administer_application'))))
+
+
+def application_profile(user):
+    return getattr(user, 'app_profile', None) if user.is_authenticated else None
+
+
+def owns_plan(user, plan):
+    if getattr(plan, 'owner_username', ''):
+        return plan.owner_username == user.get_username()
+    if getattr(plan, 'cloud_origin', ''):
+        return False
+    return plan.imported_by_id == user.pk
+
+
+def can_delete_plan(user, plan):
+    return bool(user.is_authenticated and user.is_active and (
+        is_administrator(user) or (can_edit_plan(user, plan) and owns_plan(user, plan))))
 
 
 def roles_for(user):
@@ -27,12 +47,22 @@ def can_edit_plan(user, plan):
         return False
     if is_administrator(user):
         return True
+    profile = application_profile(user)
+    if profile is not None:
+        return profile.role == 'worker'
     if getattr(plan, 'cloud_origin', ''):
         return bool(plan.owner_username and plan.owner_username == user.get_username())
     return plan.imported_by_id == user.pk
 
 
 def can_access_plan(user, plan, action='can_view'):
+    if not user.is_authenticated or not user.is_active:
+        return False
+    profile = application_profile(user)
+    if profile is not None:
+        if profile.role == 'viewer' and plan.imported_by_id != user.pk and not getattr(plan, 'cloud_origin', '') and not hasattr(plan, 'saved_project'):
+            return False
+        return action != 'can_export' or profile.role != 'viewer'
     if can_edit_plan(user, plan):
         return True
     roles = roles_for(user)
@@ -43,6 +73,14 @@ def can_access_plan(user, plan, action='can_view'):
 
 
 def visible_plans(user, queryset):
+    profile = application_profile(user)
+    if profile is not None:
+        if profile.role == 'viewer':
+            condition = Q(saved_project__isnull=False) | Q(imported_by=user)
+            if queryset.model._meta.model_name == 'pdfplan':
+                condition |= ~Q(cloud_origin='')
+            return queryset.filter(condition)
+        return queryset
     if is_administrator(user):
         return queryset
     roles = roles_for(user)
@@ -62,8 +100,13 @@ def workbook_plans(document):
 
 
 def can_edit_workbook(user, document):
+    if not user.is_authenticated or not user.is_active:
+        return False
     if is_administrator(user):
         return True
+    profile = application_profile(user)
+    if profile is not None:
+        return profile.role == 'worker'
     plans = workbook_plans(document)
     return all(can_edit_plan(user, plan) for plan in plans) if plans else document.updated_by_id == user.pk
 
@@ -72,15 +115,23 @@ def capabilities(user, plan=None):
     active = bool(user.is_authenticated and user.is_active)
     admin = is_administrator(user)
     create = active
-    if active and not admin:
+    profile = application_profile(user)
+    if profile is not None:
+        create = active and profile.role in ('worker', 'administrator')
+    elif active and not admin:
         roles = roles_for(user)
         create = not has_role_configuration(user) or roles.filter(can_create=True).exists()
-    edit = active and (plan is None or can_edit_plan(user, plan))
+    edit = active and (create if plan is None else can_edit_plan(user, plan))
     result = {key: edit for key in (
         'can_assign', 'can_change_excel', 'can_save_plan', 'can_save_pdf_plan',
         'can_change_plan', 'can_delete_plan', 'can_change_pdf_plan', 'can_delete_pdf_plan',
         'can_delete_cad_marker', 'can_delete_pdf_marker')}
-    result.update(can_view=active, can_import=bool(create), can_administer=admin)
+    delete = active and (edit if plan is None else can_delete_plan(user, plan))
+    result.update(can_delete_plan=delete, can_delete_pdf_plan=delete,
+                  can_view=active, can_import=active if profile is not None else bool(create),
+                  can_create=bool(create), can_administer=admin,
+                  can_create_category=admin or bool(profile and profile.role == 'worker' and active),
+                  can_history=bool(create), can_export=bool(create))
     if plan is not None:
         result['can_export'] = can_access_plan(user, plan, 'can_export')
     return result
@@ -116,8 +167,14 @@ def api_permissions(*permissions):
                 return JsonResponse({'error': 'No tiene acceso al Excel de este plano.'}, status=403)
             mutation = request.method not in ('GET', 'HEAD', 'OPTIONS')
             local_action = view.__name__ in ('clear_local_project', 'refresh_project')
+            profile = application_profile(request.user)
+            if mutation and profile is not None and profile.role == 'viewer' and view.__name__ not in (
+                    'plan_import', 'import_pdf', 'upload_project', 'open_cloud_project', 'refresh_project', 'clear_local_project'):
+                return JsonResponse({'error': 'El espectador solo puede consultar e importar planos.'}, status=403)
+            if mutation and plan is not None and view.__name__ in ('delete_plan', 'delete_pdf_plan') and not can_delete_plan(request.user, plan):
+                return JsonResponse({'error': 'Solo puede eliminar sus propios planos. Un administrador puede eliminar cualquier plano.'}, status=403)
             if mutation and plan is not None and not local_action and not can_edit_plan(request.user, plan):
-                return JsonResponse({'error': 'Solo el creador del plano o un administrador puede modificarlo y guardarlo.'}, status=403)
+                return JsonResponse({'error': 'Su rol no permite modificar o guardar este plano.'}, status=403)
             if mutation and document is not None and not can_edit_workbook(request.user, document):
                 return JsonResponse({'error': 'Solo el creador del plano o un administrador puede modificar su Excel.'}, status=403)
             if view.__name__ in ('plan_import', 'import_pdf', 'upload_project') and not capabilities(request.user)['can_import']:
@@ -125,6 +182,8 @@ def api_permissions(*permissions):
             if plan is not None and view.__name__ == 'download_project' and not can_access_plan(request.user, plan, 'can_export'):
                 return JsonResponse({'error': 'Su rol no permite exportar este plano.'}, status=403)
             if view.__name__ in ('workbook_download', 'workbook_csv', 'motor_excel_download'):
+                if profile is not None and not capabilities(request.user)['can_export']:
+                    return JsonResponse({'error': 'El espectador solo puede consultar los Excel.'}, status=403)
                 exports = workbook_plans(document) if document is not None else ([plan] if plan is not None else [])
                 if any(not can_access_plan(request.user, p, 'can_export') for p in exports):
                     return JsonResponse({'error': 'Su rol no permite exportar el Excel de este plano.'}, status=403)

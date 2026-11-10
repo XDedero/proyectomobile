@@ -7,6 +7,7 @@ from . import piece_views
 from . import button_views
 from . import management_views
 from . import sector_views
+from . import accounts_views
 
 urlpatterns = [
     path('api/projects/<str:kind>/<int:plan_id>/sectors/', sector_views.plan_sectors, name='plan_sectors'),
@@ -20,12 +21,15 @@ urlpatterns = [
     path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
     path('api/administration/', management_views.management_data, name='management_data'),
+    path('api/administration/requests/', accounts_views.manage_registration, name='manage_registration'),
+    path('api/administration/users/', accounts_views.manage_user, name='manage_user'),
     path('api/administration/roles/', management_views.manage_role, name='manage_role'),
     path('api/administration/groups/', management_views.manage_role_group, name='manage_role_group'),
     path('api/administration/categories/', management_views.manage_category, name='manage_category'),
     path('', views.index, name='index'),
     path('api/auth/session/', views.auth_session, name='auth_session'),
     path('api/auth/login/', views.auth_login, name='auth_login'),
+    path('api/auth/register/', accounts_views.request_registration, name='request_registration'),
     path('api/auth/logout/', views.auth_logout, name='auth_logout'),
     path('api/buttons/<str:kind>/<int:button_id>/details/', button_views.button_details, name='button_details'),
     path('api/plans/', views.plans, name='plans'),

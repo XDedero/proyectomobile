@@ -438,6 +438,15 @@ class PdfPlanViewer {
             button.dataset.hoverName = label;
             button.title = `${label} · ${marker.workbook ? marker.workbook.name : 'Sin Excel asignado'}`;
             button.setAttribute('aria-label', button.title);
+            const highlightArea = (className, highlighted) => {
+                this.layer.querySelector(`[data-area-marker-id="${marker.id}"]`)?.classList.toggle(className, highlighted);
+            };
+            button.addEventListener('pointerenter', event => {
+                if (event.pointerType !== 'touch') highlightArea('hovered', true);
+            });
+            button.addEventListener('pointerleave', () => highlightArea('hovered', false));
+            button.addEventListener('focus', () => highlightArea('focused', button.matches(':focus-visible')));
+            button.addEventListener('blur', () => highlightArea('focused', false));
             this.positionButton(button, marker.x, marker.y);
             this.layer.append(button);
             this.buttons.set(Number(marker.id), button);

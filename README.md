@@ -58,7 +58,7 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 Los sectores son opcionales y se guardan dentro del propio plano, con sus mismos permisos de edición. Se incluyen al guardar, exportar e importar proyectos y al transportar su configuración en el Excel de nube. Al eliminar un plano desaparecen sus sectores; eliminar solo un sector conserva los botones. No existe una biblioteca independiente de sectores. La migración `0025` añade estos datos a los planos existentes sin exigir sectores.
 
-**Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Aparece para el creador del plano y para los administradores. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
+**Guardar plano**, situado junto al visor PDF/DXF y en la barra de acciones de pantalla completa, guarda un proyecto con el archivo original, todos sus botones, las fichas asociadas y el listado del plano. Está disponible para trabajadores y administradores. El indicador muestra Sin guardar, Cambios pendientes o Guardado para el trabajo de la sesión actual.
 
 **Ver planos guardados** en el menú principal, el menú de usuario y el módulo PDF abre una biblioteca común. Cada registro muestra **PDF** o **DXF** en pequeño. Volver a guardar el mismo plano actualiza su registro; no crea otra copia. Los planos existentes antes de esta actualización se conservan mediante la migración `0006`.
 
@@ -95,7 +95,7 @@ Al importar otro libro se conservan en el libro resultante las fichas anteriores
 
 **Ver listados** abre los listados en el editor; su selector de hojas contiene todos los listados del plano. El botón **Listados** del editor permite administrarlos. **+ Fila** y **+ Columna** conservan la estructura y los estilos de las plantillas. Se eliminó la opción Reutilizar un Excel asignado: los listados pertenecen al propio libro del plano.
 
-Los listados del plano pueden ser modificados y eliminados por el creador del plano o por un administrador. La protección de un original se conserva si se importa otro libro y el listado anterior queda como hoja adicional.
+Los listados del plano pueden ser modificados y eliminados por trabajadores y administradores. La protección de un original se conserva si se importa otro libro y el listado anterior queda como hoja adicional.
 
 ## Motores guardados
 
@@ -105,7 +105,7 @@ La biblioteca permite buscar por nombre, consultar una ficha e incorporarla al b
 
 ## Transportar un proyecto
 
-**Exportar proyecto** descarga un archivo **.planproj**. Si el usuario tiene permiso de guardar, actualiza primero su copia del proyecto; un lector puede exportar el trabajo abierto sin crear una copia en la biblioteca. Es un ZIP versionado que reúne:
+**Exportar proyecto** permite a trabajadores y administradores descargar un archivo **.planproj**, actualizando primero su copia guardada cuando corresponde. Es un ZIP versionado que reúne:
 
 - El PDF o DXF original.
 - Las páginas y posiciones de los botones.
@@ -118,15 +118,27 @@ En otra instalación, use **Importar PDF configurable → Importar proyecto**. S
 
 ## Usuarios, roles y categorías
 
-El creador de un plano puede guardarlo y modificar sus botones, fichas, listados y Excel sin necesitar permisos globales adicionales. Un administrador puede hacerlo en cualquier plano. Los demás usuarios solo pueden consultar los planos compartidos autorizados; el servidor bloquea también las solicitudes directas de modificación, asignación, guardado y eliminación.
+**Solicitar registro**, en el acceso, pide nombre, apellido, RUT y contraseña. El RUT se ingresa sin puntos y con guion, por ejemplo `12345678-5`, y se valida su dígito verificador. Se aplican las reglas de contraseña de Django: al menos ocho caracteres, evitando claves comunes, solo números y semejanzas con datos personales. El servidor evita cuentas y solicitudes pendientes duplicadas. La cuenta no existe hasta que un administrador aprueba la solicitud; entonces se inicia sesión con el RUT y la contraseña solicitada.
 
 **Administrar** abre `/administracion/`, un panel adaptable a celulares con tres secciones:
 
-- **Roles de planos:** crear y editar roles, permitir consultar, exportar o crear planos y limitar el acceso a planos específicos. También permite asignar usuarios directamente.
-- **Grupos de usuarios:** reunir usuarios y asignar uno o más roles al grupo. Los permisos de sus roles se suman.
-- **Categorías y Excel:** crear categorías adicionales a Motores y conservar varios Excel permanentes por categoría, con una hoja seleccionada. Al añadir un botón aparece la opción de utilizar esos Excel; cada botón recibe una copia y conserva intacta la plantilla.
+- **Solicitudes:** muestra únicamente las pendientes. El tick verde crea la cuenta y retira la solicitud; la X roja pide confirmación y elimina definitivamente la solicitud. No se almacena un historial de solicitudes resueltas. La migración `0029` retira los registros resueltos de versiones anteriores.
+- **Usuarios:** al abrir la pestaña se muestran y actualizan todas las cuentas existentes. Permite buscar por nombre, apellido o RUT, editar datos y contraseña, cambiar el rol y eliminar con confirmación. Solo `admin`, el **administrador principal**, puede crear administradores mediante la asignación del rol, modificar sus datos y eliminarlos. Los administradores normales pueden editarse a sí mismos y gestionar trabajadores y espectadores. Las restricciones se aplican también en Django Admin. Otorgar administración pide una confirmación adicional. Cambiar el rol o la contraseña invalida las sesiones de esa cuenta: debe volver a iniciar sesión.
+- **Categorías:** crear, consultar, editar y eliminar categorías y asociar Excel permanentes con una hoja seleccionada. Cada botón recibe una copia editable de la plantilla.
 
-Un usuario sin roles configurados conserva el acceso de consulta e importación de la instalación. Un grupo sin roles no concede acceso compartido ni creación. El creador siempre conserva el control de sus propios planos. Los roles nunca conceden edición de planos ajenos ni administración de usuarios. Solo son administradores las cuentas activas de superusuario o las cuentas de personal con el permiso `mobileApp.administer_application`; marcar únicamente «personal» no basta. El panel y las páginas de usuarios y grupos de Django aplican la misma restricción.
+Los roles de la aplicación son:
+
+- **Espectador:** rol inicial de las solicitudes aprobadas. Consulta los planos guardados e importa archivos para verlos; no puede editar, guardar, exportar, eliminar ni crear categorías y no tiene historial propio.
+- **Trabajador:** crea y modifica planos, botones, radios, sectores, Excel y piezas, guarda en Drive y crea categorías desde Añadir botón o Añadir pieza. Solo elimina planos propios; no administra usuarios ni modifica o elimina categorías existentes.
+- **Administrador:** gestiona solicitudes, usuarios y categorías y puede editar o eliminar cualquier plano.
+
+La migración `0030_primary_administrator` configura la cuenta existente `admin` como administrador principal sin cambiar su contraseña. Una restricción de la base de datos impide que otra cuenta tenga simultáneamente ese privilegio y exige que la cuenta principal mantenga el rol de administrador. No existe una opción en el panel para duplicar o transferir ese permiso. `admin` puede editar sus propios datos y contraseña; no se permite eliminarlo ni quitarle su rol. En instalaciones nuevas, `init_admin.py` asigna este privilegio únicamente a la cuenta `admin` configurada mediante `DJANGO_SUPERUSER_USERNAME=admin` y la contraseña del entorno.
+
+**Historial de mis planos**, en el menú principal y el menú de usuario de trabajadores y administradores, reúne únicamente los planos que esa persona creó y guardó, con fecha, apertura, edición y eliminación con confirmación. Guardar cambios en un plano ajeno no cambia su autor ni lo incorpora al historial propio. Los permisos se verifican en cada endpoint, además de ocultar las acciones en la interfaz.
+
+La migración `0028_registration_accounts` conserva las cuentas, contraseñas y planos existentes; asigna a cada cuenta un RUT de prueba válido y único (marcado en el panel). Los administradores conservan su rol y las demás cuentas existentes pasan a trabajador. Los nombres de acceso anteriores siguen funcionando. Las cuentas nuevas utilizan un identificador interno estable para conservar la autoría aunque se cambie su RUT. Los roles y grupos antiguos se conservan para compatibilidad, pero el panel utiliza los tres roles anteriores para las cuentas con perfil.
+
+La opacidad del radio acompaña a la del botón en PDF y DXF: al volver el control al 100 %, ambos recuperan ese nivel. Seleccionar el botón o pasar sobre él también muestra el botón y su radio al 100 %.
 
 ## Actualizaciones pendientes de planos
 
@@ -145,6 +157,8 @@ La detección entre navegadores de la misma instalación funciona tanto con PDF 
 .\.venv\Scripts\python.exe manage.py test mobileApp --noinput
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe scripts/management_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/registration_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/annotation_opacity_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/sectors_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/plan_visuals_browser_smoke.py

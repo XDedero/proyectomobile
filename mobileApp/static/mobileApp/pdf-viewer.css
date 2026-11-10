@@ -58,6 +58,7 @@
     pointer-events: auto;
     cursor: pointer;
     touch-action: none;
+    z-index: 2;
 }
 .pdf-plan-marker.has-workbook { background: #4ade80; }
 .pdf-plan-marker.selected { background: #60a5fa; outline: 3px solid #1d4ed8; z-index: 3; }

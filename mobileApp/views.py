@@ -42,10 +42,15 @@ def index(request):
 
 def session_data(request):
     user = request.user
+    from .accounts import application_role
+    profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
     return {
         'user': {
             'id': user.pk, 'username': user.get_username(),
             'display_name': user.get_full_name() or user.get_username(),
+            'role': application_role(user),
+            'primary_administrator': bool(profile and profile.is_primary_administrator),
+            'rut': profile.rut if profile else '',
             'permissions': capabilities(user),
         } if user.is_authenticated and user.is_active else None,
         'csrf_token': get_token(request),
@@ -68,6 +73,16 @@ def auth_login(request):
         return JsonResponse({'error': 'Solicitud de acceso no válida.'}, status=400)
     if not isinstance(data, dict) or not all(isinstance(data.get(key), str) for key in ('username', 'password')):
         return JsonResponse({'error': 'Ingrese su nombre de usuario y contraseña.'}, status=400)
+    from .accounts import normalize_rut
+    from .models import UserProfile
+    try:
+        rut = normalize_rut(data['username'])
+    except ValidationError:
+        pass
+    else:
+        profile = UserProfile.objects.select_related('user').filter(rut=rut).first()
+        if profile:
+            data['username'] = profile.user.username
     form = AuthenticationForm(request, data=data)
     if not form.is_valid():
         return JsonResponse({'error': 'Usuario o contraseña incorrectos, o cuenta inactiva.'}, status=401)

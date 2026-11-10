@@ -70,6 +70,13 @@ html, body {
     margin-top: 8px;
     margin-bottom: 18px;
 }
+.registration-name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.registration-name-fields > div { min-width: 0; }
+#registrationPanel[hidden], #loginForm[hidden] { display: none !important; }
+#registrationStatus { padding: .75rem; border-radius: 10px; }
+#registrationStatus.text-success { background: #e2f4e9; }
+#registrationStatus.text-danger { background: #fce9ec; }
+@media (max-width: 360px) { .registration-name-fields { grid-template-columns: 1fr; gap: 0; } }
 .brand-badge {
     width: 60px;
     height: 60px;

@@ -1,5 +1,6 @@
 """Administration of plan roles, user groups and reusable category workbooks."""
 from functools import wraps
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -26,7 +27,11 @@ def administrators_only(view):
 @require_GET
 @administrators_only
 def management_panel(request):
-    return render(request, 'mobileApp/management.html')
+    directory = Path(__file__).resolve().parent
+    files = [directory / 'templates/mobileApp/management.html',
+             directory / 'static/mobileApp/management.js', directory / 'static/mobileApp/management.css']
+    version = max(path.stat().st_mtime_ns for path in files)
+    return render(request, 'mobileApp/management.html', {'asset_version': str(version)})
 
 
 def category_data(category):
@@ -37,9 +42,14 @@ def category_data(category):
 @require_GET
 @administrators_only
 def management_data(request):
+    from .accounts import can_edit_user, is_primary_administrator, user_data, registration_data
+    from .models import RegistrationRequest
     return JsonResponse({
-        'users': [{'id': u.pk, 'name': u.get_full_name() or u.username, 'username': u.username,
-                   'administrator': is_administrator(u)} for u in get_user_model().objects.filter(is_active=True).order_by('username')],
+        'can_manage_administrators': is_primary_administrator(request.user),
+        'users': [{**user_data(u), 'can_edit': can_edit_user(request.user, u),
+                   'can_delete': u.pk != request.user.pk and can_edit_user(request.user, u)}
+                  for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
+        'requests': [registration_data(item) for item in RegistrationRequest.objects.filter(status='pending')],
         'roles': [{'id': r.pk, 'name': r.name, 'description': r.description,
                    **{key: getattr(r, key) for key in ('can_view', 'can_export', 'can_create', 'all_plans')},
                    'users': list(r.users.values_list('pk', flat=True)),
@@ -132,10 +142,14 @@ def manage_role_group(request):
 
 
 @require_POST
-@administrators_only
+@api_permissions()
 def manage_category(request):
     try:
         data = request.POST if request.FILES else json_body(request)
+        if not is_administrator(request.user):
+            from .authorization import capabilities
+            if not capabilities(request.user)['can_create_category'] or data.get('id') or data.get('action') not in (None, '', 'create'):
+                return error_response('Solo los administradores pueden modificar o eliminar categorías. Los trabajadores pueden crearlas.', 403)
         with transaction.atomic():
             category = get_object_or_404(ButtonCategory, pk=data['id']) if data.get('id') else ButtonCategory()
             if data.get('action') == 'delete':

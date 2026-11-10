@@ -21,6 +21,66 @@ def new_cloud_key():
     return f'project_{uuid4().hex}'
 
 
+class UserProfile(models.Model):
+    class Role(models.TextChoices):
+        VIEWER = 'viewer', 'Espectador'
+        WORKER = 'worker', 'Trabajador'
+        ADMINISTRATOR = 'administrator', 'Administrador'
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='app_profile')
+    rut = models.CharField(max_length=10, unique=True)
+    rut_is_test = models.BooleanField(default=False)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.VIEWER)
+    is_primary_administrator = models.BooleanField(default=False, editable=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['is_primary_administrator'], condition=models.Q(is_primary_administrator=True),
+                                    name='one_primary_administrator'),
+            models.CheckConstraint(condition=models.Q(is_primary_administrator=False) | models.Q(role='administrator'),
+                                   name='primary_must_be_administrator'),
+        ]
+
+    def clean(self):
+        from .accounts import normalize_rut
+        super().clean()
+        self.rut = normalize_rut(self.rut)
+
+    def save(self, *args, **kwargs):
+        from .accounts import normalize_rut
+        self.rut = normalize_rut(self.rut)
+        return super().save(*args, **kwargs)
+
+
+class RegistrationRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pendiente'
+        APPROVED = 'approved', 'Aceptada'
+        REJECTED = 'rejected', 'Eliminada'
+
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    rut = models.CharField(max_length=10)
+    password_hash = models.CharField(max_length=128, blank=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.SET_NULL, related_name='reviewed_registrations')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name='registration_requests')
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        constraints = [models.UniqueConstraint(fields=['rut'], condition=models.Q(status='pending'),
+                                               name='unique_pending_registration_rut')]
+
+    def save(self, *args, **kwargs):
+        from .accounts import normalize_rut
+        self.rut = normalize_rut(self.rut)
+        return super().save(*args, **kwargs)
+
+
 class Plan(models.Model):
     sectors = models.JSONField(default=list, blank=True)
     display_settings = models.JSONField(default=dict, blank=True)

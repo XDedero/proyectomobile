@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import load_workbook
 
-from .access import api_permissions, capabilities, can_access_plan, can_edit_plan, is_administrator
+from .access import api_permissions, capabilities, can_access_plan, can_edit_plan, can_delete_plan, is_administrator
 from .models import Motor, PdfPlan, Plan, SavedProject, WorkbookDocument
 from .pdf_views import error_response, json_body, pdf_data, uploaded_document, workbook_data
 from .project_service import export_project, import_project, plan_model
@@ -127,6 +127,9 @@ def saved_data(saved, user):
 @require_GET
 @api_permissions()
 def saved_projects(request):
+    mine = request.GET.get('mine') == '1'
+    if mine and not capabilities(request.user)['can_history']:
+        return error_response('El espectador no tiene historial de planos creados.', 403)
     from .terminal_monitor import retry_cloud_registrations
     retry_cloud_registrations()
     projects = SavedProject.objects.select_related('cad_plan', 'pdf_plan').only(
@@ -135,6 +138,13 @@ def saved_projects(request):
         'cad_plan__id', 'cad_plan__name', 'cad_plan__cloud_key', 'cad_plan__imported_by_id',
         'pdf_plan__id', 'pdf_plan__name', 'pdf_plan__cloud_key', 'pdf_plan__cloud_origin', 'pdf_plan__imported_by_id',
     )
+    if mine:
+        from django.db.models import Q
+        username = request.user.get_username()
+        projects = projects.filter(
+            Q(cad_plan__owner_username=username) | Q(pdf_plan__owner_username=username) |
+            Q(cad_plan__imported_by=request.user, cad_plan__owner_username='') |
+            Q(pdf_plan__imported_by=request.user, pdf_plan__owner_username='', pdf_plan__cloud_origin=''))
     availability = {}
     try:
         for kind, model in (('pdf', PdfPlan), ('dxf', Plan)):
@@ -150,7 +160,7 @@ def saved_projects(request):
     # intentionally absent from the library until the user saves it.
     return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects
                                   if can_access_plan(request.user, saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan)],
-                         'cached': cached_projects(request.user), 'availability': availability})
+                         'cached': [] if mine else cached_projects(request.user), 'availability': availability})
 
 
 def cached_projects(user):
@@ -161,7 +171,10 @@ def cached_projects(user):
 
 
 def can_clear_local(kind, plan, user):
-    return can_edit_plan(user, plan) or (
+    from .authorization import application_profile
+    if application_profile(user) is not None:
+        return can_delete_plan(user, plan)
+    return can_delete_plan(user, plan) or (
         kind == 'pdf' and bool(plan.cloud_origin) and plan.imported_by_id == user.pk and not hasattr(plan, 'saved_project')
     )
 
@@ -209,7 +222,9 @@ def cloud_projects(request):
 
 
 def can_open_cloud(user, project):
-    from .authorization import roles_for, has_role_configuration
+    from .authorization import application_profile, roles_for, has_role_configuration
+    if application_profile(user) is not None:
+        return True
     if is_administrator(user):
         return True
     roles = roles_for(user)
@@ -226,9 +241,9 @@ def open_cloud_project(request, pdf_id):
     from .cloud_projects import CloudUnavailable, open_cloud_project as restore, list_cloud_projects
 
     try:
-        from .authorization import roles_for, has_role_configuration
+        from .authorization import application_profile, roles_for, has_role_configuration
         roles = roles_for(request.user)
-        if has_role_configuration(request.user) and not is_administrator(request.user) and not roles.filter(can_view=True, all_plans=True).exists():
+        if application_profile(request.user) is None and has_role_configuration(request.user) and not is_administrator(request.user) and not roles.filter(can_view=True, all_plans=True).exists():
             project = next((p for p in list_cloud_projects() if p['id'] == pdf_id), None)
             if not project or not can_open_cloud(request.user, project):
                 return error_response('Su rol no permite abrir este plano de la nube.', 403)
@@ -252,12 +267,17 @@ def open_cloud_project(request, pdf_id):
 def delete_cloud_project(request, pdf_id):
     from .cloud_projects import CloudUnavailable, drive_command, list_cloud_projects, project_title, supabase_query
 
-    if not is_administrator(request.user):
-        return error_response('No tiene permiso para eliminar el proyecto de la nube.', status=403)
     try:
         project = next((item for item in list_cloud_projects() if item['id'] == pdf_id), None)
         if not project:
             return error_response('El proyecto ya no está en la nube.', status=404)
+        if not is_administrator(request.user):
+            from django.db.models import Q
+            from .authorization import application_profile
+            profile = application_profile(request.user)
+            originals = PdfPlan.objects.filter(Q(cloud_origin=pdf_id) | Q(cloud_key=project.get('projectKey')))
+            if profile is None or profile.role != 'worker' or not any(can_delete_plan(request.user, plan) for plan in originals):
+                return error_response('Solo puede eliminar de la nube los proyectos que usted creó.', status=403)
         excel_id = project['excelId']
         if not all(value and all(char.isascii() and (char.isalnum() or char in '_-') for char in value) for value in (pdf_id, excel_id)):
             return error_response('El identificador del archivo en la nube no es válido.')

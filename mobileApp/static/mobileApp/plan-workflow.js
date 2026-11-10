@@ -35,6 +35,7 @@
         btnRemovePlan.disabled = value;
         btnImportAutoCAD.innerHTML = value ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Procesando…' : originalImportLabel;
         if (message) status.textContent = message;
+        updateActions();
         window.projectWorkspace?.update();
     }
 

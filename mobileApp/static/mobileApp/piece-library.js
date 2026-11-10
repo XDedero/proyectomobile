@@ -121,6 +121,7 @@
             const data = await request(`/api/piece-library/?q=${encodeURIComponent(byId('savedMotorsSearch').value)}&offset=${offset}`);
             if (version !== epoch || !appState.user) return;
             canManage = data.can_manage === true;
+            byId('btnImportMotorRecord').hidden = !canManage;
             for (const record of data.pieces) list.append(card(record));
             nextOffset = data.next_offset;
             byId('btnMoreSavedMotors').hidden = nextOffset === null;
@@ -238,6 +239,38 @@
       <button type="button" id="pieceCreateBlank" class="btn btn-outline-success">Formato predeterminado</button> <button type="button" id="pieceCreateImport" class="btn btn-success">Importar Excel o CSV</button>
       <p id="pieceCreateStatus" class="small mt-2" role="status"></p></div></div></div>`;
     document.body.append(create); const createController = new bootstrap.Modal(create);
+    function categoryControls(select) {
+        if (!select) return;
+        const box = document.createElement('details');
+        box.className = 'border rounded p-2 mb-3';
+        box.hidden = true;
+        const summary = document.createElement('summary'); summary.textContent = 'Crear categoría';
+        const label = document.createElement('label'); label.textContent = 'Nombre de la categoría'; label.className = 'form-label small mt-2';
+        const input = document.createElement('input'); input.type = 'text'; input.maxLength = 80; input.className = 'form-control mb-2';
+        input.id = select.id + 'NewName'; label.htmlFor = input.id;
+        const save = document.createElement('button'); save.type = 'button'; save.className = 'btn btn-sm btn-success'; save.textContent = 'Crear categoría';
+        const feedback = document.createElement('p'); feedback.className = 'small mt-2 mb-0'; feedback.setAttribute('role', 'status');
+        box.append(summary, label, input, save, feedback); select.after(box);
+        const modal = select.closest('.modal');
+        modal?.addEventListener('show.bs.modal', () => {
+            box.hidden = !appState.user?.permissions?.can_create_category;
+            box.open = false; input.value = ''; feedback.textContent = '';
+        });
+        save.onclick = async () => {
+            if (!input.value.trim()) { feedback.textContent = 'Ingrese el nombre de la categoría.'; input.focus(); return; }
+            save.disabled = true;
+            try {
+                const category = await post('/api/administration/categories/', { name: input.value.trim() });
+                if (![...select.options].some(option => option.value === category.id)) select.append(new Option(category.name, category.id));
+                select.value = category.id; select.dispatchEvent(new Event('change'));
+                document.dispatchEvent(new CustomEvent('category:created', { detail: category }));
+                input.value = ''; feedback.textContent = 'Categoría creada.';
+            } catch (error) { feedback.textContent = error.message; }
+            finally { save.disabled = false; }
+        };
+    }
+    categoryControls(byId('pieceCreateCategory'));
+    categoryControls(byId('newButtonCategory'));
     async function fillCategories(select, selected) {
         const data = await request('/api/piece-library/categories/');
         select.replaceChildren(new Option('Seleccione una categoría',''));

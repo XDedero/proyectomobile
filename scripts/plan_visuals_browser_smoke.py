@@ -100,7 +100,7 @@ def check_browser(url, directory):
                 page.locator(f'#btn{prefix}Fullscreen').click()
                 expect(page.get_by_text('Vista de botones', exact=True)).to_have_count(0)
                 expect(page.locator('.plan-color-legend')).to_have_count(0)
-                expect(page.locator('.plan-display-dock input')).to_have_count(1)
+                expect(page.locator('.plan-display-dock input:visible')).to_have_count(1)
                 # Every preset can be selected and dragged in its first gesture.
                 for original in sectors:
                     drag(page, hit_point(page, original['id']), 18, 9)
@@ -142,9 +142,17 @@ def check_browser(url, directory):
                     if(a.kind==='pdf') pdfWorkflow.select(a.plan.markers[0].id);
                     else planWorkflow.select(a.plan.motors[0].id);
                 }''')
+                # Selection deliberately restores the highlighted button/radius
+                # to 100%; remove the highlight before checking full hiding.
+                page.evaluate('''()=>{
+                    if(projectWorkspace.active.kind==='pdf') pdfWorkflow.deselect();
+                    else planWorkflow.deselect();
+                    document.activeElement?.blur();
+                }''')
+                page.mouse.move(0, 0)
                 opacity(page, 0)
                 marker = page.locator('.pdf-plan-marker' if kind == 'pdf' else '.motor-target').first
-                expect(marker).to_be_hidden()
+                expect(marker).to_have_css('opacity', '0')
                 expect(page.locator('.plan-sectors-layer')).to_be_hidden()
                 page.screenshot(path=str(ROOT / f'.test-artifacts/{kind}-bare-plan.png'))
                 page.locator('#fullscreenSavePlan').click()
@@ -189,7 +197,7 @@ def check_browser(url, directory):
                         else:
                             expect(touch.locator('.sector-selectable')).to_have_count(0)
                         opacity(touch, 0)
-                        expect(touch.locator('.pdf-plan-marker')).to_be_hidden()
+                        expect(touch.locator('.pdf-plan-marker')).to_have_css('opacity', '0')
                         touch.screenshot(path=str(ROOT / f'.test-artifacts/opacity-mobile-{user}.png'))
                         mobile.close()
                     print('PASS: touch selection and read-only opacity on narrow mobile screens', flush=True)

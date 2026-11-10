@@ -7,6 +7,7 @@
     let pickingFile = false;
     let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
     let localRows = [], cloudRows = [];
+    let ownHistory = false;
     let cloudRequestVersion = 0, cloudLoading = false, cloudOpening = false, cloudCheckedAt = 0;
     let localCheckedAt = 0;
     const cloudMessages = {
@@ -445,6 +446,7 @@
         if (!userId) return;
         const version = ++libraryRequestVersion;
         const parameters = new URLSearchParams();
+        if (ownHistory) parameters.set('mine', '1');
         for (const [kind, workflow] of [['pdf', window.pdfWorkflow], ['dxf', window.planWorkflow]]) {
             if (workflow?.currentPlan) parameters.set(kind, workflow.currentPlan.id);
         }
@@ -539,7 +541,7 @@
                 local?.cloud_status === 'pending' ? 'Subiendo a la nube…' : cloud && 'En la nube',
                 local?.cloud_status === 'partial' && 'Confirmación pendiente',
                 local?.cloud_status === 'uploaded' && 'Archivos en la nube · Confirmando registro',
-                cloud?.date && new Date(cloud.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
+                (cloud?.date || local?.date) && new Date(cloud?.date || local.date).toLocaleString('es-CL')].filter(Boolean).join(' · ');
             open.append(title, badge);
             open.addEventListener('click', () => openLibraryEntry(entry, !local));
             row.append(open);
@@ -550,7 +552,7 @@
                 clear.dataset.deletePlan = local.plan_id;
                 row.append(clear);
             }
-            if (canDelete(kind, local) && (cloud?.delete_url || local?.delete_url)) {
+            if ((local ? canDelete(kind, local) : appState.user?.permissions?.can_administer) && (cloud?.delete_url || local?.delete_url)) {
                 const remove = libraryAction('Eliminar proyecto completo', 'bi-trash', 'danger', () => removeLibraryEntry(entry, false));
                 remove.dataset.deletePlan = local?.plan_id || cloud.id;
                 row.append(remove);
@@ -609,10 +611,24 @@
             if (!localOnly) await showCloudProjects({ quiet: true });
         }
     }
-    function showSaved() { modalSavedPlans.show(); listSaved(); showCloudProjects(); }
+    function showSaved({ mine = false } = {}) {
+        ownHistory = mine && Boolean(appState.user?.permissions?.can_history);
+        libraryRequestVersion++;
+        cloudRequestVersion++;
+        localRows = []; cloudRows = []; librarySignature = null;
+        byId('savedDeviceFilter').value = 'all';
+        byId('savedCloudDate').value = '';
+        byId('modalSavedPlans').querySelector('.modal-title').textContent = ownHistory ? 'Historial de mis planos' : 'Planos guardados';
+        byId('cloudProjectsStatus').textContent = '';
+        for (const id of ['savedDeviceFilter', 'savedCloudDate', 'btnCloudProjects']) {
+            byId(id).closest('.col-6').hidden = ownHistory;
+        }
+        modalSavedPlans.show(); listSaved();
+        if (!ownHistory) showCloudProjects();
+    }
     async function showCloudProjects({ quiet = false } = {}) {
         const user = appState.user?.id;
-        if (!user || cloudLoading) return;
+        if (!user || cloudLoading || ownHistory) return;
         const version = ++cloudRequestVersion;
         cloudLoading = true;
         cloudCheckedAt = Date.now();
@@ -635,8 +651,13 @@
         }
     }
     byId('btnCloudProjects').addEventListener('click', () => showCloudProjects());
+    for (const id of ['btnMyPlans', 'menuItemMyPlans']) byId(id)?.addEventListener('click', event => {
+        event.preventDefault(); showSaved({ mine: true });
+    });
     for (const id of ['savedDeviceFilter', 'savedCloudOrder', 'savedCloudDate']) byId(id).addEventListener('change', renderLibrary);
     byId('modalSavedPlans').addEventListener('hidden.bs.modal', () => {
+        ownHistory = false;
+        libraryRequestVersion++;
         cloudRequestVersion++;
         cloudRows = [];
         localRows = [];

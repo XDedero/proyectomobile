@@ -1,8 +1,35 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin
+from .accounts import can_edit_user, is_primary_administrator
 from .access import is_administrator
 
 # Django's own user/group pages must obey the same administrator boundary.
 admin.site.has_permission = lambda request: is_administrator(request.user)
+
+
+class ApplicationUserAdmin(UserAdmin):
+    def has_add_permission(self, request):
+        return is_primary_administrator(request.user) and super().has_add_permission(request)
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if not is_primary_administrator(request.user):
+            fields.extend(('is_staff', 'is_superuser', 'groups', 'user_permissions'))
+        if obj and is_primary_administrator(obj):
+            fields.extend(('username', 'is_active', 'is_staff', 'is_superuser'))
+        return tuple(dict.fromkeys(fields))
+
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and (obj is None or can_edit_user(request.user, obj))
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and (
+            obj is None or (obj.pk != request.user.pk and can_edit_user(request.user, obj)))
+
+
+admin.site.unregister(get_user_model())
+admin.site.register(get_user_model(), ApplicationUserAdmin)
 
 from .models import ButtonCategory, Motor, Plan, PdfPlan, PdfMarker, WorkbookDocument
 

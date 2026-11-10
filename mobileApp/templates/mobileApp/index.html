@@ -45,7 +45,7 @@
                     <form id="loginForm" method="post">
                         <p class="text-muted small">Ingrese con su usuario y contraseña.</p>
                         <div class="mb-3">
-                            <label for="usernameInput" class="form-label small fw-semibold">Nombre de usuario</label>
+                            <label for="usernameInput" class="form-label small fw-semibold">Usuario o RUT</label>
                             <input type="text" class="form-control" id="usernameInput" name="username" autocomplete="username" required>
                         </div>
                         <div class="mb-3">
@@ -61,7 +61,24 @@
                             <span id="loginAlertText"></span>
                         </div>
                         <button type="submit" class="btn btn-modern-primary w-100" id="btnLogin" disabled>Iniciar sesión</button>
+                        <p class="small text-center mt-3 mb-0">¿No tiene una cuenta? <button type="button" id="btnRequestRegistration" class="btn btn-link p-0 align-baseline small">Solicitar registro</button></p>
                     </form>
+                    <section id="registrationPanel" hidden aria-labelledby="registrationTitle">
+                        <button type="button" id="btnBackToLogin" class="btn btn-link p-0 mb-3 small">← Volver al inicio de sesión</button>
+                        <h5 id="registrationTitle" class="fw-bold">Solicitar registro</h5>
+                        <p class="small text-muted">Complete sus datos. Un administrador revisará su solicitud antes de habilitar el acceso.</p>
+                        <form id="registrationForm" method="post">
+                            <div class="registration-name-fields">
+                                <div class="mb-3"><label for="registrationFirstName" class="form-label small fw-semibold">Nombre</label><input id="registrationFirstName" name="first_name" class="form-control" required maxlength="150" autocomplete="given-name"></div>
+                                <div class="mb-3"><label for="registrationLastName" class="form-label small fw-semibold">Apellido</label><input id="registrationLastName" name="last_name" class="form-control" required maxlength="150" autocomplete="family-name"></div>
+                            </div>
+                            <div class="mb-3"><label for="registrationRut" class="form-label small fw-semibold">RUT</label><input id="registrationRut" name="rut" class="form-control" required maxlength="10" pattern="[1-9][0-9]{6,7}-[0-9Kk]" title="Sin puntos y con guion, por ejemplo 12345678-5" autocomplete="username" placeholder="12345678-5" aria-describedby="registrationRutHelp"><p id="registrationRutHelp" class="small text-muted mt-1 mb-0">Sin puntos y con guion, por ejemplo 12345678-5. Solo se admite una cuenta por RUT.</p></div>
+                            <div class="mb-3"><label for="registrationPassword" class="form-label small fw-semibold">Contraseña</label><input id="registrationPassword" name="password" type="password" class="form-control" required minlength="8" autocomplete="new-password" aria-describedby="registrationPasswordHelp"><p id="registrationPasswordHelp" class="small text-muted mt-1 mb-0">Al menos 8 caracteres. Evite contraseñas comunes, solo números o similares a su nombre, apellido o RUT.</p></div>
+                            <div class="mb-3"><label for="registrationConfirmPassword" class="form-label small fw-semibold">Confirmar contraseña</label><input id="registrationConfirmPassword" name="confirm_password" type="password" class="form-control" required minlength="8" autocomplete="new-password"></div>
+                            <p id="registrationStatus" class="small" role="status" aria-live="polite" hidden></p>
+                            <button type="submit" id="btnSubmitRegistration" class="btn btn-modern-primary w-100">Solicitar</button>
+                        </form>
+                    </section>
                 </div>
 
                 <div class="text-center mt-auto py-2">
@@ -117,6 +134,7 @@
                             <li id="menuItemAdminister" hidden>
                                 <a class="dropdown-item" href="/administracion/"><i class="bi bi-gear"></i> Administrar</a>
                             </li>
+                            <li id="menuItemMyPlans" hidden><a class="dropdown-item" href="#"><i class="bi bi-clock-history text-primary"></i><span>Historial de mis planos</span></a></li>
                             <li><hr class="dropdown-divider my-1"></li>
                             <!-- Ítem 3: Cerrar sesión -->
                             <li>
@@ -164,6 +182,7 @@
                             </button>
                         </div>
                         <button type="button" id="btnSavedPlans" class="btn btn-outline-primary w-100 mt-3">Ver planos guardados</button>
+                        <button type="button" id="btnMyPlans" class="btn btn-outline-primary w-100 mt-2" hidden><i class="bi bi-clock-history me-1" aria-hidden="true"></i> Historial de mis planos</button>
                         <button type="button" id="btnSavedMotors" class="btn btn-outline-success w-100 mt-2">Piezas guardadas</button>
                     </div>
 

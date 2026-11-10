@@ -210,7 +210,7 @@
                 newButton.categories = data.button_categories;
                 for (const item of data.button_categories) byId('newButtonCategory').append(new Option(item.name, item.id));
                 byId('newButtonSheet').replaceChildren(new Option('Elija una hoja', ''), ...data.sheet_options.filter(row => !row.is_listing).map(row => new Option(row.name, row.name)));
-                if (!data.button_categories.length) message(newButtonModal, 'Un administrador debe crear una categoría primero.', true);
+                if (!data.button_categories.length) message(newButtonModal, 'Cree una categoría para añadir botones.', true);
             }
         } catch (error) {
             if (newButton?.context === context) message(newButtonModal, error.message, true);
@@ -219,6 +219,10 @@
         }
         return selection;
     }
+
+    document.addEventListener('category:created', event => {
+        if (newButton) newButton.categories.push(event.detail);
+    });
 
     async function chooseNewButtonSource() {
         const draft = newButton;

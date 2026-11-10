@@ -90,9 +90,10 @@ class DxfViewer {
         pin.group.setAttribute('aria-label', `${motor.name}, X ${motor.x}, Y ${motor.y}`);
         pin.circle.style.fill = motor.button_color || '#2563eb';
         pin.hover.textContent = motor.name;
-        for (const node of [pin.circle, pin.label, pin.hover, pin.group.querySelector('.motor-bounds')]) node.style.opacity = this.displaySettings?.opacity ?? 1;
         pin.area.style.fill = motor.button_color || '#2563eb';
-        pin.area.style.opacity = (this.displaySettings?.opacity ?? 1) * .18;
+        // The parent motor-target applies the viewer opacity to the entire pin,
+        // including its coverage. A second opacity here would keep the radius
+        // faded when the pin is highlighted or the control returns to 100%.
         pin.area.style.pointerEvents = 'none';
         pin.area.style.display = motor.has_area ? '' : 'none';
         if (pin.area.localName !== (motor.area_shape === 'rectangle' ? 'rect' : 'ellipse')) {

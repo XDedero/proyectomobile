@@ -56,6 +56,5 @@ btnBackToMainMenu.addEventListener('click', () => {
 menuItemPlanos.addEventListener('click', (event) => {
     event.preventDefault();
     if (!appState.user?.permissions.can_view) return;
-    modalSavedPlans.show();
-    window.planWorkflow.listSaved();
+    window.projectWorkspace?.showSaved();
 });
