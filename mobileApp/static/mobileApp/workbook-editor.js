@@ -96,6 +96,7 @@
             this.request = request || this.defaultRequest.bind(this);
             this.onSaved = onSaved;
             this.pending = new Map();
+            this.offlineDraft = new Map();
             this.tiles = new Map();
             this.inflight = new Map();
             this.sheetPositions = new Map();
@@ -352,6 +353,10 @@
                 const fresh = await this.request(metadata.metadata_url || `/api/pdf/workbooks/${metadata.id}/metadata/`);
                 if (epoch !== this.epoch || !this.visible) return false;
                 this.metadata = fresh;
+                this.offlineDraft.clear();
+                const draft=await window.relOffline?.draftsFor(fresh);
+                if(epoch!==this.epoch||!this.visible) return false;
+                for(const edit of draft?.body.edits||[]) this.offlineDraft.set(this.cellKey(edit.sheet,edit.row,edit.col),edit);
                 this.applyPermissions();
                 this.filename.textContent = fresh.name;
                 this.populateSheets();
@@ -719,7 +724,7 @@
         }
 
         cellValue(row, col, sheet = this.sheet) {
-            const pending = this.pending.get(this.cellKey(sheet, row, col));
+            const pending = this.pending.get(this.cellKey(sheet, row, col)) || this.offlineDraft.get(this.cellKey(sheet, row, col));
             const original = this.tiles.get(this.tileInfo(row, col, sheet).key)?.get(`${row}:${col}`) || { value: null };
             if (pending) return { ...original, value: pending.value, display: rawText(pending.value) };
             return original;
@@ -972,7 +977,7 @@
         setPending(sheet, row, col, value) {
             if (!this.canEdit || this.staleRevision) return;
             const key = this.cellKey(sheet, row, col);
-            const original = this.tiles.get(this.tileInfo(row, col, sheet).key)?.get(`${row}:${col}`)?.value ?? null;
+            const original = this.offlineDraft.get(key)?.value ?? this.tiles.get(this.tileInfo(row, col, sheet).key)?.get(`${row}:${col}`)?.value ?? null;
             if (Object.is(original, value)) this.pending.delete(key);
             else this.pending.set(key, { sheet, row, col, value });
             if (this.pieceEdit) this.pieceUnpublished = true;
@@ -983,6 +988,7 @@
             const count = this.pending.size;
             const draft = this.formulaDirty || (this.activeEdit && this.activeEdit.input.value !== this.activeEdit.originalText);
             this.pendingLabel.textContent = !this.canEdit ? 'Solo lectura' : count || draft ? `${count + (draft ? 1 : 0)} cambio${count + (draft ? 1 : 0) === 1 ? '' : 's'} sin guardar` : this.pieceUnpublished ? 'Cambios pendientes de Guardar pieza' : 'Sin cambios pendientes';
+            if(!count&&!draft&&this.offlineDraft.size) this.pendingLabel.textContent='Guardado en el dispositivo · pendiente de sincronizar';
             this.saveButton.disabled = !this.canEdit || this.busy || this.staleRevision;
             this.saveMotorButton.disabled = (!this.pieceEdit && Boolean(this.pieceRegistration?.registered)) || this.busy || this.staleRevision;
             this.replacePieceButton.disabled = this.busy || this.staleRevision;
@@ -1016,15 +1022,22 @@
             this.setBusy(true);
             this.setStatus('Guardando cambios en el archivo Excel…');
             try {
-                const result = await this.request(this.metadata.save_url || `/api/pdf/workbooks/${this.metadata.id}/save/`, {
+                const payload={ revision: this.metadata.revision, edits, sheet: this.sheet, context: this.context };
+                const send=()=>this.request(this.metadata.save_url || `/api/pdf/workbooks/${this.metadata.id}/save/`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ revision: this.metadata.revision, edits, sheet: this.sheet, context: this.context }),
+                    body: JSON.stringify(payload),
                 });
+                const result=window.relOffline?await window.relOffline.workbookRequest(this.metadata,payload,send):await send();
                 if (epoch !== this.epoch || !this.visible) return false;
                 this.metadata = result;
                 this.applyPermissions();
                 this.prepareLayout();
                 this.pending.clear();
+                this.offlineDraft.clear();
+                if(result.offline_pending) {
+                    const draft=await window.relOffline.draftsFor(result);
+                    for(const edit of draft?.body.edits||[]) this.offlineDraft.set(this.cellKey(edit.sheet,edit.row,edit.col),edit);
+                }
                 this.tiles.clear();
                 this.inflight.clear();
                 this.populateSheets();
@@ -1033,6 +1046,7 @@
                 const savedForPlan = this.metadata.id === plan?.workbook?.id || this.context === 'button-source';
                 this.setStatus(savedForPlan ? 'Cambios de Excel guardados. Usa «Guardar plano» para almacenarlos en la nube.' : 'Cambios de Excel guardados.', 'success');
                 this.updateCanvasSize();
+                if(result.offline_pending) this.setStatus('Cambios guardados en este dispositivo. Pendientes de sincronizar con el servidor.', 'success');
                 this.updateSelectionInputs();
                 this.render();
                 this.notifySaved(result);

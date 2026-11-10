@@ -196,6 +196,10 @@
                 }
             }
             if (window.planDisplay && !(await window.planDisplay.flush())) return false;
+            if(window.relOffline && (await window.relOffline.state()).count) {
+                status('Sincroniza los borradores pendientes antes de guardar el plano en la nube.',true);
+                window.relPWA?.open();return false;
+            }
             if (current.applyArea && !(await current.applyArea())) return false;
             const data = await post(current.plan.save_project_url);
             if (data.plan && active === current) {

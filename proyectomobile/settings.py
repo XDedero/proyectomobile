@@ -19,17 +19,43 @@ APP_DATA_DIR = Path(os.environ.get('PLANOS_DATA_DIR') or BASE_DIR).expanduser()
 if not APP_DATA_DIR.is_absolute():
     raise ImproperlyConfigured('PLANOS_DATA_DIR debe ser una ruta absoluta.')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-_pjewtfeh*-aakze_o3_j8$ejbfr+ocwi72s21@hr_1-1&ml9&'
+def env_bool(name, default=False):
+    return os.environ.get(name, str(default)).lower() in {'1', 'true', 'yes'}
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = ['*', '.onrender.com', 'localhost', '127.0.0.1']
+DEBUG = env_bool('DJANGO_DEBUG', not bool(os.environ.get('RENDER')))
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or os.environ.get('SECRET_KEY', '')
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured('Defina DJANGO_SECRET_KEY antes de iniciar en producción.')
+    SECRET_KEY = 'django-insecure-local-development-only-reloncavi-2026'
 
-CSRF_TRUSTED_ORIGINS = [
-    'https://*.onrender.com',
-]
+ALLOWED_HOSTS = [host.strip() for host in os.environ.get(
+    'DJANGO_ALLOWED_HOSTS', '*' if DEBUG else 'localhost,127.0.0.1',
+).split(',') if host.strip()]
+if not DEBUG and '*' in ALLOWED_HOSTS:
+    raise ImproperlyConfigured('Use dominios explícitos en DJANGO_ALLOWED_HOSTS en producción.')
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get(
+    'DJANGO_CSRF_TRUSTED_ORIGINS', 'https://*.onrender.com' if DEBUG else '',
+).split(',') if origin.strip()]
+# Render supplies the assigned domain at build time and runtime. Keep custom
+# domains configured above and accept the service's own HTTPS address as well.
+if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
+    ALLOWED_HOSTS.append(os.environ['RENDER_EXTERNAL_HOSTNAME'])
+    CSRF_TRUSTED_ORIGINS.append('https://' + os.environ['RENDER_EXTERNAL_HOSTNAME'])
+SECURE_SSL_REDIRECT = env_bool('DJANGO_SECURE_SSL_REDIRECT', not DEBUG)
+SECURE_REDIRECT_EXEMPT = [r'^healthz/$']
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('DJANGO_HSTS_INCLUDE_SUBDOMAINS')
+SECURE_HSTS_PRELOAD = env_bool('DJANGO_HSTS_PRELOAD')
+if os.environ.get('RENDER') or env_bool('DJANGO_TRUST_PROXY'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Application definition
 INSTALLED_APPS = [
@@ -44,11 +70,13 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'mobileApp.web_performance.CompressTextMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'mobileApp.pwa.OfflineIdentityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'mobileApp.terminal_monitor.TerminalDebugMiddleware',

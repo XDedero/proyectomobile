@@ -1,0 +1,18 @@
+.pwa-launch { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom)); z-index: 1025; min-height: 44px; padding: 6px 12px; border: 1px solid #b8cde4; border-radius: 20px; color: #17324d; background: #fffffff2; font-size: 12px; box-shadow: 0 2px 10px #17324d22; }
+.pwa-launch.is-offline { color: #854d0e; background: #fef9c3; border-color: #eab308; }
+.pwa-launch.has-pending { border-color: #2563eb; }
+body:has(.sector-editor-dock:not([hidden])) .pwa-launch, body:has(.workbook-editor-overlay:not([hidden])) .pwa-launch { display: none; }
+.pwa-panel { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px); overflow: auto; padding: 20px; border: 1px solid #cbd5e1; border-radius: 18px; color: #17324d; background: white; box-shadow: 0 20px 60px #0005; font-size: 14px; overscroll-behavior: contain; }
+.pwa-panel::backdrop { background: #17233799; }
+.pwa-panel-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.pwa-panel h2 { flex: 1; font-size: 18px; margin: 0; }
+.pwa-panel h3 { font-size: 16px; }
+.pwa-close { align-self: flex-start; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: #f1f5f9; color: #17324d; font-size: 24px; }
+.pwa-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#pwaConflicts { padding-left: 18px; color: #9f1239; overflow-wrap: anywhere; }
+#pwaMessage { margin-top: 12px; margin-bottom: 0; overflow-wrap: anywhere; }
+.pwa-panel [hidden] { display: none !important; }
+@media (display-mode: standalone) {
+    html, body { overscroll-behavior-y: none; }
+    .app-shell { -webkit-tap-highlight-color: transparent; }
+}

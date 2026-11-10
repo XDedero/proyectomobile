@@ -94,7 +94,7 @@ def visible_plans(user, queryset):
 def workbook_plans(document):
     from .models import Plan, PdfPlan
     condition = Q(workbook=document) | Q(listing=document)
-    cad = Plan.objects.filter(condition | Q(motors__workbook=document) | Q(motors__source_workbook=document)).distinct()
+    cad = Plan.objects.defer('svg').filter(condition | Q(motors__workbook=document) | Q(motors__source_workbook=document)).distinct()
     pdf = PdfPlan.objects.filter(condition | Q(markers__workbook=document) | Q(markers__source_workbook=document)).distinct()
     return [*cad, *pdf]
 
@@ -143,13 +143,17 @@ def _target(view_name, kwargs):
         kind = kwargs.get('kind') or ('pdf' if 'pdf' in view_name or view_name == 'create_marker' else 'dxf')
         if kind not in ('pdf', 'dxf'):
             return None, None
-        return get_object_or_404(PdfPlan if kind == 'pdf' else Plan, pk=kwargs['plan_id']), None
+        queryset = PdfPlan.objects.all() if kind == 'pdf' else Plan.objects.defer('svg')
+        return get_object_or_404(queryset, pk=kwargs['plan_id']), None
     if 'motor_id' in kwargs or 'marker_id' in kwargs or 'button_id' in kwargs:
         key = next(key for key in ('motor_id', 'marker_id', 'button_id') if key in kwargs)
         model = Motor if key == 'motor_id' or kwargs.get('kind') == 'dxf' else PdfMarker
-        return get_object_or_404(model.objects.select_related('plan'), pk=kwargs[key]).plan, None
+        queryset = model.objects.select_related('plan')
+        if model is Motor:
+            queryset = queryset.defer('plan__svg')
+        return get_object_or_404(queryset, pk=kwargs[key]).plan, None
     if 'workbook_id' in kwargs:
-        return None, get_object_or_404(WorkbookDocument, pk=kwargs['workbook_id'])
+        return None, get_object_or_404(WorkbookDocument.objects.defer('content'), pk=kwargs['workbook_id'])
     return None, None
 
 
@@ -196,7 +200,8 @@ def api_permissions(*permissions):
                     if isinstance(value, dict):
                         if 'workbook_url' in value and 'kind' in value and 'id' in value:
                             from .models import Plan, PdfPlan
-                            obj = (PdfPlan if value['kind'] == 'pdf' else Plan).objects.filter(pk=value['id']).first()
+                            queryset = PdfPlan.objects.all() if value['kind'] == 'pdf' else Plan.objects.defer('svg')
+                            obj = queryset.filter(pk=value['id']).first()
                             if obj:
                                 value['permissions'] = capabilities(request.user, obj)
                         for item in list(value.values()):

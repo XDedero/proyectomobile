@@ -10,6 +10,11 @@ ni Android Studio; el futuro APK deberá incorporar también el código Python.
 
 ## Ejecutar
 
+Para instalarla como PWA en iPhone, publicar con HTTPS y usar los borradores sin conexión,
+consulta [PWA de Reloncaví](docs/PWA.md).
+La configuración de build, arranque, persistencia y rendimiento para el hosting está en
+[Despliegue en Render](docs/RENDER.md).
+
 En Windows, abre **ejecutar_debug.bat**. Si falta el entorno de Python,
 el lanzador prepara uno local e instala las dependencias. Luego aplica las
 migraciones de SQLite y abre la app en **http://127.0.0.1:8000/** cuando esté lista.

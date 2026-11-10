@@ -54,6 +54,9 @@
       </div>
       <label class="small d-flex align-items-center gap-2">Color del sector <input type="color" id="sectorEditColor" class="form-control form-control-color"></label>`;
     document.body.append(dock);
+    const legend=document.createElement('ul');
+    legend.className='plan-sector-legend';legend.hidden=true;
+    legend.setAttribute('aria-label','Leyenda de sectores');
     let current=null,layer=null,editing=null,gesture=null,saving=false,paint=false,memberSector=null,configTarget=null;
     const editable=()=>Boolean(current?.plan.permissions?.can_assign);
     const selectable=sector=>sector?.shape!=='brush' && editable() && !editing && !saving && !current.isBusy?.() &&
@@ -128,11 +131,26 @@
         layer.append(group);
     }
     function draw() {
+        legend.hidden=true;
         if(!current||!ensureLayer()) return;
         layer.replaceChildren();
         const dims=dimensions();
-        for(const sector of current.plan.sectors||[]) if(sector.page===dims.page && sector.id!==editing?.draft.id) drawSector(sector);
-        if(editing && editing.draft.page===dims.page) drawSector(editing.draft,!paint);
+        const sectors=(current.plan.sectors||[]).filter(sector=>sector.page===dims.page && sector.id!==editing?.draft.id);
+        for(const sector of sectors) drawSector(sector);
+        if(editing && editing.draft.page===dims.page) {
+            drawSector(editing.draft,!paint);sectors.push(editing.draft);
+        }
+        legend.replaceChildren();
+        for(const sector of sectors) {
+            const row=document.createElement('li');row.className='sector-row';
+            const swatch=document.createElement('span');swatch.className='sector-swatch';
+            swatch.style.background=sector.color;swatch.setAttribute('aria-hidden','true');
+            const name=document.createElement('span');name.textContent=sector.name;
+            row.append(swatch,name);legend.append(row);
+        }
+        const frame=current.viewport.closest('.plan-view-frame');
+        if(frame && legend.parentNode!==frame) frame.append(legend);
+        legend.hidden=!frame||sectors.length===0;
     }
     function syncFields() {
         if(!editing) return;
@@ -165,10 +183,14 @@
         await new Promise(resolve=>{target.node.addEventListener('hidden.bs.modal',resolve,{once:true});target.modal.hide();});
     }
     async function request(context,body) {
-        const response=await fetch(context.plan.sectors_url,{credentials:'same-origin',cache:'no-store',
-            ...(body?{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken()},body:JSON.stringify(body)}:{})});
-        const data=await response.json();
-        if(!response.ok) throw new Error(data.error||'No se pudieron guardar los sectores.');
+        const send=async()=>{
+            const response=await fetch(context.plan.sectors_url,{credentials:'same-origin',cache:'no-store',
+                ...(body?{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken()},body:JSON.stringify(body)}:{})});
+            const data=await response.json();
+            if(!response.ok) throw new Error(data.error||'No se pudieron guardar los sectores.');
+            return data;
+        };
+        const data=body&&window.relOffline?await window.relOffline.sectorRequest(context,body,send):await send();
         if(!valid(context)) return null;
         context.plan.sectors=data.sectors;
         draw();return data;
@@ -371,7 +393,7 @@
     }
     const bound=new WeakSet();
     function render(context) {
-        if(!context) {stopEditing();removeLayer();current=null;list.modal.hide();settings.modal.hide();return;}
+        if(!context) {stopEditing();removeLayer();legend.remove();legend.hidden=true;current=null;list.modal.hide();settings.modal.hide();return;}
         if(current?.plan!==context.plan) {stopEditing();removeLayer();list.modal.hide();settings.modal.hide();}
         current=context;
         if(editing&&!editable()) stopEditing();

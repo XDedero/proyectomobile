@@ -112,8 +112,14 @@ class PdfPlanViewer {
             if (version !== this.version) return false;
             phase = 'document';
             const assetBase = new URL('.', new URL(this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf-entry.mjs', location.href)).href;
+            let source={url:sourceUrl};
+            if(window.relOffline?.offline) {
+                const saved=await fetch(sourceUrl,{credentials:'same-origin'});
+                if(!saved.ok) throw new Error('No se puede abrir la copia descargada de este PDF.');
+                source={data:new Uint8Array(await saved.arrayBuffer())};
+            }
             const loadingTask = pdfjs.getDocument({
-                url: sourceUrl,
+                ...source,
                 withCredentials: true,
                 cMapUrl: `${assetBase}cmaps/`, cMapPacked: true,
                 standardFontDataUrl: `${assetBase}standard_fonts/`,

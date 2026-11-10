@@ -30,14 +30,8 @@ from .models import Motor, Plan, WorkbookDocument, SavedMotor
 def index(request):
     # A fresh page must not load cached scripts from an older interface whose
     # controls differ from those expected by the current drawing workflows.
-    app_directory = Path(__file__).resolve().parent
-    frontend_files = [app_directory / 'templates' / 'mobileApp' / 'index.html']
-    frontend_files.extend((app_directory / 'static' / 'mobileApp').glob('*.js'))
-    frontend_files.extend((app_directory / 'static' / 'mobileApp').glob('*.css'))
-    frontend_files.extend((app_directory / 'static' / 'mobileApp' / 'vendor' / 'pdfjs').glob('*.mjs'))
-    frontend_files.extend((app_directory / 'static' / 'mobileApp' / 'img').glob('*.png'))
-    asset_version = max(path.stat().st_mtime_ns for path in frontend_files)
-    return render(request, 'mobileApp/index.html', {'asset_version': str(asset_version)})
+    from .pwa import asset_version
+    return render(request, 'mobileApp/index.html', {'asset_version': asset_version()})
 
 
 def session_data(request):
@@ -164,7 +158,7 @@ def plan_data(plan, detail=False):
 @require_GET
 @api_permissions()
 def plans(request):
-    return JsonResponse({'plans': [plan_data(plan) for plan in visible_plans(request.user, Plan.objects.all())]})
+    return JsonResponse({'plans': [plan_data(plan) for plan in visible_plans(request.user, Plan.objects.defer('svg'))]})
 
 
 @require_POST
@@ -196,7 +190,7 @@ def plan_import(request):
 @require_GET
 @api_permissions()
 def plan_detail(request, plan_id):
-    plan = get_object_or_404(Plan, pk=plan_id)
+    plan = get_object_or_404(Plan.objects.defer('svg'), pk=plan_id)
     return JsonResponse(plan_data(plan, detail=True))
 
 

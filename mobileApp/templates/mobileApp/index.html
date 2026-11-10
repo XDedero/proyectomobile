@@ -6,6 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#eaf4ff">
     <meta name="color-scheme" content="light">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Reloncaví">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="{% url 'pwa_manifest' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'mobileApp/img/pwa/apple-touch-icon.png' %}?v={{ asset_version }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'mobileApp/img/pwa/icon-192.png' %}">
+    <link rel="stylesheet" href="{% static 'mobileApp/pwa.css' %}?v={{ asset_version }}">
     <title>Reloncaví APP · Reloncaví Valdivia</title>
     <!-- Bootstrap 5.3 CSS -->
     <link href="{% static 'mobileApp/vendor/bootstrap.min.css' %}?v={{ asset_version }}" rel="stylesheet">
@@ -534,6 +542,8 @@
     <script src="{% static 'mobileApp/mobile-runtime.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-confirm.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-state.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/pwa-offline.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/pwa.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/dxf-viewer.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/vendor/jszip.min.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/workbook-fields.js' %}?v={{ asset_version }}"></script>

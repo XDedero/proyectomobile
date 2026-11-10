@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from openpyxl import Workbook, load_workbook
 
-from .models import ButtonCategory, Motor, PdfMarker, PlanWorkbookSheet, SavedMotor, WorkbookDocument
+from .models import ButtonCategory, Motor, PdfMarker, Plan, PlanWorkbookSheet, SavedMotor, WorkbookDocument
 from .motor_service import inspect_motor, single_sheet, template_bytes, read_origin
 from .xlsx_package import (append_sheet, arrange_sheets, remove_sheet, rename_sheet, sheet_names,
                            read_sheet_origins, unique_name, write_sheet_origins)
@@ -122,7 +122,10 @@ def preserve_variant(document, content, name, user, origin, title):
 @transaction.atomic
 def ensure_workbook(plan, user=None):
     """Upgrade an older drawing lazily, retaining all original documents."""
-    locked = type(plan).objects.select_for_update().get(pk=plan.pk)
+    queryset = type(plan).objects.select_for_update()
+    if isinstance(plan, Plan):
+        queryset = queryset.defer('svg')
+    locked = queryset.get(pk=plan.pk)
     if locked.workbook_id:
         plan.workbook_id = locked.workbook_id
         return WorkbookDocument.objects.get(pk=locked.workbook_id)

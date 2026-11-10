@@ -160,6 +160,7 @@
     menuItemLogout.addEventListener('click', async (event) => {
         event.preventDefault();
         if (window.pdfWorkflow?.canLeave && !(await window.pdfWorkflow.canLeave())) return;
+        if (window.relOffline && !(await window.relOffline.canLogout())) return;
         const revision = ++authRevision;
         try {
             await authRequest('/api/auth/logout/', {});

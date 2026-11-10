@@ -37,6 +37,7 @@
         current.focus?.focus(); current.resolve(value);
     }
     async function beforeOpen(plan) {
+        if(window.relOffline?.offline) return plan;
         if (!plan.version_url) return plan;
         const user = appState.user?.id;
         const known = remembered(plan) || plan.project_version || '';

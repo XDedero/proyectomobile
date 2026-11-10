@@ -136,7 +136,9 @@ def saved_projects(request):
         'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
         'cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress',
         'cad_plan__id', 'cad_plan__name', 'cad_plan__cloud_key', 'cad_plan__imported_by_id',
+        'cad_plan__owner_username',
         'pdf_plan__id', 'pdf_plan__name', 'pdf_plan__cloud_key', 'pdf_plan__cloud_origin', 'pdf_plan__imported_by_id',
+        'pdf_plan__owner_username',
     )
     if mine:
         from django.db.models import Q
@@ -165,7 +167,7 @@ def saved_projects(request):
 
 def cached_projects(user):
     plans = PdfPlan.objects.exclude(cloud_origin='').filter(saved_project__isnull=True).only(
-        'id', 'name', 'cloud_key', 'cloud_origin', 'imported_by_id', 'imported_at')
+        'id', 'name', 'cloud_key', 'cloud_origin', 'owner_username', 'imported_by_id', 'imported_at')
     return [{**local_copy_data('pdf', plan, user), 'date': plan.imported_at.isoformat(),
              'export_url': reverse('download_project', args=['pdf', plan.pk])} for plan in plans if can_access_plan(user, plan)]
 
