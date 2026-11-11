@@ -69,6 +69,13 @@ def auth_login(request):
         return JsonResponse({'error': 'Ingrese su nombre de usuario y contraseña.'}, status=400)
     from .accounts import normalize_rut
     from .models import UserProfile
+    from . import shared_accounts
+    from .cloud_projects import CloudUnavailable
+    if shared_accounts.enabled():
+        try:
+            shared_accounts.sync_login(data['username'])
+        except (CloudUnavailable, ValidationError) as exc:
+            return JsonResponse({'error': str(exc)}, status=503)
     try:
         rut = normalize_rut(data['username'])
     except ValidationError:

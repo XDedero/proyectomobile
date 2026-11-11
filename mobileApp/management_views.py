@@ -32,13 +32,27 @@ def management_panel(request):
     files = [directory / 'templates/mobileApp/management.html',
              directory / 'static/mobileApp/management.js', directory / 'static/mobileApp/management.css']
     version = max(path.stat().st_mtime_ns for path in files)
+    from .cloud_projects import CloudUnavailable
+    try:
+        pending = pending_registration_data()
+        error = ''
+    except (CloudUnavailable, ValidationError) as exc:
+        pending = local_registration_data()
+        error = str(exc)
     return render(request, 'mobileApp/management.html', {
         'asset_version': str(version),
-        'pending_requests': pending_registration_data(),
+        'pending_requests': pending, 'registration_error': error,
     })
 
 
 def pending_registration_data():
+    from . import shared_accounts
+    if shared_accounts.enabled():
+        shared_accounts.sync_requests()
+    return local_registration_data()
+
+
+def local_registration_data():
     return [
         registration_data(item)
         for item in RegistrationRequest.objects.filter(status='pending').select_related('reviewed_by')
@@ -48,7 +62,11 @@ def pending_registration_data():
 @require_GET
 @administrators_only
 def pending_registrations(request):
-    return JsonResponse({'requests': pending_registration_data()})
+    from .cloud_projects import CloudUnavailable
+    try:
+        return JsonResponse({'requests': pending_registration_data()})
+    except (CloudUnavailable, ValidationError) as exc:
+        return error_response(exc, 503)
 
 
 def category_data(category):
@@ -59,12 +77,20 @@ def category_data(category):
 @require_GET
 @administrators_only
 def management_data(request):
+    from . import shared_accounts
+    from .cloud_projects import CloudUnavailable
+    try:
+        if shared_accounts.enabled():
+            shared_accounts.sync_accounts()
+        requests = pending_registration_data()
+    except (CloudUnavailable, ValidationError) as exc:
+        return error_response(exc, 503)
     return JsonResponse({
         'can_manage_administrators': is_administrator(request.user),
         'users': [{**user_data(u), 'can_edit': can_edit_user(request.user, u),
                    'can_delete': u.pk != request.user.pk and can_edit_user(request.user, u)}
                   for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
-        'requests': pending_registration_data(),
+        'requests': requests,
         'roles': [{'id': r.pk, 'name': r.name, 'description': r.description,
                    **{key: getattr(r, key) for key in ('can_view', 'can_export', 'can_create', 'all_plans')},
                    'users': list(r.users.values_list('pk', flat=True)),

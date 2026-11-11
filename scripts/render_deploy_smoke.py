@@ -22,6 +22,7 @@ def main():
         assert directory.resolve().is_relative_to(artifacts.resolve())
         os.environ.update({
             'DJANGO_SETTINGS_MODULE': 'proyectomobile.settings', 'DJANGO_DEBUG': 'false',
+            'APP_SHARED_ACCOUNTS': '0',
             'DJANGO_SECRET_KEY': secrets.token_urlsafe(64), 'RENDER': 'true',
             'RENDER_EXTERNAL_HOSTNAME': 'reloncavi-test.onrender.com',
             'PLANOS_DATA_DIR': str(directory),

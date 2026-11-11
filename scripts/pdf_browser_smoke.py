@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 def serve():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proyectomobile.settings')
+    os.environ['APP_SHARED_ACCOUNTS'] = '0'
     from django.conf import settings
     directory = Path(os.environ['PDF_BROWSER_TEST_DIR'])
     settings.DATABASES['default']['NAME'] = directory / 'test.sqlite3'

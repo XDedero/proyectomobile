@@ -127,6 +127,20 @@ En otra instalación, use **Importar PDF configurable → Importar proyecto**. S
 
 **Administrar** abre `/administracion/`, un panel adaptable a celulares con tres secciones:
 
+Las solicitudes se envían al registro privado `app_identity` de Supabase y se consultan
+desde cada instalación con `APP_SHARED_ACCOUNTS=1` (valor predeterminado). La aprobación
+es atómica en la base compartida. La cuenta aprobada conserva el mismo identificador,
+contraseña y rol al iniciar sesión desde otro equipo. Los cambios de rol y contraseña
+y la eliminación de estas cuentas también se sincronizan. Las cuentas anteriores sin
+vinculación al registro compartido conservan su administración local.
+El servidor utiliza la conexión existente de Supabase CLI. Las tablas y funciones de
+identidad son privadas y no conceden acceso a los roles públicos del navegador.
+Cada equipo debe ejecutar esta versión y tener configurada la misma conexión de servidor.
+Al abrir el panel se envían las solicitudes pendientes que todavía existían en ese equipo.
+`python manage.py sync_shared_accounts` permite ejecutar esa sincronización manualmente.
+Si falla la conexión, la app informa el error y conserva las solicitudes pendientes de envío.
+Las pruebas aisladas utilizan `APP_SHARED_ACCOUNTS=0`.
+
 - **Solicitudes:** muestra únicamente las pendientes y se actualiza cada cinco segundos, al abrir la pestaña, volver a la aplicación o recuperar la conexión. **Actualizar solicitudes** permite consultar de inmediato; si falla la consulta, se avisa y se conserva la última lista confirmada. Todos los administradores pueden elegir el rol Espectador, Trabajador o Administrador antes de aceptar. El tick verde crea la cuenta con ese rol y retira la solicitud; la X roja pide confirmación y elimina definitivamente la solicitud. Otorgar administración pide confirmación adicional. No se almacena un historial de solicitudes resueltas. La migración `0029` retira los registros resueltos de versiones anteriores.
 - **Usuarios:** al abrir la pestaña se muestran y actualizan todas las cuentas existentes. Permite buscar por nombre, apellido o RUT, editar datos y contraseña, cambiar el rol y eliminar con confirmación. Todos los administradores pueden otorgar cualquiera de los tres roles a trabajadores y espectadores. `admin`, el **administrador principal**, conserva la facultad de modificar o eliminar otros administradores. Los demás administradores pueden editarse a sí mismos y gestionar trabajadores y espectadores. La protección de otros administradores se aplica también en Django Admin. Otorgar administración pide una confirmación adicional. Cambiar el rol o la contraseña invalida las sesiones de esa cuenta: debe volver a iniciar sesión.
 - **Categorías:** crear, consultar, editar y eliminar categorías y asociar Excel permanentes con una hoja seleccionada. Cada botón recibe una copia editable de la plantilla.

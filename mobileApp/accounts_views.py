@@ -18,6 +18,7 @@ from .access import is_administrator
 from .management_views import administrators_only
 from .models import RegistrationRequest, UserProfile
 from .pdf_views import error_response, json_body
+from .cloud_projects import CloudUnavailable
 
 
 def record_id(data):
@@ -49,7 +50,16 @@ def request_registration(request):
                 raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
             item = RegistrationRequest.objects.create(first_name=first_name, last_name=last_name,
                                                       rut=rut, password_hash=make_password(password))
+        from . import shared_accounts
+        if shared_accounts.enabled():
+            try:
+                shared_accounts.publish_request(item)
+            except ValidationError:
+                item.delete()
+                raise
         return JsonResponse({'id': item.pk, 'message': 'Solicitud enviada. Un administrador debe aprobar su cuenta.'}, status=201)
+    except CloudUnavailable as exc:
+        return error_response(str(exc) + ' La solicitud quedó pendiente de envío en este equipo.', 503)
     except (ValidationError, IntegrityError) as exc:
         return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario o una solicitud pendiente con ese RUT.')
 
@@ -62,6 +72,15 @@ def manage_registration(request):
         action = data.get('action')
         if action not in ('approve', 'reject'):
             raise ValidationError('Seleccione aceptar o eliminar la solicitud.')
+        role = data.get('role', UserProfile.Role.VIEWER)
+        if role not in UserProfile.Role.values:
+            raise ValidationError('Seleccione un rol válido para la cuenta.')
+        from . import shared_accounts
+        if shared_accounts.enabled():
+            item = get_object_or_404(RegistrationRequest, pk=record_id(data))
+            shared_accounts.review_request(item, action, role, request.user)
+            message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
+            return JsonResponse({'deleted': True, 'message': message})
         with transaction.atomic():
             item = get_object_or_404(RegistrationRequest.objects.select_for_update(), pk=record_id(data))
             if item.status != 'pending':
@@ -82,6 +101,8 @@ def manage_registration(request):
             item.delete()
         message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
         return JsonResponse({'deleted': True, 'message': message})
+    except CloudUnavailable as exc:
+        return error_response(exc, 503)
     except (ValidationError, IntegrityError) as exc:
         return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT.')
 
@@ -111,6 +132,10 @@ def manage_user(request):
                     raise ValidationError('No puede eliminar su propia cuenta.')
                 if previous_role == 'administrator':
                     ensure_other_administrator(user)
+                from . import shared_accounts
+                profile = getattr(user, 'app_profile', None)
+                if shared_accounts.enabled() and profile and profile.cloud_id:
+                    shared_accounts.update_account(user, profile, delete=True)
                 invalidate_user_sessions(user.pk)
                 user.delete()
                 return JsonResponse({'deleted': True})
@@ -153,6 +178,9 @@ def manage_user(request):
                 user.set_password(password)
             user.save()
             profile.full_clean()
+            from . import shared_accounts
+            if shared_accounts.enabled() and profile.cloud_id:
+                shared_accounts.update_account(user, profile)
             profile.save()
             if changed_role:
                 permission = Permission.objects.get(content_type__app_label='mobileApp', codename='administer_application')
@@ -164,5 +192,7 @@ def manage_user(request):
                 invalidate_user_sessions(user.pk)
         return JsonResponse({'user': user_data(user), 'requires_login': changed_role or password is not None,
                              'message': 'Cambios guardados. El usuario debe volver a iniciar sesión.' if changed_role or password is not None else 'Usuario actualizado.'})
+    except CloudUnavailable as exc:
+        return error_response(exc, 503)
     except (ValidationError, IntegrityError) as exc:
         return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT o nombre de acceso.')

@@ -17,6 +17,7 @@ PASSWORD = 'PlanosSeguro!2026'
 
 
 def serve():
+    os.environ['APP_SHARED_ACCOUNTS'] = '0'
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proyectomobile.settings')
     from django.conf import settings
     directory = Path(os.environ['REGISTRATION_TEST_DIR'])

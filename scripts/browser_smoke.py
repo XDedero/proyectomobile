@@ -79,6 +79,7 @@ def check_workbook_layout(page):
 
 def serve():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proyectomobile.settings')
+    os.environ['APP_SHARED_ACCOUNTS'] = '0'
     from django.conf import settings
     directory = Path(os.environ['DXF_BROWSER_TEST_DIR'])
     settings.DATABASES['default']['NAME'] = directory / 'test.sqlite3'

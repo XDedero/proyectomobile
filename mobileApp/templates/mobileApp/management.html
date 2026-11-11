@@ -29,7 +29,7 @@
         <h3 class="mb-0">Solicitudes pendientes</h3>
         <button id="refreshRequests" class="btn btn-sm btn-outline-primary" type="button">Actualizar solicitudes</button>
       </div>
-      <p id="requestRefreshStatus" class="small text-secondary" role="status" aria-live="polite">Consultando solicitudes…</p>
+      <p id="requestRefreshStatus" class="small text-secondary" role="status" aria-live="polite">{% if registration_error %}{{ registration_error }}{% else %}Consultando solicitudes…{% endif %}</p>
       <div id="requestRows" class="management-rows" aria-live="polite"></div>
     </div>
   </section>

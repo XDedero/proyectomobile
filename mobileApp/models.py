@@ -22,6 +22,8 @@ def new_cloud_key():
 
 
 class UserProfile(models.Model):
+    cloud_id = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    cloud_revision = models.PositiveBigIntegerField(default=0, editable=False)
     class Role(models.TextChoices):
         VIEWER = 'viewer', 'Espectador'
         WORKER = 'worker', 'Trabajador'
@@ -53,6 +55,8 @@ class UserProfile(models.Model):
 
 
 class RegistrationRequest(models.Model):
+    cloud_id = models.UUIDField(default=uuid4, unique=True, editable=False)
+    cloud_synced = models.BooleanField(default=False, editable=False)
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pendiente'
         APPROVED = 'approved', 'Aceptada'

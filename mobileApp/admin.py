@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import PermissionDenied
 from .accounts import can_edit_user, is_primary_administrator
 from .access import is_administrator
 
@@ -10,6 +11,11 @@ admin.site.index_template = 'mobileApp/django_admin_index.html'
 
 
 class ApplicationUserAdmin(UserAdmin):
+    def delete_queryset(self, request, queryset):
+        if queryset.filter(app_profile__cloud_id__isnull=False).exists():
+            raise PermissionDenied('Gestione las cuentas compartidas desde el panel de la aplicación.')
+        return super().delete_queryset(request, queryset)
+
     def has_add_permission(self, request):
         return is_primary_administrator(request.user) and super().has_add_permission(request)
 
@@ -22,9 +28,13 @@ class ApplicationUserAdmin(UserAdmin):
         return tuple(dict.fromkeys(fields))
 
     def has_change_permission(self, request, obj=None):
+        if obj and getattr(getattr(obj, 'app_profile', None), 'cloud_id', None):
+            return False
         return super().has_change_permission(request, obj) and (obj is None or can_edit_user(request.user, obj))
 
     def has_delete_permission(self, request, obj=None):
+        if obj and getattr(getattr(obj, 'app_profile', None), 'cloud_id', None):
+            return False
         return super().has_delete_permission(request, obj) and (
             obj is None or (obj.pk != request.user.pk and can_edit_user(request.user, obj)))
 
