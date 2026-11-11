@@ -29,7 +29,13 @@ def query(sql, *, write=False):
     try:
         return supabase_query(sql, read_only=not write).get('rows', [])
     except CloudUnavailable as exc:
-        raise CloudUnavailable('No se pudo consultar el registro compartido. Compruebe la conexión e intente otra vez.') from exc
+        if exc.code == 'client_missing':
+            message = 'Esta instalación no encuentra el conector de la base de datos. Compruebe su instalación y reinicie la app.'
+        elif exc.code == 'project_configuration':
+            message = 'La conexión de esta instalación apunta a una configuración de proyecto no válida.'
+        else:
+            message = 'No se pudo consultar el registro compartido. Compruebe la conexión e intente otra vez.'
+        raise CloudUnavailable(message, code=exc.code) from exc
 
 
 def publish_request(item):

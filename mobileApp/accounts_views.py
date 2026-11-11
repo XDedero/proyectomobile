@@ -2,7 +2,7 @@
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import Permission
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -31,6 +31,8 @@ def record_id(data):
 @require_POST
 @never_cache
 def request_registration(request):
+    from . import shared_accounts
+
     try:
         data = json_body(request)
         first_name = validate_name(data.get('first_name'), 'nombre')
@@ -46,17 +48,24 @@ def request_registration(request):
         with transaction.atomic():
             if rut_in_use(rut):
                 raise ValidationError('Ya existe un usuario con ese RUT.')
-            if RegistrationRequest.objects.filter(rut=rut, status='pending').exists():
-                raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
-            item = RegistrationRequest.objects.create(first_name=first_name, last_name=last_name,
-                                                      rut=rut, password_hash=make_password(password))
-        from . import shared_accounts
+            item = RegistrationRequest.objects.filter(rut=rut, status='pending').first()
+            if item:
+                if (not shared_accounts.enabled() or item.cloud_synced
+                        or item.first_name != first_name or item.last_name != last_name
+                        or not check_password(password, item.password_hash)):
+                    raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
+            else:
+                item = RegistrationRequest.objects.create(first_name=first_name, last_name=last_name,
+                                                          rut=rut, password_hash=make_password(password))
         if shared_accounts.enabled():
             try:
-                shared_accounts.publish_request(item)
+                result = shared_accounts.publish_request(item)
             except ValidationError:
                 item.delete()
                 raise
+            if result.get('status') != 'pending':
+                item.delete()
+                return JsonResponse({'message': 'La solicitud ya fue resuelta. Consulte con un administrador.'})
         return JsonResponse({'id': item.pk, 'message': 'Solicitud enviada. Un administrador debe aprobar su cuenta.'}, status=201)
     except CloudUnavailable as exc:
         return error_response(str(exc) + ' La solicitud quedó pendiente de envío en este equipo.', 503)

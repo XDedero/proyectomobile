@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from io import BytesIO
 import os
 from pathlib import Path
@@ -21,7 +22,9 @@ from .project_service import MAX_PROJECT_BYTES, finite, import_shared_project, v
 
 
 class CloudUnavailable(Exception):
-    pass
+    def __init__(self, message, *, code='unavailable'):
+        super().__init__(message)
+        self.code = code
 
 
 def command_json(command, message, *, timeout):
@@ -34,7 +37,20 @@ def command_json(command, message, *, timeout):
             raise ValueError
         return json.JSONDecoder().raw_decode(result.stdout[start:])[0]
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        raise CloudUnavailable(message) from exc
+        code = 'command_failed'
+        if isinstance(exc, FileNotFoundError):
+            code = 'client_missing'
+        elif isinstance(exc, PermissionError):
+            code = 'client_permission'
+        elif isinstance(exc, subprocess.TimeoutExpired):
+            code = 'client_timeout'
+        elif isinstance(exc, ValueError):
+            code = 'invalid_response'
+        logging.getLogger(__name__).warning(
+            'Cloud connector failed: code=%s executable=%s exit=%s',
+            code, Path(command[0]).name, getattr(exc, 'returncode', None),
+        )
+        raise CloudUnavailable(message, code=code) from exc
 
 
 def drive_command(*args):
@@ -58,17 +74,29 @@ def project_title(name):
     return re.sub(r'(?: - \d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)?\.pdf$', '', name, flags=re.I).strip()
 
 
+def supabase_command():
+    """Resolve npm's Windows launcher using its actual location on PATH."""
+    cli = shutil.which('supabase')
+    if cli and Path(cli).suffix.lower() not in ('.cmd', '.bat'):
+        return [cli]
+    candidates = []
+    if cli:
+        candidates.append(Path(cli).parent / 'node_modules' / 'supabase' / 'dist' / 'supabase.js')
+    candidates.append(
+        Path(os.getenv('APPDATA') or Path.home() / 'AppData' / 'Roaming')
+        / 'npm' / 'node_modules' / 'supabase' / 'dist' / 'supabase.js')
+    node = shutil.which('node')
+    if node:
+        for candidate in candidates:
+            if candidate.is_file():
+                return [node, str(candidate)]
+    raise CloudUnavailable('Esta instalación no encuentra el conector de la base de datos en su entorno.',
+                           code='client_missing')
+
+
 def supabase_query(sql, *, read_only):
     message = 'No se pudo consultar la base de datos. Revisa la conexión y los permisos.'
-    cli = shutil.which('supabase')
-    npm_cli = (Path(os.getenv('APPDATA') or Path.home() / 'AppData' / 'Roaming')
-               / 'npm' / 'node_modules' / 'supabase' / 'dist' / 'supabase.js')
-    if cli and Path(cli).suffix.lower() not in ('.cmd', '.bat'):
-        command = [cli]
-    elif npm_cli.is_file():
-        command = ['node', str(npm_cli)]
-    else:
-        raise CloudUnavailable(message)
+    command = supabase_command()
     workdir = os.environ.get('PLANOS_SUPABASE_WORKDIR')
     if not workdir:
         profile = settings.BASE_DIR / 'supabase-workdir.txt'
@@ -80,7 +108,7 @@ def supabase_query(sql, *, read_only):
     if workdir:
         directory = Path(workdir)
         if not directory.is_absolute() or not (directory / 'supabase' / '.temp' / 'project-ref').is_file():
-            raise CloudUnavailable(message)
+            raise CloudUnavailable(message, code='project_configuration')
         command.extend(['--workdir', workdir])
     with TemporaryDirectory(prefix='planos-supabase-') as directory:
         query = Path(directory) / 'query.sql'

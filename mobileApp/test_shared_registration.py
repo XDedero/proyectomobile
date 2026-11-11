@@ -1,4 +1,6 @@
 """Failures must preserve submissions and never report a local-only save as shared."""
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -6,13 +8,24 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .cloud_projects import CloudUnavailable
+from .cloud_projects import CloudUnavailable, supabase_command
 from .models import RegistrationRequest
 
 
 @override_settings(APP_SHARED_ACCOUNTS=True,
                    PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class SharedRegistrationTests(TestCase):
+    def test_npm_client_is_resolved_from_the_windows_launcher(self):
+        with TemporaryDirectory() as temporary:
+            npm = Path(temporary) / 'custom-npm'
+            entry = npm / 'node_modules' / 'supabase' / 'dist' / 'supabase.js'
+            entry.parent.mkdir(parents=True)
+            entry.touch()
+            launcher = str(npm / 'supabase.cmd')
+            with patch.dict('os.environ', {'APPDATA': str(Path(temporary) / 'other-appdata')}):
+                with patch('mobileApp.cloud_projects.shutil.which', side_effect=[launcher, 'node.exe']):
+                    self.assertEqual(supabase_command(), ['node.exe', str(entry)])
+
     def payload(self):
         return {'first_name': 'Prueba', 'last_name': 'Compartida', 'rut': '12345678-5',
                 'password': 'Cascada!Sur2026', 'confirm_password': 'Cascada!Sur2026'}
@@ -30,6 +43,22 @@ class SharedRegistrationTests(TestCase):
             response = self.client.post(reverse('request_registration'), self.payload(), content_type='application/json')
         self.assertEqual(response.status_code, 400)
         self.assertFalse(RegistrationRequest.objects.exists())
+
+    def test_retry_uses_the_original_request_after_connection_failure(self):
+        with patch('mobileApp.shared_accounts.query', side_effect=CloudUnavailable('Sin conexión')):
+            first = self.client.post(reverse('request_registration'), self.payload(), content_type='application/json')
+        item = RegistrationRequest.objects.get()
+        self.assertEqual(first.status_code, 503)
+        changed = {**self.payload(), 'password': 'OtraClave!2026', 'confirm_password': 'OtraClave!2026'}
+        with patch('mobileApp.shared_accounts.query', return_value=[{'result': {'status': 'pending'}}]) as query:
+            denied = self.client.post(reverse('request_registration'), changed, content_type='application/json')
+            self.assertEqual(denied.status_code, 400)
+            query.assert_not_called()
+            retried = self.client.post(reverse('request_registration'), self.payload(), content_type='application/json')
+        self.assertEqual(retried.status_code, 201)
+        self.assertEqual(retried.json()['id'], item.pk)
+        self.assertIn(str(item.cloud_id), query.call_args.args[0])
+        self.assertTrue(RegistrationRequest.objects.get().cloud_synced)
 
     def test_pending_list_imports_global_identity_without_a_password(self):
         admin = get_user_model().objects.create_superuser('shared-test-admin')
