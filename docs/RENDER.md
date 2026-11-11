@@ -1,5 +1,9 @@
 # Despliegue y rendimiento en Render
 
+Para un servicio **gratuito**, usar [RENDER_FREE.md](RENDER_FREE.md): el modo
+`PLANOS_CLOUD_MODE=1` utiliza Supabase y Drive y no necesita `/var/data`.
+Las instrucciones de disco y SQLite de este documento corresponden al modo local.
+
 Las optimizaciones conservan las APIs, los datos y los permisos. No cambian el formato
 de los planos, las fichas de Excel, las exportaciones ni los procesos de nube.
 

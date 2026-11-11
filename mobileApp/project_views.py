@@ -181,6 +181,9 @@ def cached_projects(user):
 
 
 def can_clear_local(kind, plan, user):
+    from django.conf import settings
+    if settings.PLANOS_CLOUD_MODE:
+        return False
     from .authorization import application_profile
     if application_profile(user) is not None:
         return can_delete_plan(user, plan)

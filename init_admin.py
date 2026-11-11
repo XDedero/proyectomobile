@@ -19,7 +19,8 @@ if username and password:
     user.is_superuser = True
     user.is_staff = True
     user.is_active = True
-    user.set_password(password)
+    if created or os.environ.get('DJANGO_RESET_SUPERUSER_PASSWORD') == '1':
+        user.set_password(password)
     user.user_permissions.set(Permission.objects.all())
     user.save()
     profile = getattr(user, 'app_profile', None)
@@ -34,5 +35,5 @@ if username and password:
     if created:
         print(f"Superusuario '{username}' creado exitosamente con permisos totales.")
     else:
-        print(f"Superusuario '{username}' actualizado con permisos totales y nueva contraseña.")
+        print(f"Superusuario '{username}' verificado; se conserva su contraseña salvo reinicio explícito.")
 
