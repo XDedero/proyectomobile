@@ -1,4 +1,4 @@
-"""The admin account alone controls administrator accounts; its privilege cannot be copied."""
+"""Only the primary admin can manage other admins; any admin can grant the role."""
 from importlib import import_module
 from types import SimpleNamespace
 
@@ -40,15 +40,14 @@ class PrimaryAdministratorTests(TestCase):
         self.assertEqual(UserProfile.objects.filter(is_primary_administrator=True).count(), 1)
         self.assertFalse(is_primary_administrator(self.administrator))
 
-    def test_only_primary_can_grant_modify_demote_and_delete_administrators(self):
-        denied = self.post(self.administrator, id=self.worker.pk, role='administrator')
-        self.assertEqual(denied.status_code, 403)
-        granted = self.post(self.primary, id=self.worker.pk, role='administrator')
+    def test_administrators_can_grant_roles_but_only_primary_can_manage_other_administrators(self):
+        granted = self.post(self.administrator, id=self.worker.pk, role='administrator')
         self.assertEqual(granted.status_code, 200, granted.content)
         self.worker.refresh_from_db()
         self.assertEqual(self.worker.app_profile.role, 'administrator')
         self.assertFalse(self.worker.app_profile.is_primary_administrator)
         self.assertEqual(self.post(self.administrator, id=self.worker.pk, first_name='Cambio').status_code, 403)
+        self.assertEqual(self.post(self.administrator, id=self.worker.pk, role='worker').status_code, 403)
         self.assertEqual(self.post(self.primary, id=self.worker.pk, first_name='Luis').status_code, 200)
         self.assertEqual(self.post(self.primary, id=self.worker.pk, role='worker').status_code, 200)
         self.assertEqual(self.post(self.primary, id=self.worker.pk, role='administrator').status_code, 200)
@@ -79,7 +78,7 @@ class PrimaryAdministratorTests(TestCase):
         self.assertTrue(other['can_delete'])
         self.client.force_login(self.administrator)
         regular_data = self.client.get(reverse('management_data')).json()
-        self.assertFalse(regular_data['can_manage_administrators'])
+        self.assertTrue(regular_data['can_manage_administrators'])
         primary = next(user for user in regular_data['users'] if user['id'] == self.primary.pk)
         self.assertFalse(primary['can_edit'])
         self.assertFalse(primary['can_delete'])
@@ -110,7 +109,15 @@ class PrimaryAdministratorTests(TestCase):
         self.administrator.save()
         self.administrator.user_permissions.set(Permission.objects.all())
         self.assertFalse(is_primary_administrator(self.administrator))
-        self.assertEqual(self.post(self.administrator, id=self.worker.pk, role='administrator').status_code, 403)
+        self.assertEqual(self.post(self.administrator, id=self.worker.pk, role='administrator').status_code, 200)
+        for target in (self.primary, self.worker):
+            for changes in ({'first_name': 'Cambio'}, {'role': 'worker'}, {'action': 'delete'}):
+                with self.subTest(target=target.username, changes=changes):
+                    self.assertEqual(self.post(self.administrator, id=target.pk, **changes).status_code, 403)
+        self.administrator.refresh_from_db()
+        self.worker.refresh_from_db()
+        self.assertFalse(self.administrator.app_profile.is_primary_administrator)
+        self.assertFalse(self.worker.app_profile.is_primary_administrator)
 
     def test_migration_assigns_admin_once_preserving_passwords_and_other_accounts(self):
         original_password = self.primary.password

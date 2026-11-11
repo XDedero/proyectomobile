@@ -21,6 +21,7 @@ def step(operation, directory, state_path):
     django.setup()
     from django.contrib.auth import get_user_model
     from django.core.management import call_command
+    from django.db.models import Max
     from django.test import Client
     from mobileApp.models import RegistrationRequest, UserProfile
 
@@ -34,28 +35,43 @@ def step(operation, directory, state_path):
     if operation != 'login':
         client.force_login(get_user_model().objects.get(username='test-shared-admin'))
     if operation == 'submit':
-        response = client.post('/api/auth/register/', {
-            'first_name': 'Prueba', 'last_name': 'Sincronización', 'rut': state['rut'],
-            'password': state['password'], 'confirm_password': state['password'],
-        }, content_type='application/json')
+        try:
+            response = client.post('/api/auth/register/', {
+                'first_name': 'Prueba', 'last_name': 'Sincronización', 'rut': state['rut'],
+                'password': state['password'], 'confirm_password': state['password'],
+            }, content_type='application/json')
+        finally:
+            # Capture the UUID even if the response failed after committing remotely.
+            # Cleanup is restricted to these test identities, never another RUT's records.
+            identifiers = state.setdefault('cloud_ids', [])
+            for identifier in RegistrationRequest.objects.filter(rut=state['rut']).values_list('cloud_id', flat=True):
+                if str(identifier) not in identifiers:
+                    identifiers.append(str(identifier))
+            state_path.write_text(json.dumps(state), encoding='utf-8')
         assert response.status_code == 201, (response.status_code, response.content)
         item = RegistrationRequest.objects.get(pk=response.json()['id'])
+        assert str(item.cloud_id) != state.get('cloud_id'), 'A resubmission must use a new UUID'
         state.update(cloud_id=str(item.cloud_id), first_id=item.pk)
         state_path.write_text(json.dumps(state), encoding='utf-8')
-    elif operation == 'approve':
+    elif operation in ('approve', 'reject'):
         response = client.get('/api/administration/requests/pending/')
         assert response.status_code == 200, (response.status_code, response.content)
         item = RegistrationRequest.objects.get(cloud_id=state['cloud_id'])
         # Deliberately make local request IDs differ between the installations.
-        RegistrationRequest.objects.filter(pk=item.pk).update(id=item.pk + 100)
+        next_id = RegistrationRequest.objects.aggregate(maximum=Max('pk'))['maximum'] + 100
+        RegistrationRequest.objects.filter(pk=item.pk).update(id=next_id)
         item = RegistrationRequest.objects.get(cloud_id=state['cloud_id'])
         assert item.pk != state['first_id']
         assert 'password' not in response.content.decode()
         response = client.post('/api/administration/requests/', {
-            'id': item.pk, 'action': 'approve', 'role': 'worker',
+            'id': item.pk, 'action': operation, 'role': 'worker',
         }, content_type='application/json')
         assert response.status_code == 200, (response.status_code, response.content)
-        assert UserProfile.objects.get(cloud_id=state['cloud_id']).role == 'worker'
+        if operation == 'approve':
+            assert UserProfile.objects.get(cloud_id=state['cloud_id']).role == 'worker'
+        else:
+            assert not UserProfile.objects.filter(cloud_id=state['cloud_id']).exists()
+        assert not RegistrationRequest.objects.filter(cloud_id=state['cloud_id']).exists()
     elif operation == 'login':
         response = client.post('/api/auth/login/', {
             'username': state['rut'], 'password': state['password'],
@@ -91,22 +107,23 @@ def main():
             'rut': body + '-' + rut_check_digit(body), 'password': 'Registro!' + uuid4().hex,
         }), encoding='utf-8')
         try:
-            for operation, installation in [('submit', first), ('approve', second), ('login', first),
+            for operation, installation in [('submit', first), ('reject', second), ('submit', first),
+                                             ('approve', second), ('login', first),
                                              ('role', second), ('login', first)]:
                 subprocess.run([sys.executable, __file__, '--step', operation, str(installation), str(state_path)],
                                cwd=ROOT, check=True)
         finally:
             state = json.loads(state_path.read_text(encoding='utf-8'))
-            if state.get('cloud_id'):
+            if state.get('cloud_ids'):
                 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proyectomobile.settings')
                 import django
                 django.setup()
                 from mobileApp.cloud_projects import supabase_query
                 from uuid import UUID
-                identifier = str(UUID(state['cloud_id']))
+                identifiers = ','.join("'" + str(UUID(value)) + "'" for value in state['cloud_ids'])
                 supabase_query(
-                    f"BEGIN; DELETE FROM app_identity.registration_requests WHERE id='{identifier}'; "
-                    f"DELETE FROM app_identity.accounts WHERE id='{identifier}'; COMMIT;", read_only=False)
+                    f"BEGIN; DELETE FROM app_identity.registration_requests WHERE id IN ({identifiers}); "
+                    f"DELETE FROM app_identity.accounts WHERE id IN ({identifiers}); COMMIT;", read_only=False)
                 print('PASS removed test registry records', flush=True)
 
 

@@ -14,13 +14,17 @@ ROOT = Path(__file__).resolve().parent.parent
 HOST = '127.0.0.1'
 PORT = 8000
 URL = f'http://{HOST}:{PORT}/'
-CHECK_IMPORTS = 'import django, ezdxf, openpyxl, defusedxml, PIL, psycopg, pypdf, whitenoise'
+CHECK_IMPORTS = 'import django, ezdxf, openpyxl, defusedxml, psycopg, pypdf, whitenoise; from PIL import Image'
 
 
-def has_dependencies(python):
-    return subprocess.run(
-        [str(python), '-c', CHECK_IMPORTS], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode == 0
+def dependency_error(python):
+    result = subprocess.run(
+        [str(python), '-c', CHECK_IMPORTS], cwd=ROOT,
+        capture_output=True, text=True, errors='replace',
+    )
+    if result.returncode == 0:
+        return ''
+    return result.stderr.strip() or result.stdout.strip() or 'No se pudieron cargar las dependencias.'
 
 
 def can_run(python):
@@ -34,7 +38,7 @@ def can_run(python):
 
 def app_python():
     current = Path(sys.executable)
-    if has_dependencies(current):
+    if not dependency_error(current):
         return current
 
     directory = ROOT / '.venv-local'
@@ -42,11 +46,22 @@ def app_python():
     if not can_run(python):
         print('Preparando el entorno Python de esta instalación…', flush=True)
         subprocess.run([str(current), '-m', 'venv', str(directory)], cwd=ROOT, check=True)
-    if not has_dependencies(python):
+    if dependency_error(python):
         print('Instalando las dependencias de la aplicación…', flush=True)
         subprocess.run([str(python), '-m', 'pip', 'install', '-r', 'requirements.txt'], cwd=ROOT, check=True)
-        if not has_dependencies(python):
-            raise RuntimeError('El entorno se instaló, pero alguna dependencia de la aplicación no se puede cargar.')
+        error = dependency_error(python)
+        if error:
+            # pip considers installed packages satisfied even when their compiled
+            # extensions belong to another Python version (e.g. cp314 on 3.13).
+            print('Las dependencias instaladas no se pueden cargar. Reparando el entorno Python…', flush=True)
+            subprocess.run(
+                [str(python), '-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir',
+                 '-r', 'requirements.txt'], cwd=ROOT, check=True,
+            )
+            error = dependency_error(python)
+            if error:
+                print(error, file=sys.stderr)
+                raise RuntimeError('No se pudieron cargar las dependencias después de reparar el entorno. Revisa el error anterior.')
     return python
 
 

@@ -57,8 +57,9 @@ class SharedRegistrationTests(TestCase):
             result = postgres_query('postgresql://server:secret@pooler.example/postgres',
                                     'SELECT 42 AS answer;', read_only=True)
         self.assertEqual(result, {'rows': [{'answer': 42}]})
-        self.assertEqual(connector.call_args.kwargs['options'],
-                         '-c default_transaction_read_only=on')
+        self.assertNotIn('options', connector.call_args.kwargs)
+        self.assertFalse(connector.call_args.kwargs['autocommit'])
+        self.assertIs(connection.read_only, True)
         cursor.execute.assert_called_once_with('SELECT 42 AS answer;', prepare=False)
 
     def test_npm_client_is_resolved_from_the_windows_launcher(self):

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from tempfile import TemporaryDirectory
+from urllib.parse import unquote, urlsplit
 from zipfile import BadZipFile, ZipFile
 
 from django.conf import settings
@@ -27,12 +28,13 @@ class CloudUnavailable(Exception):
         self.code = code
 
 
-def command_json(command, message, *, timeout):
+def command_json(command, message, *, timeout, env=None):
     try:
         result = subprocess.run(command, cwd=settings.BASE_DIR, capture_output=True, text=True,
-                                encoding='utf-8', errors='replace', timeout=timeout, check=True)
+                                encoding='utf-8', errors='replace', timeout=timeout, check=True, env=env)
         # The Supabase CLI can print its target before the JSON result.
-        start = result.stdout.find('{')
+        start = min((position for character in ('{', '[')
+                     if (position := result.stdout.find(character)) >= 0), default=-1)
         if start < 0:
             raise ValueError
         return json.JSONDecoder().raw_decode(result.stdout[start:])[0]
@@ -44,6 +46,12 @@ def command_json(command, message, *, timeout):
             code = 'client_permission'
         elif isinstance(exc, subprocess.TimeoutExpired):
             code = 'client_timeout'
+        elif isinstance(exc, subprocess.CalledProcessError):
+            detail = ((exc.stderr or '') + (exc.stdout or '')).lower()
+            if 'necessary privileges' in detail or 'status 403' in detail:
+                code = 'account_permission'
+            elif 'access token not provided' in detail or 'status 401' in detail:
+                code = 'account_authentication'
         elif isinstance(exc, ValueError):
             code = 'invalid_response'
         logging.getLogger(__name__).warning(
@@ -75,7 +83,7 @@ def project_title(name):
 
 
 def supabase_command():
-    """Resolve npm's Windows launcher using its actual location on PATH."""
+    """Find the installed CLI, including npm's local cache on Windows."""
     cli = shutil.which('supabase')
     if cli and Path(cli).suffix.lower() not in ('.cmd', '.bat'):
         return [cli]
@@ -90,7 +98,15 @@ def supabase_command():
         for candidate in candidates:
             if candidate.is_file():
                 return [node, str(candidate)]
-    raise CloudUnavailable('Esta instalación no encuentra el conector de la base de datos en su entorno.',
+    # `npx supabase` installs a native CLI in npm's cache, without adding it
+    # to PATH. Reuse that installation instead of requiring another login.
+    cache = Path(os.environ.get('npm_config_cache') or
+                 Path(os.getenv('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local') / 'npm-cache')
+    binaries = list(cache.glob('_npx/*/node_modules/@supabase/cli-windows-x64/bin/supabase.exe'))
+    if binaries:
+        return [str(max(binaries, key=lambda path: path.stat().st_mtime))]
+    raise CloudUnavailable('Configure la conexión PostgreSQL privada en SUPABASE_DATABASE_URL o '
+                           'conexion-base-datos.txt. No se encontró un conector alternativo de Supabase.',
                            code='client_missing')
 
 
@@ -109,6 +125,21 @@ def supabase_database_url():
                   or any(character.isspace() for character in value)):
         raise CloudUnavailable('La configuración privada de la base de datos no es válida.',
                                code='database_configuration')
+    if value:
+        try:
+            parsed = urlsplit(value)
+            # Reject example strings before attempting DNS or authentication. Never
+            # include the URI in an exception: it contains the database password.
+            placeholder = re.search(r'\[(?:tu[_ -]?password|your[_ -]?password|password)\]',
+                                    unquote(parsed.password or ''), re.I)
+            if not parsed.hostname or any(char in parsed.hostname for char in '<>') or placeholder:
+                raise ValueError
+            parsed.port
+        except ValueError as exc:
+            raise CloudUnavailable(
+                'Complete la URI PostgreSQL privada en SUPABASE_DATABASE_URL o conexion-base-datos.txt; '
+                'los valores de ejemplo no permiten conectarse.', code='database_configuration',
+            ) from exc
     return value
 
 
@@ -122,14 +153,16 @@ def postgres_query(database_url, sql, *, read_only):
                                code='client_missing') from exc
     connection_options = {
         'connect_timeout': 12,
-        'autocommit': True,
+        'autocommit': not read_only,
         'prepare_threshold': None,
         'row_factory': dict_row,
     }
-    if read_only:
-        connection_options['options'] = '-c default_transaction_read_only=on'
     try:
         with psycopg.connect(database_url, **connection_options) as connection:
+            if read_only:
+                # Psycopg emits BEGIN READ ONLY for this transaction. A startup
+                # option or a session SET can fail or leak across pooler clients.
+                connection.read_only = True
             with connection.cursor() as cursor:
                 cursor.execute(sql, prepare=False)
                 rows = []
@@ -140,7 +173,12 @@ def postgres_query(database_url, sql, *, read_only):
                         break
         return {'rows': rows}
     except psycopg.Error as exc:
-        code = 'database_query' if getattr(exc, 'sqlstate', None) else 'database_connection'
+        state = getattr(exc, 'sqlstate', None)
+        code = {
+            '42P01': 'database_schema', '3F000': 'database_schema',
+            '42883': 'database_schema', '42703': 'database_schema',
+            '42501': 'database_permission', '28P01': 'database_authentication',
+        }.get(state, 'database_query' if state else 'database_connection')
         logging.getLogger(__name__).warning(
             'Database connector failed: code=%s sqlstate=%s', code, getattr(exc, 'sqlstate', None),
         )
@@ -172,10 +210,19 @@ def supabase_query(sql, *, read_only):
         query = Path(directory) / 'query.sql'
         query.write_text(sql, encoding='utf-8')
         flag = '--read-only' if read_only else '--yes'
-        return command_json(
-            [*command, 'db', 'query', '--remote', flag, '--file', str(query)],
-            message, timeout=30 if read_only else 90,
+        environment = os.environ.copy()
+        environment.update(DO_NOT_TRACK='1', SUPABASE_TELEMETRY_DISABLED='1', SUPABASE_NO_UPDATE_NOTIFIER='1')
+        result = command_json(
+            [*command, '--agent=no', 'db', 'query', '--output', 'json', flag, '--file', str(query), '--remote'],
+            message, timeout=30 if read_only else 90, env=environment,
         )
+        # CLI v3 returns a JSON array for remote queries; native PostgreSQL and
+        # older CLI releases use an object containing `rows`.
+        if isinstance(result, list):
+            result = {'rows': result}
+        if not isinstance(result, dict) or not isinstance(result.get('rows'), list):
+            raise CloudUnavailable('Supabase devolvió una respuesta de consulta no válida.', code='invalid_response')
+        return result
 
 
 def supabase_metadata(pdf_id, excel_id):

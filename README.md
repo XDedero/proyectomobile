@@ -20,6 +20,8 @@ el lanzador prepara uno local e instala las dependencias. Luego aplica las
 migraciones de SQLite y abre la app en **http://127.0.0.1:8000/** cuando esté lista.
 El arranque local no depende de una sesión en Supabase. Para comprobar solo la
 instalación, ejecuta `ejecutar_debug.bat --check-only`.
+El lanzador también repara paquetes binarios incompatibles con la versión de Python instalada.
+Las cuentas locales, incluido `admin`, pueden iniciar sesión aunque Supabase no esté disponible.
 
 Para iniciar manualmente desde un entorno ya creado:
 
@@ -139,6 +141,10 @@ instalación local también puede guardarse la misma URL completa, como una úni
 privado solo a quien administra la instalación. Las tablas y funciones de identidad son
 privadas y no conceden acceso a los roles públicos del navegador. La herramienta de línea
 de comandos anterior se conserva únicamente como compatibilidad temporal.
+La conexión y la instalación del esquema se explican en [Configurar Supabase](docs/SUPABASE.md).
+`manage.py migrate` prepara SQLite; el registro privado de Supabase se prepara por separado con
+`manage.py setup_shared_accounts --initialize` y se comprueba con `manage.py setup_shared_accounts`.
+El documento informativo `conexion_supabase.txt`, si contiene `[TU_PASSWORD]`, no es una conexión válida.
 Cada servidor debe ejecutar esta versión y tener configurada la misma conexión privada.
 Al abrir el panel se envían las solicitudes pendientes que todavía existían en ese equipo.
 `python manage.py sync_shared_accounts` permite ejecutar esa sincronización manualmente.

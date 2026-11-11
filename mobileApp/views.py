@@ -7,7 +7,7 @@ from xml.etree import ElementTree
 from zipfile import ZipFile
 
 from django.conf import settings
-from django.contrib.auth import login as django_login, logout as django_logout
+from django.contrib.auth import get_user_model, login as django_login, logout as django_logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -71,16 +71,24 @@ def auth_login(request):
     from .models import UserProfile
     from . import shared_accounts
     from .cloud_projects import CloudUnavailable
-    if shared_accounts.enabled():
+    identifier = data['username'].strip()
+    try:
+        rut = normalize_rut(identifier)
+    except ValidationError:
+        rut = None
+    profile = UserProfile.objects.select_related('user').filter(rut=rut).first() if rut else None
+    local_user = profile.user if profile else get_user_model().objects.select_related('app_profile').filter(
+        username=identifier).first()
+    local_profile = getattr(local_user, 'app_profile', None)
+    # Legacy accounts, including the primary admin, have local credentials.
+    # Only shared or unknown identities need a cloud refresh before authentication.
+    if shared_accounts.enabled() and (local_user is None or (local_profile and local_profile.cloud_id)):
         try:
-            shared_accounts.sync_login(data['username'])
+            shared_accounts.sync_login(identifier)
         except (CloudUnavailable, ValidationError) as exc:
             return JsonResponse({'error': str(exc)}, status=503)
-    try:
-        rut = normalize_rut(data['username'])
-    except ValidationError:
-        pass
-    else:
+    data['username'] = identifier
+    if rut:
         profile = UserProfile.objects.select_related('user').filter(rut=rut).first()
         if profile:
             data['username'] = profile.user.username

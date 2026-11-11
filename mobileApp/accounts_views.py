@@ -45,6 +45,10 @@ def request_registration(request):
             raise ValidationError('Las contraseñas no coinciden.')
         user = get_user_model()(username=rut, first_name=first_name, last_name=last_name)
         validate_password(password, user=user)
+        if shared_accounts.enabled():
+            previous = RegistrationRequest.objects.filter(rut=rut, status='pending', cloud_synced=True).first()
+            if previous:
+                shared_accounts.refresh_request(previous)
         with transaction.atomic():
             if rut_in_use(rut):
                 raise ValidationError('Ya existe un usuario con ese RUT.')

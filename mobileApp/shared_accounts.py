@@ -2,6 +2,7 @@
 import json
 import threading
 import time
+from datetime import datetime
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -30,9 +31,22 @@ def query(sql, *, write=False):
         return supabase_query(sql, read_only=not write).get('rows', [])
     except CloudUnavailable as exc:
         if exc.code == 'client_missing':
-            message = 'Esta instalación no tiene configurada la conexión privada de la base de datos.'
+            message = ('Configure la conexión privada con SUPABASE_DATABASE_URL o '
+                       'conexion-base-datos.txt en esta instalación.')
         elif exc.code in ('project_configuration', 'database_configuration'):
             message = 'La conexión de esta instalación apunta a una configuración de proyecto no válida.'
+        elif exc.code == 'database_schema':
+            message = ('Falta preparar el registro compartido en Supabase. Ejecute '
+                       'manage.py setup_shared_accounts --initialize desde el servidor.')
+        elif exc.code == 'database_authentication':
+            message = 'Supabase rechazó las credenciales de la conexión privada. Revise su usuario y contraseña PostgreSQL.'
+        elif exc.code == 'database_permission':
+            message = 'El usuario PostgreSQL de esta instalación no tiene permisos para consultar el registro compartido.'
+        elif exc.code == 'account_permission':
+            message = ('La sesión guardada de Supabase no tiene acceso al proyecto de esta app. '
+                       'Conecte la cuenta administradora del proyecto correcto.')
+        elif exc.code == 'account_authentication':
+            message = 'La sesión de Supabase no está disponible. Vuelva a conectar la cuenta administradora del proyecto.'
         else:
             message = 'No se pudo consultar el registro compartido. Compruebe la conexión e intente otra vez.'
         raise CloudUnavailable(message, code=exc.code) from exc
@@ -50,6 +64,14 @@ def publish_request(item):
     RegistrationRequest.objects.filter(pk=item.pk).update(cloud_synced=True)
     item.cloud_synced = True
     return result
+
+
+def refresh_request(item):
+    """Retire a local replica resolved by an administrator on another installation."""
+    rows = query('SELECT status FROM app_identity.registration_requests WHERE id=' +
+                 literal(item.cloud_id) + '::uuid;')
+    if not rows or rows[0]['status'] != 'pending':
+        item.delete()
 
 
 def sync_requests():
@@ -80,7 +102,11 @@ def sync_requests():
                 RegistrationRequest.objects.filter(pk=item.pk).update(**values)
             else:
                 item = RegistrationRequest.objects.create(**values)
-            RegistrationRequest.objects.filter(pk=item.pk).update(created_at=parse_datetime(row['created_at']))
+            # psycopg returns timestamptz as datetime; the legacy CLI returns ISO text.
+            created_at = row['created_at']
+            if not isinstance(created_at, datetime):
+                created_at = parse_datetime(created_at)
+            RegistrationRequest.objects.filter(pk=item.pk).update(created_at=created_at)
 
 
 def apply_account(data):
@@ -127,7 +153,9 @@ def review_request(item, action, role, actor):
     result = rows[0]['result']
     if result.get('error'):
         raise ValidationError(result['error'])
-    if result.get('account'):
+    # Old database functions could return a composite with null fields on reject.
+    # Rejection must never attempt to create an account in this installation.
+    if action == 'approve' and result.get('account'):
         apply_account(result['account'])
     item.delete()
 

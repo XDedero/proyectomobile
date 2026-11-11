@@ -84,7 +84,8 @@ BEGIN
         RETURN jsonb_build_object('error','Otro administrador ya resolvió la solicitud. Actualice la lista.');
     END IF;
     SELECT * INTO account_row FROM accounts WHERE id=item.account_id;
-    RETURN jsonb_build_object('status',item.status,'account',to_jsonb(account_row));
+    RETURN jsonb_build_object('status',item.status,'account',
+        CASE WHEN item.status='approved' THEN to_jsonb(account_row) ELSE NULL END);
 END;
 $$;
 
