@@ -174,8 +174,9 @@
     async function openPlan(plan, currentRevision) {
         plan = await window.planVersions.beforeOpen(plan);
         if (!plan || currentRevision !== revision) return false;
-        const response = await fetch(plan.svg_url, { credentials: 'same-origin' });
-        if (!response.ok) throw new Error('No se pudo cargar la vista del plano. Puede volver a abrirlo desde Planos guardados.');
+        const source = await window.relOffline?.planSource(plan).catch(() => null);
+        const response = source || await fetch(plan.svg_url, { credentials: 'same-origin' });
+        if (!source && !response.ok) throw new Error('No se pudo cargar la vista del plano. Puede volver a abrirlo desde Planos guardados.');
         const drawing = await response.text();
         if (currentRevision !== revision) return;
         resetPreview();
@@ -189,6 +190,7 @@
             updatePlanCardUI();
             throw error;
         }
+        window.projectWorkspace?.keepOnDevice(plan, source);
         remember(plan.id);
         setMode('explore');
         activateProject();

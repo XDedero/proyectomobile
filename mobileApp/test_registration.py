@@ -102,6 +102,7 @@ class RegistrationTests(TestCase):
             expected = 403 if actor else 401
             self.assertEqual(self.post('manage_registration', {'id': item.pk, 'action': 'approve'}).status_code, expected)
             self.assertEqual(self.post('manage_user', {'id': self.worker.pk, 'action': 'delete'}).status_code, expected)
+            self.assertEqual(self.client.get(reverse('pending_registrations')).status_code, expected)
         self.client.force_login(self.admin)
         data = self.client.get(reverse('management_data')).json()
         self.assertEqual(data['requests'][0]['status'], 'pending')
@@ -182,14 +183,22 @@ class RegistrationTests(TestCase):
             self.assertEqual([request['id'] for request in data['requests']], [item.pk])
             self.assertEqual(data['requests'][0]['name'], 'María José Muñoz Ochoa')
             self.assertNotIn('password_hash', data['requests'][0])
+            pending = client.get(reverse('pending_registrations'))
+            self.assertIn('no-store', pending.headers['Cache-Control'])
+            self.assertEqual(pending.json(), {'requests': data['requests']})
+            panel = client.get(reverse('management_panel'))
+            self.assertIn('no-store', panel.headers['Cache-Control'])
+            self.assertEqual(panel.context['pending_requests'], data['requests'])
+            self.assertNotContains(panel, item.password_hash)
+            self.assertContains(client.get(reverse('admin:index')), reverse('management_panel'))
         decision = {'id': item.pk, 'action': 'approve', 'role': 'worker'}
         self.assertEqual(self.post('manage_registration', decision, clients[1]).status_code, 200)
-        self.assertEqual(clients[0].get(reverse('management_data')).json()['requests'], [])
+        self.assertEqual(clients[0].get(reverse('pending_registrations')).json()['requests'], [])
         self.assertEqual(self.post('manage_registration', decision, clients[0]).status_code, 404)
         rejected = self.submit(rut='22222222-2')
         self.assertEqual(self.post('manage_registration', {'id': rejected.pk, 'action': 'reject'}, clients[1]).status_code, 200)
         self.assertFalse(UserProfile.objects.filter(rut=rejected.rut).exists())
-        self.assertEqual(clients[0].get(reverse('management_data')).json()['requests'], [])
+        self.assertEqual(clients[0].get(reverse('pending_registrations')).json()['requests'], [])
 
     def test_every_administrator_can_approve_with_any_application_role(self):
         for administrator in (self.admin, self.primary_administrator(), self.ordinary_administrator()):

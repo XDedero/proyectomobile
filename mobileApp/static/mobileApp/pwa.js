@@ -13,9 +13,8 @@
       <p id="pwaConnection" role="status"></p>
       <div id="pwaInstallHelp"><p>Instala la app para abrir tus planos desde la pantalla de inicio.</p><ol><li>Abre esta dirección en Safari.</li><li>Toca Compartir y luego <strong>Agregar a pantalla de inicio</strong>.</li><li>Activa <strong>Abrir como app</strong> si aparece y toca Agregar.</li></ol></div>
       <button type="button" id="pwaInstall" class="btn btn-primary" hidden>Instalar Reloncaví</button>
-      <hr><h3>Trabajo sin conexión</h3><p>Descarga el plano abierto y su Excel antes de salir a terreno. Encuentra, actualiza o quita la copia en «Planos guardados».</p>
-      <p>Sin señal puedes consultar lo descargado y guardar cambios de sectores y celdas de Excel como pendientes. La sincronización se realiza al recuperar conexión con la app abierta. Importar, mover botones, cambiar la estructura del Excel y guardar en la nube requieren conexión.</p>
-      <button type="button" id="pwaDownload" class="btn btn-outline-primary">Descargar plano abierto</button>
+      <hr><h3>Trabajo sin conexión</h3><p>Al abrir un plano guardado, la app conserva una copia en este dispositivo. Puedes quitarla en «Planos guardados». Abre las hojas de Excel que vayas a consultar antes de perder la conexión.</p>
+      <p>Sin señal puedes consultar las copias y guardar cambios de sectores y celdas de Excel como pendientes. La sincronización se realiza al recuperar conexión con la app abierta. Importar, mover botones, cambiar la estructura del Excel y guardar en la nube requieren conexión.</p>
       <p id="pwaPending"></p><div class="pwa-actions"><button type="button" id="pwaSync" class="btn btn-primary">Sincronizar pendientes</button><button type="button" id="pwaExport" class="btn btn-outline-secondary">Exportar borradores</button><button type="button" id="pwaDiscard" class="btn btn-outline-danger">Descartar borradores</button></div>
       <ul id="pwaConflicts"></ul><hr><div id="pwaUpdateArea" hidden><p>Hay una nueva versión disponible.</p><button type="button" id="pwaUpdate" class="btn btn-primary">Actualizar app</button></div>
       <p id="pwaMessage" role="status"></p>`;
@@ -34,7 +33,6 @@
         $('pwaPending').textContent=state.count?`${state.count} cambios guardados en este dispositivo, pendientes del servidor.`:'No hay cambios pendientes de sincronizar.';
         $('pwaSync').disabled=!state.count||offline||state.syncing;
         $('pwaExport').disabled=$('pwaDiscard').disabled=!state.count||state.syncing;
-        $('pwaDownload').disabled=offline||!state.user;
         $('pwaInstallHelp').hidden=installed()||Boolean(installPrompt);
         if(!ios&&!installed()&&!installPrompt) $('pwaInstallHelp').innerHTML='<p>Usa la opción «Instalar app» o «Agregar a pantalla de inicio» del menú de tu navegador.</p>';
         $('pwaInstall').hidden=!installPrompt||installed();
@@ -53,14 +51,6 @@
     };
     window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;refresh();});
     window.addEventListener('appinstalled',()=>{installPrompt=null;refresh();});
-    $('pwaDownload').onclick=async()=>{
-        $('pwaDownload').disabled=true;message('Descargando el plano…');
-        try {
-            const copy=await window.relOffline.downloadPlan(window.projectWorkspace?.active);
-            message((copy.workbook_url?'Plano y Excel descargados.':'Plano descargado.')+' Para consultar hojas en el visor sin señal, ábrelas antes de desconectarte.');
-        }
-        catch(error){message(error.message);}finally{refresh();}
-    };
     $('pwaSync').onclick=async()=>{
         try {await window.relOffline.sync();message('Revisión de pendientes terminada. Si no hay conflictos, vuelve a abrir el plano para ver los datos sincronizados.');}
         catch(error){message(error.message);}

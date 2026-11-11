@@ -10,7 +10,8 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
 from .access import api_permissions, is_administrator
-from .models import ButtonCategory, CategoryWorkbook, PlanRole, PlanRoleGroup, Plan, PdfPlan
+from .accounts import can_edit_user, registration_data, user_data
+from .models import ButtonCategory, CategoryWorkbook, PlanRole, PlanRoleGroup, Plan, PdfPlan, RegistrationRequest
 from .pdf_views import error_response, json_body
 
 
@@ -31,7 +32,23 @@ def management_panel(request):
     files = [directory / 'templates/mobileApp/management.html',
              directory / 'static/mobileApp/management.js', directory / 'static/mobileApp/management.css']
     version = max(path.stat().st_mtime_ns for path in files)
-    return render(request, 'mobileApp/management.html', {'asset_version': str(version)})
+    return render(request, 'mobileApp/management.html', {
+        'asset_version': str(version),
+        'pending_requests': pending_registration_data(),
+    })
+
+
+def pending_registration_data():
+    return [
+        registration_data(item)
+        for item in RegistrationRequest.objects.filter(status='pending').select_related('reviewed_by')
+    ]
+
+
+@require_GET
+@administrators_only
+def pending_registrations(request):
+    return JsonResponse({'requests': pending_registration_data()})
 
 
 def category_data(category):
@@ -42,14 +59,12 @@ def category_data(category):
 @require_GET
 @administrators_only
 def management_data(request):
-    from .accounts import can_edit_user, user_data, registration_data
-    from .models import RegistrationRequest
     return JsonResponse({
         'can_manage_administrators': is_administrator(request.user),
         'users': [{**user_data(u), 'can_edit': can_edit_user(request.user, u),
                    'can_delete': u.pk != request.user.pk and can_edit_user(request.user, u)}
                   for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
-        'requests': [registration_data(item) for item in RegistrationRequest.objects.filter(status='pending')],
+        'requests': pending_registration_data(),
         'roles': [{'id': r.pk, 'name': r.name, 'description': r.description,
                    **{key: getattr(r, key) for key in ('can_view', 'can_export', 'can_create', 'all_plans')},
                    'users': list(r.users.values_list('pk', flat=True)),
@@ -58,8 +73,9 @@ def management_data(request):
                   for r in PlanRole.objects.prefetch_related('users', 'cad_plans', 'pdf_plans')],
         'groups': [{'id': g.pk, 'name': g.name, 'roles': list(g.roles.values_list('pk', flat=True)),
                     'users': list(g.users.values_list('pk', flat=True))} for g in PlanRoleGroup.objects.prefetch_related('roles', 'users')],
-        'plans': [{'id': f'{kind}:{p.pk}', 'name': p.name, 'kind': kind.upper()}
-                  for kind, model in [('pdf', PdfPlan), ('dxf', Plan)] for p in model.objects.all()],
+        'plans': [{'id': f'{kind}:{pk}', 'name': name, 'kind': kind.upper()}
+                  for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]
+                  for pk, name in model.objects.values_list('pk', 'name')],
         'categories': [category_data(c) for c in ButtonCategory.objects.prefetch_related('templates')],
     })
 

@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
     path('api/administration/', management_views.management_data, name='management_data'),
+    path('api/administration/requests/pending/', management_views.pending_registrations, name='pending_registrations'),
     path('api/administration/requests/', accounts_views.manage_registration, name='manage_registration'),
     path('api/administration/users/', accounts_views.manage_user, name='manage_user'),
     path('api/administration/roles/', management_views.manage_role, name='manage_role'),

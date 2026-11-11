@@ -102,7 +102,7 @@ class PdfPlanViewer {
         return failure;
     }
 
-    async load(sourceUrl, markers = [], initialPage = 1) {
+    async load(sourceUrl, markers = [], initialPage = 1, localSource = null) {
         this.clear();
         const version = this.version;
         this.showMessage('Abriendo plano PDF…');
@@ -113,11 +113,14 @@ class PdfPlanViewer {
             phase = 'document';
             const assetBase = new URL('.', new URL(this.options.pdfjsUrl || '/static/mobileApp/vendor/pdfjs/pdf-entry.mjs', location.href)).href;
             let source={url:sourceUrl};
-            if(window.relOffline?.offline) {
+            if(localSource) {
+                source={data:new Uint8Array(await localSource.arrayBuffer())};
+            } else if(window.relOffline?.offline) {
                 const saved=await fetch(sourceUrl,{credentials:'same-origin'});
                 if(!saved.ok) throw new Error('No se puede abrir la copia descargada de este PDF.');
                 source={data:new Uint8Array(await saved.arrayBuffer())};
             }
+            if (version !== this.version) return false;
             const loadingTask = pdfjs.getDocument({
                 ...source,
                 withCredentials: true,

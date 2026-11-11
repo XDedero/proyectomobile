@@ -6,6 +6,7 @@ from .access import is_administrator
 
 # Django's own user/group pages must obey the same administrator boundary.
 admin.site.has_permission = lambda request: is_administrator(request.user)
+admin.site.index_template = 'mobileApp/django_admin_index.html'
 
 
 class ApplicationUserAdmin(UserAdmin):

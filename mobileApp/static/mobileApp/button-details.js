@@ -124,7 +124,7 @@
         byId('ColorSection').hidden = mode !== 'appearance';
         byId('DescriptionSection').hidden = mode !== 'description';
         byId('Rows').hidden = editing && mode !== 'description';
-        byId('Edit').hidden = !data?.can_edit || editing;
+        byId('Edit').hidden = !options.assign || !data?.can_edit || editing;
         byId('Add').hidden = byId('Save').hidden = byId('Cancel').hidden = !editing;
         byId('Add').hidden = !editing || mode !== 'description';
         byId('Save').textContent = mode === 'description' ? 'Guardar descripción' : 'Guardar cambios';
@@ -164,7 +164,7 @@
     byId('Excel').onclick = () => afterClose(current?.options.openExcel);
     byId('Assign').onclick = () => afterClose(current?.options.assign);
     function startEdit() {
-        if (!current?.data?.can_edit) return;
+        if (!current?.options.assign || !current.data?.can_edit) return;
         current.editing = true;
         current.mode = typeof current.options.edit === 'string' ? current.options.edit : 'description';
         current.draft = current.data.descriptions.map(row => ({ ...row }));

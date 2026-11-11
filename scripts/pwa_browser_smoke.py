@@ -35,7 +35,14 @@ def check_browser(url, directory):
                 page.locator('#pdfFileInput').set_input_files(directory / 'plano_pdf_configurable.pdf')
             plan = response.value.json()
             expect(page.locator('#pdfViewport canvas').first).to_be_visible()
-            page.evaluate('relOffline.downloadPlan(projectWorkspace.active)')
+            page.locator('#btnPdfSavePlan').click()
+            page.evaluate("""async () => {
+                for (let attempt=0; attempt<100; attempt++) {
+                    if ((await relOffline.downloadedPlans()).length === 1) return;
+                    await new Promise(resolve => setTimeout(resolve,100));
+                }
+                throw new Error('El plano guardado no se conservó automáticamente en el dispositivo.');
+            }""")
             expect(page.locator('.plan-sector-legend')).to_be_hidden()
             sector = {'id': str(uuid4()), 'name': 'Sala offline', 'shape': 'rectangle', 'color': '#ef4444',
                       'page': 1, 'x': 450, 'y': 300, 'width': 200, 'height': 100, 'rotation': 0}

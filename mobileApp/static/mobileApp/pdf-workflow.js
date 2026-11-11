@@ -221,7 +221,7 @@
     async function configureMarker() {
         closeAreaControls();
         const marker = selectedMarker();
-        if (!marker) return;
+        if (!marker || !getPermissions().can_assign) return;
         if (window.planExcel) { await window.planExcel.assign('pdf', plan, marker); return; }
         focusBeforeDialog = document.activeElement;
         dialogMarkerId = marker.id;
@@ -339,12 +339,15 @@
         setBusy(true);
         activateProject();
         try {
-            const loaded = await viewer.load(plan.source_url, plan.markers);
+            const source = await window.relOffline?.planSource(nextPlan).catch(() => null);
+            if (currentRevision !== revision) return;
+            const loaded = await viewer.load(nextPlan.source_url, nextPlan.markers, 1, source);
             if (currentRevision !== revision || !loaded) return;
             updateMarkers();
             activateProject();
             status('Plano listo. Puede recorrer sus páginas y añadir botones.');
             clearError();
+            window.projectWorkspace?.keepOnDevice(nextPlan, source);
             return true;
         } finally { if (currentRevision === revision) setBusy(false); }
     }

@@ -171,7 +171,7 @@
     }
 
     async function registerCurrent(editor) {
-        if (registerContext || editor.busy || !editor.visible) return;
+        if (registerContext || editor.busy || !editor.visible || !editor.canSavePiece) return;
         editor.commitAll();
         if (editor.hasUnsavedChanges && !(await editor.save())) return;
         if (!editor.pieceEdit && (editor.pieceRegistration || editor.metadata.motor_registration)?.registered) {

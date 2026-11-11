@@ -134,12 +134,12 @@ En otra instalación, use **Importar PDF configurable → Importar proyecto**. S
 Los roles de la aplicación son:
 
 - **Espectador:** rol inicial de las solicitudes aprobadas. Consulta los planos guardados e importa archivos para verlos; no puede editar, guardar, exportar, eliminar ni crear categorías y no tiene historial propio.
-- **Trabajador:** crea y modifica planos, botones, radios, sectores, Excel y piezas, guarda en Drive y crea categorías desde Añadir botón o Añadir pieza. Solo elimina planos propios; no administra usuarios ni modifica o elimina categorías existentes.
+- **Trabajador:** crea planos y puede editar, guardar, exportar o eliminar los propios, con sus botones, sectores y fichas. Consulta los planos ajenos en modo lectura. También puede gestionar piezas y crear categorías desde Añadir botón o Añadir pieza.
 - **Administrador:** gestiona solicitudes, usuarios y categorías y puede editar o eliminar cualquier plano.
 
 La migración `0030_primary_administrator` configura la cuenta existente `admin` como administrador principal sin cambiar su contraseña. Una restricción de la base de datos impide que otra cuenta tenga simultáneamente ese privilegio y exige que la cuenta principal mantenga el rol de administrador. No existe una opción en el panel para duplicar o transferir ese permiso. `admin` puede editar sus propios datos y contraseña; no se permite eliminarlo ni quitarle su rol. En instalaciones nuevas, `init_admin.py` asigna este privilegio únicamente a la cuenta `admin` configurada mediante `DJANGO_SUPERUSER_USERNAME=admin` y la contraseña del entorno.
 
-**Historial de mis planos**, en el menú principal y el menú de usuario de trabajadores y administradores, reúne únicamente los planos que esa persona creó y guardó, con fecha, apertura, edición y eliminación con confirmación. Guardar cambios en un plano ajeno no cambia su autor ni lo incorpora al historial propio. Los permisos se verifican en cada endpoint, además de ocultar las acciones en la interfaz.
+**Historial de mis planos**, en el menú principal y el menú de usuario de trabajadores y administradores, reúne únicamente los planos que esa persona creó y guardó, con fecha, apertura, edición y eliminación con confirmación. Los permisos se verifican en cada endpoint, además de ocultar las acciones en la interfaz.
 
 La migración `0028_registration_accounts` conserva las cuentas, contraseñas y planos existentes; asigna a cada cuenta un RUT de prueba válido y único (marcado en el panel). Los administradores conservan su rol y las demás cuentas existentes pasan a trabajador. Los nombres de acceso anteriores siguen funcionando. Las cuentas nuevas utilizan un identificador interno estable para conservar la autoría aunque se cambie su RUT. Los roles y grupos antiguos se conservan para compatibilidad, pero el panel utiliza los tres roles anteriores para las cuentas con perfil.
 

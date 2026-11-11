@@ -85,6 +85,7 @@
     <button type="submit" value="cancel" class="decision-button decision-reject" autofocus><i class="bi bi-x-lg" aria-hidden="true"></i><span>Cancelar</span></button>
   </form>
 </dialog>
+{{ pending_requests|json_script:"initialRegistrationRequests" }}
 <script src="{% static 'mobileApp/management.js' %}?v={{ asset_version }}"></script>
 </body>
 </html>

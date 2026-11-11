@@ -121,6 +121,9 @@
         for (const [kind, prefix] of [['pdf', 'Pdf'], ['dxf', 'Cad']]) {
             const listing = active?.kind === kind ? active.plan.listing : null;
             if (active?.kind === kind) byId(`btn${prefix}OpenListing`).hidden = !listing;
+            const copy = byId(`btn${prefix}CopyButton`);
+            copy.hidden = rights(kind).can_copy_button !== true;
+            copy.disabled = copy.hidden || !selectedActions || isBusy();
             byId(`btn${prefix}SavePlan`).hidden = !canSave(kind);
             byId(`btn${prefix}SavePlan`).disabled = isBusy();
             byId(`btnDelete${prefix}Plan`).disabled = isBusy();
@@ -212,6 +215,11 @@
             current.plan.project_version = data.saved_at;
             window.planVersions?.remember(current.plan);
             current.plan._projectDirty = false;
+            if (window.relOffline) {
+                const user = appState.user?.id;
+                (data.plan ? Promise.resolve(data.plan) : request(current.plan.detail_url))
+                    .then(plan => { if (appState.user?.id === user) keepOnDevice(plan); }).catch(() => {});
+            }
             if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, data.saved.cloud_status === 'error');
             return true;
         } catch (error) {
@@ -366,8 +374,9 @@
     function selection(configuration) {
         if (selectedActions?.buttonId !== configuration?.buttonId) resetOutsideClicks();
         selectedActions = configuration;
-        for (const [kind, id] of [['pdf', 'btnPdfCopyButton'], ['dxf', 'btnCadCopyButton']]) {
-            byId(id).disabled = active?.kind !== kind || !configuration || !active.plan.permissions?.can_assign;
+        if (active) {
+            const copy = byId(active.kind === 'pdf' ? 'btnPdfCopyButton' : 'btnCadCopyButton');
+            copy.disabled = copy.hidden || !configuration || isBusy();
         }
         window.pieceLibrary?.setTarget(configuration?.target || null);
         window.planDisplay?.render(active, configuration);
@@ -489,7 +498,7 @@
             // Connection failures never mean a plan was deleted. Keep the last
             // confirmed state until this installation can be reached again.
             if (version === libraryRequestVersion && appState.user?.id === userId && !quiet) {
-                if (deviceRows.length) byId('savedPlansFeedback').textContent = 'Se muestran las copias descargadas en este dispositivo.';
+                if (deviceRows.length) byId('savedPlansFeedback').textContent = 'Se muestran las copias guardadas en este dispositivo.';
                 else container.textContent = error.message;
             }
             if (active?.plan.cloud_status === 'pending') { active.plan._cloudPollDelayed = true; renderUploadProgress(); }
@@ -558,7 +567,7 @@
             title.textContent = name;
             const badge = document.createElement('small');
             badge.className = 'project-kind-badge';
-            badge.textContent = [kind.toUpperCase(), device ? 'Descargado en este dispositivo' : local ? 'En esta instalación' : 'Sin copia en este dispositivo',
+            badge.textContent = [kind.toUpperCase(), device ? 'Guardado en este dispositivo' : 'Sin copia en este dispositivo',
                 local?.cloud_status === 'pending' ? 'Subiendo a la nube…' : cloud && 'En la nube',
                 local?.cloud_status === 'partial' && 'Confirmación pendiente',
                 local?.cloud_status === 'uploaded' && 'Archivos en la nube · Confirmando registro',
@@ -568,13 +577,7 @@
             row.append(open);
             if (cloud && (local || device) && !offline) row.append(libraryAction('Abrir versión de la nube', 'bi-cloud-arrow-down', 'primary', () => openLibraryEntry(entry, true)));
             if (local?.export_url && !offline && local.permissions?.can_export !== false) row.append(libraryAction('Exportar proyecto', 'bi-download', 'primary', () => download(local.export_url)));
-            if ((local || cloud || device) && !offline && window.relOffline) {
-                row.append(libraryAction(device ? 'Actualizar copia descargada' : 'Descargar para usar sin conexión',
-                    'bi-hdd', 'primary', () => downloadLibraryEntry(entry)));
-            }
             if (device) {
-                if (device.workbook_url) row.append(libraryAction('Descargar Excel de la copia', 'bi-file-earmark-spreadsheet', 'secondary',
-                    () => window.relOffline.downloadSavedWorkbook(device).catch(error => { byId('savedPlansFeedback').textContent = error.message; })));
                 row.append(libraryAction('Quitar copia de este dispositivo', 'bi-x-circle', 'secondary', () => removeDeviceCopy(device)));
             }
             if (!offline && copies.length && copies.every(copy => copy.clear_url)) {
@@ -604,23 +607,17 @@
             await window.relOffline.clearDownloadedPlan(copy).catch(() => {});
         }
     }
-    async function downloadLibraryEntry(entry) {
-        if (isBusy() || cloudOpening) return;
-        const feedback = byId('savedPlansFeedback');
-        const local = entry.copies[0] || entry.device;
-        cloudOpening = true;
-        feedback.textContent = 'Descargando el plano y su Excel…';
-        try {
-            const plan = entry.cloud ? (await post(entry.cloud.open_url)).plan : await request(local.detail_url);
-            await window.relOffline.downloadPlan({ kind: plan.kind, plan });
-            feedback.textContent = 'Copia descargada en este dispositivo.';
-        } catch (error) { feedback.textContent = error.message; }
-        finally { cloudOpening = false; }
+    function keepOnDevice(plan, source) {
+        window.relOffline?.keepPlan(plan, source).catch(error => {
+            if (active?.plan.kind === plan.kind && active.plan.id === plan.id && !active.plan._projectDirty) {
+                status(`No se pudo conservar una copia en este dispositivo. ${error.message}`, true, plan.kind);
+            }
+        });
     }
     async function removeDeviceCopy(device) {
         if (cloudOpening || deleting) return;
         if (!(await window.confirmAppAction('Quitar copia del dispositivo',
-            'Se liberará el espacio de esta descarga. El plano de la nube y tus borradores se conservan.',
+            'Se liberará el espacio de esta copia. El plano de la nube y tus borradores se conservan.',
             'Quitar copia'))) return;
         try {
             await window.relOffline.clearDownloadedPlan(device);
@@ -630,15 +627,24 @@
     async function openLibraryEntry(entry, remote) {
         if (isBusy() || cloudOpening || !(await window.workbookEditor.requestClose())) return;
         const user = appState.user?.id;
-        const local = entry.copies[0] || entry.device;
+        const local = (window.relOffline?.offline && entry.device) || entry.copies[0] || entry.device;
         const feedback = byId('savedPlansFeedback');
         cloudOpening = true;
         feedback.textContent = remote ? 'Abriendo el plano, sus hojas y botones…' : 'Abriendo el plano…';
         try {
-            const result = remote ? await post(entry.cloud.open_url) : { plan: await request(local.detail_url) };
+            let result;
+            if (remote) result = await post(entry.cloud.open_url);
+            else {
+                try { result = { plan: await request(local.detail_url) }; }
+                catch (error) {
+                    if (error.status !== 404 || !entry.cloud) throw error;
+                    result = await post(entry.cloud.open_url);
+                    remote = true;
+                }
+            }
             if (appState.user?.id !== user) return;
             exitFullscreen();
-            const opened = await openPlan(remote ? 'pdf' : local.kind, result.plan);
+            const opened = await openPlan(result.plan.kind, result.plan);
             if (opened === false) return;
             modalSavedPlans.hide();
             if (remote) status(result.warning || 'Plano y Excel abiertos desde la nube.', Boolean(result.warning));
@@ -839,7 +845,7 @@
     document.addEventListener('workbook:saved', dirty);
     window.projectWorkspace = {
         get active() { return active; }, get full() { return full; }, get selected() { return selectedActions; },
-        activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged,
+        activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged, keepOnDevice,
         reportError(message) { status(message, true); },
         reset() {
             libraryRequestVersion += 1;

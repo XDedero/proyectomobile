@@ -135,25 +135,30 @@ def check_browser(url, directory):
                 visitor.locator('#passwordInput').fill(PASSWORD)
                 visitor.locator('#btnLogin').click()
             assert denied.value.status == 401
-            with admin.expect_response('**/api/administration/', timeout=3000):
+            admin.route('**/api/administration/', lambda route: route.fulfill(status=503, json={'error': 'Datos generales no disponibles.'}))
+            with admin.expect_response('**/api/administration/requests/pending/', timeout=3000):
                 admin.locator('[data-tab="requests"]').click()
             row = admin.locator('#requestRows .request-row').filter(has_text='Camila Fuentes')
             expect(row).to_be_visible()
             expect(admin.locator('#pendingCount')).to_have_text('1')
+            admin.reload()
+            expect(admin.locator('#managementStatus')).to_contain_text('No se pudieron actualizar los usuarios y las categorías')
+            expect(row).to_be_visible()
+            admin.unroute('**/api/administration/')
             role_choice = row.locator('select[data-request-role]')
             role_choice.select_option('worker')
-            with admin.expect_response('**/api/administration/'):
+            with admin.expect_response('**/api/administration/requests/pending/'):
                 admin.locator('#refreshRequests').click()
             expect(role_choice).to_have_value('worker')
             role_choice.select_option('viewer')
 
             # A failed refresh is visible and leaves confirmed pending data intact.
-            admin.route('**/api/administration/', lambda route: route.fulfill(status=503, json={'error': 'Conexión interrumpida.'}))
+            admin.route('**/api/administration/requests/pending/', lambda route: route.fulfill(status=503, json={'error': 'Conexión interrumpida.'}))
             admin.locator('#refreshRequests').click()
             expect(admin.locator('#requestRefreshStatus')).to_contain_text('No se pudieron actualizar')
             expect(row).to_be_visible()
-            admin.unroute('**/api/administration/')
-            with admin.expect_response('**/api/administration/'):
+            admin.unroute('**/api/administration/requests/pending/')
+            with admin.expect_response('**/api/administration/requests/pending/'):
                 admin.evaluate("window.dispatchEvent(new Event('online'))")
             expect(admin.locator('#requestRefreshStatus')).to_contain_text('Solicitudes actualizadas')
             with admin.expect_response('**/api/administration/requests/') as approved:
@@ -241,7 +246,7 @@ def check_browser(url, directory):
             expect(visitor.locator('#savedPlansContainer .saved-plan-row')).to_have_count(1)
             own_rows = visitor.request.get(url + 'api/projects/?mine=1').json()['plans']
             assert [row['plan_id'] for row in own_rows] == [own['id']]
-            # A separate owner gives the worker editing rights without deletion.
+            # A saved drawing owned by someone else is available for consultation.
             token = next(cookie['value'] for cookie in admin.context.cookies() if cookie['name'] == 'csrftoken')
             foreign_result = admin.request.post(url + 'api/plans/import/', multipart={
                 'file': {'name': 'plano-ajeno.dxf', 'mimeType': 'application/dxf', 'buffer': (directory / 'motores_demo.dxf').read_bytes()}},
@@ -249,7 +254,7 @@ def check_browser(url, directory):
             assert foreign_result.status == 201, foreign_result.text()
             foreign = foreign_result.json()
             foreign_detail = visitor.request.get(url.rstrip('/') + foreign['detail_url']).json()
-            assert foreign_detail['permissions']['can_assign'] and not foreign_detail['permissions']['can_delete_plan']
+            assert not any(foreign_detail['permissions'][key] for key in ('can_assign', 'can_copy_button', 'can_export', 'can_delete_plan'))
             assert post(visitor, foreign['delete_url'], {}).status == 403
             assert post(admin, foreign['save_project_url'], {}).status == 200
             assert [row['plan_id'] for row in visitor.request.get(url + 'api/projects/?mine=1').json()['plans']] == [own['id']]
@@ -260,7 +265,7 @@ def check_browser(url, directory):
             expect(visitor.locator('#savedDeviceFilter')).to_be_visible()
             expect(visitor.locator('#savedPlansContainer .saved-plan-row')).to_have_count(2)
             visitor.locator('#modalSavedPlans [data-bs-dismiss="modal"]').first.click()
-            print('PASS: worker can create categories/plans and view own history, without deleting categories or other owners plans', flush=True)
+            print('PASS: worker can create categories and plans, view own history and consult shared plans', flush=True)
 
             # Granting administration requires a deliberate confirmation and a new login.
             select_user(admin, 'Camila')

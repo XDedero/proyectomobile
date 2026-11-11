@@ -287,6 +287,10 @@
         }
 
         get canEdit() { return this.metadata?.can_edit === true; }
+        get canExport() { return this.metadata?.can_export === true; }
+        get canSavePiece() {
+            return this.canEdit && this.context !== 'listing' && Boolean(this.metadata?.is_piece || this.pieceRegistration?.is_motor);
+        }
         get pieceRegistration() { return this.metadata?.piece_registrations ? this.metadata.piece_registrations[this.sheet] || {registered:false,is_motor:true} : this.metadata?.motor_registration; }
 
         applyPermissions() {
@@ -294,15 +298,16 @@
             this.removeMarkerButton.hidden = !this.removeMarker;
             for (const button of [this.saveButton, this.rowButton, this.colButton]) button.hidden = !this.canEdit;
             if (this.context === 'saved-piece' || this.pieceEdit) this.saveButton.hidden = true;
-            this.replacePieceButton.hidden = !this.pieceEdit;
+            this.replacePieceButton.hidden = !this.canEdit || !this.pieceEdit;
+            this.downloadButton.hidden = this.csvButton.hidden = !this.canExport;
             const registration = this.pieceRegistration;
-            this.saveMotorButton.hidden = !(this.metadata?.is_piece || registration?.is_motor) || this.context === 'listing';
+            this.saveMotorButton.hidden = !this.canSavePiece;
             this.saveMotorButton.disabled = (!this.pieceEdit && Boolean(registration?.registered)) || this.busy || this.staleRevision;
-            this.motorRegistrationNotice.hidden = !registration?.is_motor || this.context === 'listing';
+            this.motorRegistrationNotice.hidden = !this.canSavePiece || !registration?.is_motor;
             this.motorRegistrationNotice.textContent = registration?.registered
                 ? (this.context === 'saved-piece' ? `Pieza guardada: ${registration.name}. Puede incorporarlo al Excel de un plano.` : `Pieza guardada: ${registration.name}. Los botones vinculados a esta hoja comparten sus datos.`)
                 : 'Ficha independiente. Use Guardar pieza para registrarla con un nombre.';
-            if (this.pieceEdit) {
+            if (this.canEdit && this.pieceEdit) {
                 this.motorRegistrationNotice.hidden = false;
                 this.motorRegistrationNotice.textContent = `Modificando «${this.pieceDraftName}». Guardar pieza reemplaza únicamente la hoja seleccionada en el catálogo.`;
             }
@@ -324,7 +329,7 @@
             this.pieceCategoryId = metadata.piece_category_id || (this.context === 'piece-import' ? null : window.projectWorkspace?.selected?.target?.category_id);
             this.pieceDraftName = metadata.piece_name || '';
             this.selectSourceUrl = metadata.select_source_url || '';
-            this.sheetSelect.setAttribute('aria-label', this.selectSourceUrl ? 'Hoja que se incorporará al guardar el plano' : 'Hoja del Excel');
+            this.sheetSelect.setAttribute('aria-label', 'Hoja del Excel');
             this.removeMarker = metadata.removeMarker || null;
             this.visible = true;
             this.overlay.hidden = false;
@@ -361,7 +366,10 @@
                 this.filename.textContent = fresh.name;
                 this.populateSheets();
                 this.changeSheet(this.visibleSheets().find((sheet) => sheet.name === metadata.preferred_sheet)?.name || this.visibleSheets()[0]?.name);
-                if (this.selectSourceUrl) this.setStatus(`Se incorporará «${this.sheet}» al guardar el plano. Puede elegir otra hoja en el menú.`);
+                if (this.canEdit && this.selectSourceUrl) {
+                    this.sheetSelect.setAttribute('aria-label', 'Hoja que se incorporará al guardar el plano');
+                    this.setStatus(`Se incorporará «${this.sheet}» al guardar el plano. Puede elegir otra hoja en el menú.`);
+                }
                 else this.setStatus(this.canEdit ? (this.context === 'listing' ? 'Listado del plano. Use + Fila para más motores y + Columna para ampliar sus datos. Se incluye al guardar el plano.' : 'Toque una celda para editarla. Los datos se incluyen al guardar el plano.') : 'Solo lectura. Deslice en ambas direcciones para recorrer toda la hoja y seleccione una celda para consultar su valor.');
                 this.viewport.focus();
                 return true;
@@ -497,7 +505,7 @@
         }
 
         async selectWorkbookSheet(name) {
-            if (!this.selectSourceUrl) { this.changeSheet(name); return; }
+            if (!this.canEdit || !this.selectSourceUrl) { this.changeSheet(name); return; }
             if (!name || this.busy || name === this.sheet) return;
             const epoch = this.epoch;
             this.setBusy(true);
@@ -1135,7 +1143,7 @@
         }
 
         async download(format = 'xlsx') {
-            if (this.busy || !this.metadata) return;
+            if (this.busy || !this.canExport) return;
             this.commitAll();
             if (this.pending.size && !(await this.save())) return;
             const link = this.node('a');

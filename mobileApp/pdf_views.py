@@ -18,6 +18,7 @@ from django.views.decorators.http import require_GET, require_POST
 from pypdf import PdfReader
 
 from .access import api_permissions, capabilities, can_edit_workbook, visible_plans
+from .authorization import can_export_workbook, workbook_plans
 from .models import Motor, PdfMarker, PdfPlan, WorkbookDocument, SavedMotor
 from .views import validate_excel
 from .workbook_service import document_sheets, edited_document, positive_integer, read_cells
@@ -41,6 +42,7 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
     if document.plan_mode == 'source':
         context = 'button-source'
         sheet_name = None
+    plans = workbook_plans(document) if user is not None else []
     snapshot = bool(user is not None and SavedMotor.objects.filter(workbook_id=document.pk).exists())
     result = {
         'id': document.pk, 'name': document.name, 'revision': document.revision,
@@ -49,7 +51,8 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
         'save_url': reverse('workbook_save', args=[document.pk]),
         'download_url': reverse('workbook_download', args=[document.pk]),
         'csv_url': reverse('workbook_csv', args=[document.pk]),
-        'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document)),
+        'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document, plans=plans)),
+        'can_export': bool(user is not None and can_export_workbook(user, plans)),
         'is_motor': bool(document.is_motor or (document.plan_mode and sheet_name and context != 'listing')),
         'is_piece': bool(context != 'listing' and (document.is_motor or document.plan_mode == 'source' or sheet_name)),
     }

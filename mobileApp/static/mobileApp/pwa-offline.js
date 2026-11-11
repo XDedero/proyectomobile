@@ -116,6 +116,8 @@
         await ready;
         const owner=account?.id;
         if(!owner||copy.user!==owner) throw new Error('Abre la sesión de esta copia para quitarla.');
+        const pending=copiesInProgress.get(copy.key);
+        if(pending) pending.cancelled=true;
         await updateStores(['downloads','downloadFiles','reads','readinfo'],tx=>{
             const downloads=tx.objectStore('downloads'), query=downloads.get(copy.key);
             query.onsuccess=()=>{
@@ -182,9 +184,24 @@
         const saved=await downloadedFile(owner,url);
         const row=saved||await get('reads',owner+'|'+url.href);
         if(!row||account?.id!==owner) return null;
-        return overlay(url,new Response(row.body,{headers:{
+        let response=new Response(row.body,{headers:{
             'Content-Type':row.type||row.body.type,'X-Reloncavi-Offline':'1',
-        }}));
+        }});
+        const planDetail=/^\/api\/(?:pdf\/)?plans\/\d+\/$/.test(url.pathname);
+        const workbookMetadata=/^\/api\/pdf\/workbooks\/\d+\/metadata\/$/.test(url.pathname);
+        if(planDetail || workbookMetadata) {
+            const data=await response.clone().json();
+            // Older offline copies can still be read, but need an online refresh before editing.
+            if(planDetail && data.permissions && !('can_copy_button' in data.permissions)) {
+                for(const key of Object.keys(data.permissions)) {
+                    if(!['can_view','can_import','can_create','can_administer','can_create_category','can_history'].includes(key)) data.permissions[key]=false;
+                }
+                response=offlineResponse(data);
+            } else if(workbookMetadata && !('can_export' in data)) {
+                response=offlineResponse({...data,can_edit:false,can_export:false});
+            }
+        }
+        return overlay(url,response);
     }
     async function overlay(url,response) {
         if(!account||!response.headers.get('Content-Type')?.includes('json')) return response;
@@ -403,23 +420,54 @@
         if(!size) throw new Error('El archivo descargado está vacío.');
         return new Blob(chunks,{type:response.headers.get('Content-Type')||''});
     }
-    async function downloadPlan(context) {
-        if(!context) throw new Error('Abre primero el plano que quieres consultar sin señal.');
-        if(!navigator.onLine) throw new Error('Conéctate para descargar el plano.');
-        if(!window.isSecureContext||!('serviceWorker' in navigator)) throw new Error('Abre la app desde HTTPS para preparar el uso sin conexión.');
-        // Request browser persistence during the user gesture when supported.
-        navigator.storage?.persist?.().catch(()=>{});
+    const savedPlan=plan=>Boolean(plan.saved_at||plan.cloud_origin);
+    const copyKey=(owner,plan)=>[owner,plan.kind,plan.cloud_origin||plan.cloud_key||plan.id].join('|');
+    const copyRevision=plan=>JSON.stringify([plan.id,plan.project_version,plan.workbook?.revision,plan.permissions?.can_export]);
+    const copiesInProgress=new Map();
+
+    async function currentCopy(owner,plan) {
+        const copy=await get('downloads',copyKey(owner,plan));
+        return copy?.revision===copyRevision(plan) ? copy : null;
+    }
+
+    async function planSource(plan) {
+        if(!savedPlan(plan)) return null;
+        const owner=appState.user?.id;
         await ready;
-        const owner=account?.id;
-        if(!owner) throw new Error('Inicia sesión para descargar el plano.');
-        await new Promise((resolve,reject)=>{
-            const timer=setTimeout(()=>reject(new Error('La app todavía está preparando su primera descarga. Vuelve a intentarlo en unos segundos.')),30000);
-            navigator.serviceWorker.ready.then(()=>{clearTimeout(timer);resolve();},error=>{clearTimeout(timer);reject(error);});
-        });
-        const {plan,kind}=context;
+        if(!owner||owner!==account?.id) return null;
+        const source=plan.source_url||plan.svg_url;
+        const copy=await currentCopy(owner,plan);
+        if(copy) {
+            const file=await get('downloadFiles',copy.key+'|'+new URL(source,location.href).href);
+            if(file&&account?.id===owner) return file.body;
+        }
+        if(!navigator.onLine||disconnected||account?.id!==owner) return null;
+        const running=copiesInProgress.get(copyKey(owner,plan));
+        if(!running?.cancelled && running?.revision===copyRevision(plan) && running.sourceBody) return running.sourceBody;
+        return fileBody(await checkedDownload(source,owner));
+    }
+
+    async function keepPlan(plan,sourceBody) {
+        if(!savedPlan(plan)||!navigator.onLine||disconnected) return;
+        const owner=appState.user?.id;
+        const detail=JSON.parse(JSON.stringify(plan));
+        await ready;
+        if(!owner||owner!==account?.id||await currentCopy(owner,detail)) return;
+        if((await pending()).some(row=>row.detail===detail.detail_url)) return;
+        const key=copyKey(owner,detail), revision=copyRevision(detail);
+        const running=copiesInProgress.get(key);
+        if(running?.revision===revision) return running.result;
+        if(running) running.cancelled=true;
+        const copy={revision,sourceBody,cancelled:false};
+        copiesInProgress.set(key,copy);
+        copy.result=storePlan(owner,detail,sourceBody,copy);
+        try { return await copy.result; }
+        finally { if(copiesInProgress.get(key)===copy) copiesInProgress.delete(key); }
+    }
+
+    async function storePlan(owner,detail,sourceBody,copy) {
+        navigator.storage?.persist?.().catch(()=>{});
         const started=Date.now();
-        const detail=await (await checkedDownload(plan.detail_url,owner)).json();
-        if(detail.id!==plan.id||detail.kind!==kind) throw new Error('El plano cambió. Vuelve a abrirlo antes de descargarlo.');
         const urls=[], files=[];
         function append(url,body) {
             const absolute=new URL(url,location.href).href;
@@ -429,52 +477,44 @@
         const source=detail.source_url||detail.svg_url;
         append(detail.detail_url,json(detail));
         append(detail.sectors_url,json({sectors:detail.sectors||[]}));
-        append(source,await fileBody(await checkedDownload(source,owner)));
+        append(source,sourceBody||await fileBody(await checkedDownload(source,owner)));
         const book=detail.workbook;
         let workbookUrl;
-        if(book?.download_url&&detail.permissions?.can_export!==false) {
-            const response=await checkedDownload(book.download_url,owner,{optionalExport:true});
-            if(response) {
-                if(response.headers.get('X-Reloncavi-Workbook-Revision')!==String(book.revision)) {
-                    throw new Error('El Excel cambió durante la descarga. Vuelve a intentarlo.');
+        if(book?.download_url&&detail.permissions?.can_export===true) {
+            const response=await checkedDownload(book.download_url,owner,{optionalExport:true}).catch(()=>null);
+            if(response?.headers.get('X-Reloncavi-Workbook-Revision')===String(book.revision)) {
+                const body=await fileBody(response).catch(()=>null);
+                if(body) {
+                    append(book.download_url,body);
+                    workbookUrl=book.download_url;
                 }
-                append(book.download_url,await fileBody(response));
-                workbookUrl=book.download_url;
-            }
+            } else await response?.body?.cancel().catch(()=>{});
         }
         const buttons=detail.markers||detail.motors||[];
         const paths=[detail.detail_url,detail.sectors_url,detail.version_url,source,
             ...(book?[book.metadata_url,book.cells_url,book.download_url]:[]),
-            ...buttons.flatMap(button=>[button.details_url,button.workbook?.metadata_url,button.workbook?.cells_url])];
+            ...buttons.flatMap(button=>{
+                const book=button.workbook||button.excel;
+                return [button.details_url,book?.metadata_url,book?.cells_url];
+            })];
         const download={
-            key:[owner,kind,detail.cloud_origin||detail.cloud_key||detail.id].join('|'),
-            user:owner,kind,plan_id:detail.id,name:detail.name,version:detail.project_version,
+            key:copyKey(owner,detail),revision:copy.revision,
+            user:owner,kind:detail.kind,plan_id:detail.id,name:detail.name,version:detail.project_version,
             date:detail.saved_at||detail.date,time:started,cloud_key:detail.cloud_key,cloud_origin:detail.cloud_origin,
             detail_url:detail.detail_url,source_url:source,workbook_url:workbookUrl,workbook_name:book?.name,
             urls,paths:[...new Set(paths.filter(Boolean).map(url=>new URL(url,location.href).pathname))],
             size:files.reduce((size,file)=>size+file.body.size,0),
         };
+        if(copy.cancelled) return;
         try {
             await writeDownload(download,files);
         } catch(error) {
-            if(error.name==='QuotaExceededError') throw new Error('El navegador se quedó sin espacio. Quita alguna copia descargada y vuelve a intentarlo.');
+            if(error.name==='QuotaExceededError') throw new Error('El navegador se quedó sin espacio. Quita una copia de este dispositivo y vuelve a abrir el plano.');
             throw error;
         }
-        return download;
-    }
-    async function downloadSavedWorkbook(copy) {
-        await ready;
-        const owner=account?.id;
-        if(!owner||owner!==copy.user||!copy.workbook_url) throw new Error('No hay un Excel descargado para esta sesión.');
-        const file=await get('downloadFiles',copy.key+'|'+new URL(copy.workbook_url,location.href).href);
-        if(!file||account?.id!==owner) throw new Error('El Excel ya no está disponible en este dispositivo.');
-        const url=URL.createObjectURL(file.body), link=document.createElement('a');
-        link.href=url;link.download=/\.xlsx$/i.test(copy.workbook_name)?copy.workbook_name:(copy.workbook_name||copy.name)+'.xlsx';
-        document.body.append(link);link.click();link.remove();
-        setTimeout(()=>URL.revokeObjectURL(url),30000);
     }
     window.relOffline={
-        nativeFetch,sectorRequest,workbookRequest,draftsFor,downloadPlan,downloadedPlans,clearDownloadedPlan,downloadSavedWorkbook,
+        nativeFetch,sectorRequest,workbookRequest,draftsFor,planSource,keepPlan,downloadedPlans,clearDownloadedPlan,
         get offline(){return disconnected||!navigator.onLine;},
         get unavailable(){return unavailable;},get syncing(){return syncing;},
         async state(){

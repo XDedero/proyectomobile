@@ -47,6 +47,7 @@ class ApplicationRolePermissionsTests(TestCase):
         for kind in ('pdf', 'dxf'):
             plan = self.import_plan(self.viewer, kind)
             self.assertFalse(plan['permissions']['can_assign'])
+            self.assertFalse(plan['permissions']['can_copy_button'])
             self.assertFalse(plan['permissions']['can_save_plan'])
             for url, data in [(plan['update_url'], {'name': 'Prohibido'}),
                               (plan['save_project_url'], {}), (plan['delete_url'], {}),
@@ -70,24 +71,45 @@ class ApplicationRolePermissionsTests(TestCase):
         ids = [plan['id'] for plan in self.client.get(reverse('list_pdf_plans')).json()['plans']]
         self.assertEqual(ids, [saved['id']])
         book = saved['workbook']
-        self.assertFalse(self.client.get(book['metadata_url']).json()['can_edit'])
+        metadata = self.client.get(book['metadata_url']).json()
+        self.assertFalse(metadata['can_edit'])
+        self.assertFalse(metadata['can_export'])
         self.assertEqual(self.post(book['save_url'], {'revision': 1}).status_code, 403)
         self.assertEqual(self.client.get(book['download_url']).status_code, 403)
 
-    def test_worker_edits_shared_plans_but_only_deletes_own_plans(self):
+    def test_worker_reads_shared_plans_and_edits_own_plans(self):
         for kind in ('pdf', 'dxf'):
             foreign = self.import_plan(self.other, kind)
             self.assertEqual(self.post(foreign['save_project_url']).status_code, 200)
             self.client.force_login(self.worker)
-            detail = self.client.get(foreign['detail_url']).json()
-            self.assertTrue(detail['permissions']['can_assign'])
-            self.assertFalse(detail['permissions']['can_delete_plan'])
-            self.assertEqual(self.post(foreign['update_url'], {'name': 'Compartido'}).status_code, 200)
-            self.assertEqual(self.post(foreign['save_project_url']).status_code, 200)
+            response = self.client.get(foreign['detail_url'])
+            self.assertEqual(response.status_code, 200)
+            rights = response.json()['permissions']
+            for permission in ('can_assign', 'can_copy_button', 'can_save_plan', 'can_export', 'can_delete_plan'):
+                self.assertFalse(rights[permission], permission)
+            self.assertEqual(self.post(foreign['update_url'], {'name': 'Compartido'}).status_code, 403)
+            self.assertEqual(self.post(foreign['save_project_url']).status_code, 403)
+            self.assertEqual(self.post(foreign['markers_url'], {'origin': 'copy', 'copy_button_id': 1}).status_code, 403)
             self.assertEqual(self.post(foreign['delete_url']).status_code, 403)
+            self.assertEqual(self.client.get(foreign['export_project_url']).status_code, 403)
             clear = reverse('clear_local_project', args=[kind, foreign['id']])
             self.assertEqual(self.post(clear).status_code, 403)
+            book = foreign['workbook']
+            response = self.client.get(book['metadata_url'])
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()['can_edit'])
+            self.assertFalse(response.json()['can_export'])
+            for url in (book['download_url'], book['csv_url']):
+                self.assertEqual(self.client.get(url).status_code, 403)
+            self.assertEqual(self.post(book['save_url'], {'revision': book['revision']}).status_code, 403)
+            self.assertEqual(self.post(reverse('register_piece'), {'workbook_id': book['id']}).status_code, 403)
+            self.client.force_login(self.admin)
+            self.assertTrue(self.client.get(foreign['detail_url']).json()['permissions']['can_copy_button'])
+            metadata = self.client.get(book['metadata_url']).json()
+            self.assertTrue(metadata['can_edit'])
+            self.assertTrue(metadata['can_export'])
             own = self.import_plan(self.worker, kind)
+            self.assertTrue(own['permissions']['can_copy_button'])
             self.assertEqual(self.post(own['save_project_url']).status_code, 200)
             self.assertEqual(self.post(own['delete_url']).status_code, 200)
 
@@ -98,7 +120,6 @@ class ApplicationRolePermissionsTests(TestCase):
         foreign = self.import_plan(self.other)
         self.assertEqual(self.post(foreign['save_project_url']).status_code, 200)
         self.client.force_login(self.worker)
-        self.assertEqual(self.post(foreign['save_project_url']).status_code, 200)
         history = self.client.get(reverse('saved_projects'), {'mine': '1'}).json()
         self.assertEqual([plan['plan_id'] for plan in history['plans']], [own['id']])
         self.assertEqual(history['cached'], [])

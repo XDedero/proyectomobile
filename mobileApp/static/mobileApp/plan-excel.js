@@ -306,6 +306,7 @@
     }
 
     async function assign(kind, plan, marker) {
+        if (!plan.permissions?.can_assign) return;
         if (!(await window.workbookEditor.requestClose())) return;
         assignment = { ...target(), kind, plan, marker };
         if (!valid(assignment)) return;
@@ -571,7 +572,7 @@
     byId('btnButtonAppearanceOptions').onclick = () => editButtonOption('appearance');
     byId('btnButtonDetailsOptions').onclick = () => editButtonOption('description');
     async function copyButton(context, marker, dialog = null) {
-        if (!marker || !valid(context) || !context.plan.permissions?.can_assign || active().isBusy?.() || window.planSectors?.editing) return;
+        if (!marker || !valid(context) || !context.plan.permissions?.can_copy_button || active().isBusy?.() || window.planSectors?.editing) return;
         if (window.planDisplay && !(await window.planDisplay.flush())) return;
         if (!valid(context)) return;
         const name = marker.label || marker.name || window.projectWorkspace.selected?.name || 'Botón';

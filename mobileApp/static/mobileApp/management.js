@@ -7,8 +7,10 @@
         worker: 'Puede crear y modificar planos, asociar Excel, guardar en Drive y crear categorías. Solo puede eliminar sus propios planos.',
         administrator: 'Puede administrar usuarios y categorías, y gestionar todos los planos. Al recibir este rol debe cerrar sesión y volver a entrar.',
     };
-    let state = {users: [], requests: [], categories: []}, userId = null, categoryId = null, busy = false, dataRevision = 0;
-    let ready = false, refreshing = false;
+    const initialRequests = JSON.parse($('initialRegistrationRequests').textContent);
+    const state = {users: [], requests: initialRequests, categories: []};
+    let userId = null, categoryId = null, busy = false, dataRevision = 0;
+    let ready = false, refreshingRequests = false, refreshingDetails = false;
     const requestRoles = new Map();
     const initialControls = [...document.querySelectorAll('main form input, main form select, main form button, #userSearch')];
     initialControls.forEach(control => { control.disabled = true; });
@@ -25,8 +27,8 @@
             else { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); }
         }
         const response = await fetch(url, options);
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || 'No se pudo completar la operación. Recarga el panel e intenta otra vez.');
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result) throw new Error(result?.error || 'No se pudo completar la operación. Recarga el panel e intenta otra vez.');
         return result;
     }
     function confirmAction(title, description = '', label = 'Aceptar') {
@@ -42,16 +44,21 @@
     async function mutate(operation, message = 'Cambios guardados.') {
         if (busy) return;
         busy = true;
+        dataRevision += 1;
         let saved = false, result;
         document.querySelectorAll('main button, main input, main select').forEach(control => { control.disabled = true; });
         try {
             result = await operation(); saved = true;
-            await load();
+            const updates = await Promise.allSettled([load(), loadRequests()]);
+            const failed = updates.find(update => update.status === 'rejected');
+            if (failed) throw failed.reason;
             status(result?.message || message);
         } catch (error) { status(saved ? `${result?.message || message} No se pudo actualizar el panel: ${error.message}` : error.message, true); }
         finally {
             busy = false;
             document.querySelectorAll('main button, main input, main select').forEach(control => { control.disabled = false; });
+            if (!ready) initialControls.forEach(control => { control.disabled = true; });
+            $('refreshRequests').disabled = refreshingRequests;
             applyRolePermissions();
         }
     }
@@ -187,13 +194,37 @@
         }
         if (!state.categories.length) empty(container, 'Crea la primera categoría para comenzar.');
     }
-    async function load() {
-        dataRevision += 1;
-        state = await request('/api/administration/');
-        summary(); renderRequests(); renderUsers(); renderCategories();
-        editUser(state.users.find(user => user.id === userId));
-        editCategory(state.categories.find(category => category.id === categoryId));
-        $('requestRefreshStatus').textContent = 'Solicitudes actualizadas. Se comprueban automáticamente cada 5 segundos.';
+    async function load({resetForms = true} = {}) {
+        const revision = dataRevision;
+        const latest = await request('/api/administration/');
+        if (revision !== dataRevision) return;
+        state.users = latest.users;
+        state.categories = latest.categories;
+        state.can_manage_administrators = latest.can_manage_administrators;
+        ready = true;
+        summary(); renderUsers(); renderCategories();
+        const user = state.users.find(item => item.id === userId && item.can_edit);
+        if (resetForms || (userId && !user)) editUser(user);
+        if (resetForms) editCategory(state.categories.find(category => category.id === categoryId));
+        if (!busy) initialControls.forEach(control => { control.disabled = false; });
+        applyRolePermissions();
+    }
+    async function loadRequests() {
+        const revision = dataRevision;
+        try {
+            const {requests} = await request('/api/administration/requests/pending/');
+            if (revision !== dataRevision) return;
+            if (!Array.isArray(requests)) throw new Error('La respuesta del servidor no incluye la lista de solicitudes.');
+            if (JSON.stringify(state.requests) !== JSON.stringify(requests)) {
+                state.requests = requests;
+                summary(); renderRequests();
+            }
+            $('requestRefreshStatus').textContent = 'Solicitudes actualizadas. Se comprueban automáticamente cada 5 segundos.';
+        } catch (error) {
+            if (revision !== dataRevision) return;
+            $('requestRefreshStatus').textContent = `No se pudieron actualizar las solicitudes: ${error.message} Pulsa Actualizar solicitudes para reintentar.`;
+            throw error;
+        }
     }
     $('userForm').onsubmit = async event => {
         event.preventDefault(); if (busy || !userId) return;
@@ -231,48 +262,46 @@
         if (button.dataset.tab === 'users') {
             $('userSearch').value = '';
             renderUsers();
+            refreshDetails();
         }
-        if (['users', 'requests'].includes(button.dataset.tab)) refresh();
+        if (button.dataset.tab === 'requests') refreshRequests();
+        if (button.dataset.tab === 'categories' && !ready) refreshDetails();
     };
-    // Refresh lists without replacing unsaved user or category forms.
-    async function refreshLists() {
-        if (busy || refreshing || $('managementConfirm').open) return;
-        refreshing = true;
+    async function refreshDetails() {
+        if (busy || refreshingDetails) return;
+        refreshingDetails = true;
+        const revision = dataRevision;
+        try {
+            await load({resetForms: !ready});
+            if (revision === dataRevision) status('');
+        } catch (error) {
+            if (revision === dataRevision) status(`No se pudieron actualizar los usuarios y las categorías: ${error.message}`, true);
+        } finally {
+            refreshingDetails = false;
+        }
+    }
+    async function refreshRequests() {
+        if (busy || refreshingRequests || $('managementConfirm').open) return;
+        refreshingRequests = true;
         $('refreshRequests').disabled = true;
         try {
-            if (!ready) {
-                await load(); ready = true;
-                initialControls.forEach(control => { control.disabled = false; });
-                applyRolePermissions(); status('');
-                return;
-            }
-            const revision = dataRevision;
-            const latest = await request('/api/administration/');
-            if (busy || revision !== dataRevision) return;
-            const requestsChanged = JSON.stringify(state.requests) !== JSON.stringify(latest.requests);
-            state.users = latest.users; state.requests = latest.requests;
-            state.can_manage_administrators = latest.can_manage_administrators;
-            if (userId && !state.users.some(user => user.id === userId && user.can_edit)) editUser();
-            summary(); renderUsers();
-            if (requestsChanged) renderRequests();
-            applyRolePermissions();
-            $('requestRefreshStatus').textContent = 'Solicitudes actualizadas. Se comprueban automáticamente cada 5 segundos.';
+            await loadRequests();
+        } catch {
+            // loadRequests leaves the last confirmed list visible and reports the error.
         } finally {
-            refreshing = false;
+            refreshingRequests = false;
             $('refreshRequests').disabled = busy;
         }
     }
-    function refresh() {
-        return refreshLists().catch(error => {
-            $('requestRefreshStatus').textContent = `No se pudieron actualizar las solicitudes: ${error.message} Pulsa Actualizar solicitudes para reintentar.`;
-            if (!ready) status(error.message, true);
-        });
+    function resume() {
+        refreshRequests();
+        if (!ready || !$('usersPanel').hidden) refreshDetails();
     }
-    $('refreshRequests').onclick = refresh;
-    window.addEventListener('focus', refresh);
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-    setInterval(() => { if (!document.hidden) refresh(); }, 5000);
-    status('Cargando administración…');
-    refresh();
+    $('refreshRequests').onclick = refreshRequests;
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) resume(); });
+    setInterval(() => { if (!document.hidden) refreshRequests(); }, 5000);
+    summary(); renderRequests();
+    resume();
 })();
