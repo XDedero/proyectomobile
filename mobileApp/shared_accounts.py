@@ -30,8 +30,8 @@ def query(sql, *, write=False):
         return supabase_query(sql, read_only=not write).get('rows', [])
     except CloudUnavailable as exc:
         if exc.code == 'client_missing':
-            message = 'Esta instalación no encuentra el conector de la base de datos. Compruebe su instalación y reinicie la app.'
-        elif exc.code == 'project_configuration':
+            message = 'Esta instalación no tiene configurada la conexión privada de la base de datos.'
+        elif exc.code in ('project_configuration', 'database_configuration'):
             message = 'La conexión de esta instalación apunta a una configuración de proyecto no válida.'
         else:
             message = 'No se pudo consultar el registro compartido. Compruebe la conexión e intente otra vez.'

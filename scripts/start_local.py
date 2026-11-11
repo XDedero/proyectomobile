@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HOST = '127.0.0.1'
 PORT = 8000
 URL = f'http://{HOST}:{PORT}/'
-CHECK_IMPORTS = 'import django, ezdxf, openpyxl, defusedxml, PIL, pypdf, whitenoise'
+CHECK_IMPORTS = 'import django, ezdxf, openpyxl, defusedxml, PIL, psycopg, pypdf, whitenoise'
 
 
 def has_dependencies(python):

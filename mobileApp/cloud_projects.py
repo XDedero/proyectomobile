@@ -94,8 +94,66 @@ def supabase_command():
                            code='client_missing')
 
 
+def supabase_database_url():
+    """Return the private server connection without requiring a developer CLI login."""
+    value = os.environ.get('SUPABASE_DATABASE_URL', '').strip()
+    if not value:
+        profile = settings.BASE_DIR / 'conexion-base-datos.txt'
+        try:
+            if profile.is_file():
+                value = profile.read_text(encoding='utf-8-sig').strip()
+        except (OSError, UnicodeError) as exc:
+            raise CloudUnavailable('No se pudo leer la configuración privada de la base de datos.',
+                                   code='database_configuration') from exc
+    if value and (not value.startswith(('postgresql://', 'postgres://'))
+                  or any(character.isspace() for character in value)):
+        raise CloudUnavailable('La configuración privada de la base de datos no es válida.',
+                               code='database_configuration')
+    return value
+
+
+def postgres_query(database_url, sql, *, read_only):
+    """Run SQL through PostgreSQL directly and return the CLI-compatible row shape."""
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except ImportError as exc:
+        raise CloudUnavailable('Esta instalación no tiene el conector de la base de datos.',
+                               code='client_missing') from exc
+    connection_options = {
+        'connect_timeout': 12,
+        'autocommit': True,
+        'prepare_threshold': None,
+        'row_factory': dict_row,
+    }
+    if read_only:
+        connection_options['options'] = '-c default_transaction_read_only=on'
+    try:
+        with psycopg.connect(database_url, **connection_options) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, prepare=False)
+                rows = []
+                while True:
+                    if cursor.description is not None:
+                        rows = cursor.fetchall()
+                    if not cursor.nextset():
+                        break
+        return {'rows': rows}
+    except psycopg.Error as exc:
+        code = 'database_query' if getattr(exc, 'sqlstate', None) else 'database_connection'
+        logging.getLogger(__name__).warning(
+            'Database connector failed: code=%s sqlstate=%s', code, getattr(exc, 'sqlstate', None),
+        )
+        raise CloudUnavailable(
+            'No se pudo consultar la base de datos. Revisa la conexión y los permisos.', code=code,
+        ) from exc
+
+
 def supabase_query(sql, *, read_only):
     message = 'No se pudo consultar la base de datos. Revisa la conexión y los permisos.'
+    database_url = supabase_database_url()
+    if database_url:
+        return postgres_query(database_url, sql, read_only=read_only)
     command = supabase_command()
     workdir = os.environ.get('PLANOS_SUPABASE_WORKDIR')
     if not workdir:

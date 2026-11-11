@@ -133,9 +133,13 @@ es atómica en la base compartida. La cuenta aprobada conserva el mismo identifi
 contraseña y rol al iniciar sesión desde otro equipo. Los cambios de rol y contraseña
 y la eliminación de estas cuentas también se sincronizan. Las cuentas anteriores sin
 vinculación al registro compartido conservan su administración local.
-El servidor utiliza la conexión existente de Supabase CLI. Las tablas y funciones de
-identidad son privadas y no conceden acceso a los roles públicos del navegador.
-Cada equipo debe ejecutar esta versión y tener configurada la misma conexión de servidor.
+El servidor usa una conexión PostgreSQL privada mediante `SUPABASE_DATABASE_URL`. En una
+instalación local también puede guardarse la misma URL completa, como una única línea, en
+`conexion-base-datos.txt`; ese archivo está excluido de Git y debe entregarse por un medio
+privado solo a quien administra la instalación. Las tablas y funciones de identidad son
+privadas y no conceden acceso a los roles públicos del navegador. La herramienta de línea
+de comandos anterior se conserva únicamente como compatibilidad temporal.
+Cada servidor debe ejecutar esta versión y tener configurada la misma conexión privada.
 Al abrir el panel se envían las solicitudes pendientes que todavía existían en ese equipo.
 `python manage.py sync_shared_accounts` permite ejecutar esa sincronización manualmente.
 Si falla la conexión, la app informa el error y conserva las solicitudes pendientes de envío.
