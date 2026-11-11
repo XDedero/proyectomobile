@@ -4,6 +4,13 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 import re
 
 
+def cloud_enabled(environ):
+    value = environ.get('PLANOS_CLOUD_MODE', '0').strip().lower()
+    if value not in {'0', '1', 'false', 'true', 'no', 'yes', ''}:
+        raise ValueError('PLANOS_CLOUD_MODE debe ser 1 para Supabase y Drive, o 0 para una instalacion local.')
+    return value in {'1', 'true', 'yes'}
+
+
 def database_url(environ, root):
     value = environ.get('SUPABASE_DATABASE_URL')
     if not value:

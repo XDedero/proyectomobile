@@ -13,13 +13,20 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from proyectomobile.cloud_config import postgres_database, private_schema
+from proyectomobile.cloud_config import cloud_enabled, postgres_database, private_schema
 from scripts.prepare_runtime import prepare
 from .drive_storage import GoogleDriveStorage
 from .management.commands.migrate_local_to_cloud import local_original, require_empty_target
 
 
 class CloudConfigurationTests(SimpleTestCase):
+    def test_an_invalid_cloud_mode_cannot_silently_start_an_ephemeral_sqlite_database(self):
+        self.assertTrue(cloud_enabled({'PLANOS_CLOUD_MODE':'1'}))
+        self.assertTrue(cloud_enabled({'PLANOS_CLOUD_MODE':'TRUE'}))
+        self.assertFalse(cloud_enabled({}))
+        with self.assertRaisesMessage(ValueError,'PLANOS_CLOUD_MODE'):
+            cloud_enabled({'PLANOS_CLOUD_MODE':'/var/data/reloncavi'})
+
     def test_session_pooler_uri_preserves_password_and_enforces_tls(self):
         result = postgres_database('postgresql://postgres.example:secret%40word@aws-0.pooler.supabase.com:5432/postgres')
         self.assertEqual(result['PASSWORD'], 'secret@word')

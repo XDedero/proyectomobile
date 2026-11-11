@@ -10,10 +10,14 @@ import tempfile
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+from .cloud_config import cloud_enabled
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-PLANOS_CLOUD_MODE = os.environ.get('PLANOS_CLOUD_MODE', '0').lower() in {'1', 'true', 'yes'}
+try:
+    PLANOS_CLOUD_MODE = cloud_enabled(os.environ)
+except ValueError as exc:
+    raise ImproperlyConfigured(str(exc)) from None
 APP_SHARED_ACCOUNTS = os.environ.get(
     'APP_SHARED_ACCOUNTS', '0' if 'test' in sys.argv else '1',
 ).lower() in {'1', 'true', 'yes'}
