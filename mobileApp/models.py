@@ -120,17 +120,6 @@ class ButtonCategory(models.Model):
         return self.name
 
 
-class CategoryWorkbook(models.Model):
-    category = models.ForeignKey(ButtonCategory, on_delete=models.CASCADE, related_name='templates')
-    name = models.CharField(max_length=255)
-    content = models.BinaryField()
-    sheet = models.CharField(max_length=31)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['name', 'id']
-
-
 class PlanRole(models.Model):
     name = models.CharField(max_length=80, unique=True)
     description = models.CharField(max_length=255, blank=True)

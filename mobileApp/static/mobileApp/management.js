@@ -22,9 +22,9 @@
     async function request(url, data) {
         const options = {credentials: 'same-origin', cache: 'no-store'};
         if (data !== undefined) {
-            options.method = 'POST'; options.headers = {'X-CSRFToken': token()};
-            if (data instanceof FormData) options.body = data;
-            else { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); }
+            options.method = 'POST';
+            options.headers = {'X-CSRFToken': token(), 'Content-Type': 'application/json'};
+            options.body = JSON.stringify(data);
         }
         const response = await fetch(url, options);
         const result = await response.json().catch(() => null);
@@ -168,29 +168,19 @@
     function editCategory(category) {
         categoryId = category?.id || null; $('categoryForm').reset();
         $('categoryFormTitle').textContent = category ? 'Editar categoría' : 'Crear categoría';
-        $('categoryName').value = category?.name || ''; $('categoryTemplates').replaceChildren();
-        for (const item of category?.templates || []) {
-            const row = document.createElement('div'); row.className = 'management-row mb-2';
-            const name = document.createElement('p'); name.textContent = `${item.name} · Hoja: ${item.sheet}`;
-            row.append(name, action('Quitar Excel', async () => {
-                if (await confirmAction('¿Seguro que desea quitar este Excel?', `Los botones existentes conservarán su copia de «${item.name}».`, 'Quitar')) {
-                    await mutate(() => request('/api/administration/categories/', {id: categoryId, action: 'delete_template', template_id: item.id}), 'Excel retirado de la categoría.');
-                }
-            }, {danger: true})); $('categoryTemplates').append(row);
-        }
+        $('categoryName').value = category?.name || '';
     }
     function renderCategories() {
         const container = $('categoryRows'); container.replaceChildren();
         for (const category of state.categories) {
             const row = document.createElement('div'); row.className = 'management-row';
             const title = document.createElement('strong'); title.textContent = category.name;
-            const detail = document.createElement('p'); detail.textContent = `${category.templates.length} Excel permanentes`;
             const controls = document.createElement('div'); controls.className = 'form-actions';
             controls.append(action('Editar', () => editCategory(category)), action('Eliminar', async () => {
                 if (await confirmAction('¿Seguro que desea eliminar esta categoría?', `Se eliminará «${category.name}».`, 'Eliminar')) {
                     await mutate(() => request('/api/administration/categories/', {id: category.id, action: 'delete'}), 'Categoría eliminada.');
                 }
-            }, {danger: true})); row.append(title, detail, controls); container.append(row);
+            }, {danger: true})); row.append(title, controls); container.append(row);
         }
         if (!state.categories.length) empty(container, 'Crea la primera categoría para comenzar.');
     }
@@ -245,10 +235,7 @@
     $('categoryForm').onsubmit = event => {
         event.preventDefault();
         mutate(async () => {
-            const data = new FormData(); if (categoryId) data.set('id', categoryId);
-            data.set('name', $('categoryName').value); data.set('sheet', $('categorySheet').value);
-            const file = $('categoryFile').files[0]; if (file) data.set('file', file);
-            const result = await request('/api/administration/categories/', file ? data : {id: categoryId, name: $('categoryName').value});
+            const result = await request('/api/administration/categories/', {id: categoryId, name: $('categoryName').value});
             categoryId = result.id;
         }, 'Categoría guardada.');
     };

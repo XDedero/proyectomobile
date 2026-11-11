@@ -91,9 +91,6 @@ class DxfViewer {
         pin.circle.style.fill = motor.button_color || '#2563eb';
         pin.hover.textContent = motor.name;
         pin.area.style.fill = motor.button_color || '#2563eb';
-        // The parent motor-target applies the viewer opacity to the entire pin,
-        // including its coverage. A second opacity here would keep the radius
-        // faded when the pin is highlighted or the control returns to 100%.
         pin.area.style.pointerEvents = 'none';
         pin.area.style.display = motor.has_area ? '' : 'none';
         if (pin.area.localName !== (motor.area_shape === 'rectangle' ? 'rect' : 'ellipse')) {

@@ -13,7 +13,7 @@ from django.urls import reverse
 
 from .access import can_edit_plan
 from .cloud_projects import CloudUnavailable, open_cloud_project, workbook_version
-from .models import ButtonCategory, CategoryWorkbook, Plan, PdfPlan, PlanRole, PlanRoleGroup, SavedProject, WorkbookDocument
+from .models import ButtonCategory, Plan, PdfPlan, PlanRole, PlanRoleGroup, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload, excel_upload
 from .tests import dxf_file
 
@@ -114,32 +114,47 @@ class ManagementAndVersionTests(TestCase):
         self.assertEqual(self.client.get(plan['detail_url']).status_code, 403)
         self.assertEqual(self.client.post(reverse('import_pdf'), {'file': pdf_upload()}).status_code, 403)
 
-    def test_category_excel_is_permanent_and_buttons_receive_independent_copies(self):
+    def test_category_is_a_label_and_deleting_it_preserves_the_button_workbook(self):
         self.client.force_login(self.admin)
-        response = self.client.post(reverse('manage_category'), {'name': 'Válvulas', 'file': excel_upload(), 'sheet': 'Otra hoja'})
+        url = reverse('manage_category')
+        response = self.post(url, {'name': 'Válvulas'})
         self.assertEqual(response.status_code, 200, response.content)
-        category = response.json(); template = category['templates'][0]
-        original = bytes(CategoryWorkbook.objects.get(pk=template['id']).content)
+        category = response.json()
+        self.assertEqual(set(category), {'id', 'name'})
+        self.assertIn(category, self.client.get(reverse('management_data')).json()['categories'])
         self.client.force_login(self.owner)
         plan = self.create_plan()
-        self.assertIn(category['id'], [str(c['id']) for c in plan['button_categories']])
-        marker = self.post(plan['markers_url'], {'page': 1, 'x': .1, 'y': .2, 'origin': 'category',
-            'category_id': category['id'], 'template_id': template['id']})
-        self.assertEqual(marker.status_code, 201, marker.content)
-        marker = marker.json()['marker']
-        self.assertEqual(marker['source_sheet'], 'Otra hoja')
-        document = WorkbookDocument.objects.get(pk=marker['workbook']['id'])
-        self.assertEqual(bytes(document.content), original)
-        self.assertEqual(bytes(CategoryWorkbook.objects.get(pk=template['id']).content), original)
-        self.assertEqual(self.post(reverse('manage_category'), {'name': 'No autorizado'}).status_code, 403)
+        self.assertIn(category, plan['button_categories'])
+        placement = {'page': 1, 'x': .1, 'y': .2, 'origin': 'upload', 'category_id': category['id']}
+        response = self.client.post(plan['markers_url'], {'placement': json.dumps(placement), 'file': excel_upload()})
+        self.assertEqual(response.status_code, 201, response.content)
+        marker = response.json()['marker']
+        self.assertEqual(marker['category_name'], 'Válvulas')
+        record = PdfPlan.objects.get(pk=plan['id']).markers.get(pk=marker['id'])
+        workbook_id, original = record.source_workbook_id, bytes(record.source_workbook.content)
+        self.assertEqual(self.post(url, {'name': 'No autorizado'}).status_code, 403)
+        self.client.force_login(self.admin)
+        self.assertEqual(self.post(url, {'id': category['id'], 'name': 'Válvulas hidráulicas'}).status_code, 200)
+        self.assertEqual(record.category.name, 'Válvulas hidráulicas')
+        self.assertEqual(self.post(url, {'id': category['id'], 'action': 'delete'}).status_code, 200)
+        record.refresh_from_db()
+        self.assertIsNone(record.category_id)
+        self.assertEqual(record.source_workbook_id, workbook_id)
+        self.assertEqual(bytes(record.source_workbook.content), original)
 
-    def test_category_template_cannot_be_used_from_another_category(self):
+    def test_legacy_category_workbook_upload_and_selection_are_rejected(self):
         category = ButtonCategory.objects.create(name='Sensores')
-        other = ButtonCategory.objects.create(name='Bombas')
-        template = CategoryWorkbook.objects.create(category=other, name='Bomba.xlsx', content=excel_upload().read(), sheet='Equipos')
-        plan = self.create_plan()
-        response = self.post(plan['markers_url'], {'page': 1, 'x': .1, 'y': .2, 'origin': 'category', 'category_id': str(category.pk), 'template_id': template.pk})
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse('manage_category'), {'id': category.pk, 'name': 'Bombas', 'file': excel_upload()})
         self.assertEqual(response.status_code, 400)
+        category.refresh_from_db()
+        self.assertEqual(category.name, 'Sensores')
+        self.client.force_login(self.owner)
+        plan = self.create_plan()
+        response = self.post(plan['markers_url'], {'page': 1, 'x': .1, 'y': .2, 'origin': 'category',
+                                                   'category_id': str(category.pk), 'template_id': 1})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(PdfPlan.objects.get(pk=plan['id']).markers.exists())
 
     def test_local_version_detects_pending_update_for_pdf_and_dxf(self):
         for kind in ('pdf', 'dxf'):

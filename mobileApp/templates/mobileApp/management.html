@@ -63,15 +63,11 @@
     </div>
   </section>
   <section class="management-section" id="categoriesPanel" hidden>
-    <div class="section-intro"><h2>Categorías de botones</h2><p>Crea, modifica y elimina categorías. También puedes asociar plantillas Excel que estarán disponibles al crear botones.</p></div>
+    <div class="section-intro"><h2>Categorías de botones</h2><p>Crea, modifica y elimina las etiquetas que se asignan a los botones.</p></div>
     <div class="management-grid">
       <div class="management-card"><div class="section-toolbar mb-3"><h3 class="mb-0">Categorías disponibles</h3><button id="newCategory" class="btn btn-sm btn-outline-primary" type="button">+ Crear categoría</button></div><div id="categoryRows" class="management-rows"></div></div>
       <form class="management-card" id="categoryForm"><h3 id="categoryFormTitle">Crear categoría</h3>
         <label class="form-label" for="categoryName">Nombre de la categoría</label><input id="categoryName" class="form-control mb-3" required maxlength="80" placeholder="Ej. Válvulas">
-        <label class="form-label" for="categoryFile">Añadir Excel permanente <span class="text-secondary">(opcional)</span></label><input id="categoryFile" class="form-control mb-3" type="file" accept=".xlsx">
-        <label class="form-label" for="categorySheet">Hoja que usarán los botones</label><input id="categorySheet" class="form-control mb-2" maxlength="31" placeholder="Vacío: primera hoja visible">
-        <p class="small text-secondary">Cada botón recibe una copia editable. La plantilla de la categoría se conserva.</p>
-        <div id="categoryTemplates" class="mb-3"></div>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar categoría</button><button id="cancelCategory" class="btn btn-link" type="button">Limpiar</button></div>
       </form>
     </div>

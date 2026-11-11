@@ -136,14 +136,12 @@ def check_browser(url, directory):
                 page.locator('#fullscreenSavePlan').click()
                 expect(page.locator(f'#{prefix.lower()}SaveBadge' if kind == 'pdf' else '#cadSaveBadge')).to_contain_text('Guardado')
                 expect(page.locator('#planAnnotationOpacity')).to_have_value('23')
-                # Selection and hovering cannot override the opacity slider.
                 page.evaluate('''()=>{
                     const a=projectWorkspace.active;
                     if(a.kind==='pdf') pdfWorkflow.select(a.plan.markers[0].id);
                     else planWorkflow.select(a.plan.motors[0].id);
                 }''')
-                # Selection deliberately restores the highlighted button/radius
-                # to 100%; remove the highlight before checking full hiding.
+                # Clear the highlight before checking that zero hides annotations.
                 page.evaluate('''()=>{
                     if(projectWorkspace.active.kind==='pdf') pdfWorkflow.deselect();
                     else planWorkflow.deselect();

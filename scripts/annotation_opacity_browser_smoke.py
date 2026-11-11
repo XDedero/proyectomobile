@@ -1,4 +1,4 @@
-"""Verify the real PDF/DXF viewers restore a button and its radius together.
+"""Verify the real PDF/DXF viewers combine the radius and general opacities.
 
 Uses an isolated browser document; no database, network or production data.
 """
@@ -57,23 +57,23 @@ def main():
 
                 change(23)
                 assert abs(effective_opacity(marker) - .23) < .001
-                assert abs(effective_opacity(radius) - .23) < .001
+                assert abs(effective_opacity(radius) - .23 * .25) < .001
                 marker.hover()
                 assert effective_opacity(marker) == 1
-                assert effective_opacity(radius) == 1
+                assert effective_opacity(radius) == .25
                 page.mouse.move(0, 0)
-                assert abs(effective_opacity(radius) - .23) < .001
+                assert abs(effective_opacity(radius) - .23 * .25) < .001
                 page.evaluate('index => contexts[index].viewer.select(1)', index)
                 assert effective_opacity(marker) == 1
-                assert effective_opacity(radius) == 1
+                assert effective_opacity(radius) == .25
                 page.evaluate('index => contexts[index].viewer.select(null)', index)
                 change(0)
                 assert effective_opacity(marker) == 0
                 assert effective_opacity(radius) == 0
                 change(100)
                 assert effective_opacity(marker) == 1
-                assert effective_opacity(radius) == 1
-                print(f'PASS: {kind.upper()} radius follows opacity, hover and selection and returns to 100%', flush=True)
+                assert effective_opacity(radius) == .25
+                print(f'PASS: {kind.upper()} radius stays translucent at full opacity and fades with the slider', flush=True)
         finally:
             browser.close()
 

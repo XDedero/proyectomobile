@@ -214,9 +214,7 @@ def workspace_data(plan, user=None):
     return {'workbook': workbook_data(document, sheets=False), 'workbook_mode': document.plan_mode,
         'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows
                           if not (row.name == EMPTY_SHEET and not row.is_listing and document.plan_mode == 'template')],
-        'button_categories': [{'id': category.pk, 'name': category.name, 'templates': [
-            {'id': item.pk, 'name': item.name, 'sheet': item.sheet} for item in category.templates.all()]}
-            for category in ButtonCategory.objects.prefetch_related('templates')],
+        'button_categories': list(ButtonCategory.objects.values('id', 'name')),
         'listings': listings, 'listing': listing,
         'binding_counts': {item['sheet_name']: item['count'] for item in markers(plan).values('sheet_name').annotate(count=Count('pk'))}}
 
@@ -279,21 +277,13 @@ def new_button_options(request, plan):
         raise ValidationError('Indica si el botón mostrará su descripción.')
     if origin is None and upload is None and 'category_id' not in data:
         return data, None, None, None
-    if origin not in ('blank', 'upload', 'category', 'piece', 'sheet') or (origin == 'upload') != (upload is not None):
-        raise ValidationError('Elija una ficha predeterminada o un archivo para importar.')
+    if origin not in ('blank', 'upload', 'piece', 'sheet') or (origin == 'upload') != (upload is not None):
+        raise ValidationError('Elija un origen disponible para la ficha.')
     category = button_category(data.get('category_id'))
     if origin == 'piece':
         from .workbook_service import positive_integer
         record = get_object_or_404(SavedMotor, pk=positive_integer(data.get('saved_piece_id'), 'Pieza'))
         origin = ('piece', record.pk)
-    if origin == 'category':
-        from .models import CategoryWorkbook
-        from django.core.files.uploadedfile import SimpleUploadedFile
-        template = CategoryWorkbook.objects.filter(pk=data.get('template_id'), category=category).first()
-        if template is None:
-            raise ValidationError('Elija un Excel permanente de esta categoría.')
-        upload = SimpleUploadedFile(template.name, bytes(template.content))
-        origin = ('category', template.sheet)
     if origin == 'sheet':
         if not isinstance(data.get('sheet'), str) or not data['sheet']:
             raise ValidationError('Elija una hoja del plano.')
@@ -308,8 +298,6 @@ def initialize_button(marker, user, origin, upload):
         assign_marker(marker, user, {'sheet': origin[1]})
     elif isinstance(origin, tuple) and origin[0] == 'piece':
         stage_piece_source(marker, user, origin[1])
-    elif isinstance(origin, tuple) and origin[0] == 'category':
-        stage_button_source(marker, user, upload, selected=origin[1])
     elif origin == 'upload':
         stage_button_source(marker, user, upload)
     elif origin == 'blank':

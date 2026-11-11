@@ -84,10 +84,9 @@ def check_browser(url, directory):
             expect(admin.locator('#userRut')).to_have_value('12345678-5')
             admin.locator('[data-tab=categories]').click()
             admin.locator('#categoryName').fill('Válvulas')
-            admin.locator('#categoryFile').set_input_files(directory / 'motor_01.xlsx')
             admin.locator('#categoryForm button[type=submit]').click()
             expect(admin.locator('#categoryRows')).to_contain_text('Válvulas')
-            expect(admin.locator('#categoryTemplates')).to_contain_text('motor_01.xlsx')
+            expect(admin.locator('#categoryForm input[type=file]')).to_have_count(0)
             admin.reload()
             admin.locator('[data-tab=categories]').click()
             expect(admin.locator('#categoryRows')).to_contain_text('Válvulas')
@@ -102,8 +101,8 @@ def check_browser(url, directory):
             author.locator('#btnPdfAddMarker').click()
             expect(author.locator('#newPlanButton')).to_be_visible()
             author.locator('#newButtonCategory').select_option(label='Válvulas')
-            author.locator('#newButtonOrigin').select_option('category')
-            expect(author.locator('#newButtonTemplate')).to_contain_text('motor_01.xlsx')
+            expect(author.locator('#newButtonOrigin option[value=category]')).to_have_count(0)
+            author.locator('#newButtonOrigin').select_option('blank')
             author.locator('#btnConfirmNewButton').click()
             expect(author.locator('#newPlanButton')).to_be_hidden()
             expect(author.locator('#pdfViewport')).to_have_class('pdf-plan-viewport placing-marker')
@@ -111,7 +110,7 @@ def check_browser(url, directory):
             author.wait_for_function('pdfWorkflow.currentPlan.markers.length === 1')
             assert author.evaluate('pdfWorkflow.currentPlan.markers[0].category_name') == 'Válvulas'
             assert not errors, errors
-            print('PASS: administrator searches and edits users, keeps category Excel after reload; mobile panel fits', flush=True)
+            print('PASS: administrator searches and edits users; category labels survive reload and can be assigned to buttons', flush=True)
         finally:
             browser.close()
 

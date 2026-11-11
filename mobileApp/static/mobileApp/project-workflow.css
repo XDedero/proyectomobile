@@ -105,8 +105,14 @@
 .plan-opacity-control { margin: 0; width: 220px; max-width: 100%; padding: .5rem .65rem; border-radius: 10px; background: #fffffff2; color: #17324d; font-size: .85rem; }
 .plan-opacity-control input { display: block; width: 100%; margin-top: .35rem; }
 .plan-fullscreen .plan-display-dock { position: absolute; right: .5rem; top: 65px; max-width: min(240px, 65vw); }
-:is(.motor-target, .pdf-plan-marker, .pdf-marker-coverage-area, .plan-sectors-layer) { opacity: var(--plan-annotation-opacity, 1); }
-.pdf-marker-coverage-area:is(.selected, .focused) { opacity: 1; }
+:is(.motor-target, .pdf-plan-marker, .plan-sectors-layer) { opacity: var(--plan-annotation-opacity, 1); }
+:is(.pdf-marker-coverage-area, .motor-coverage) { --button-area-opacity: .25; }
+.motor-coverage { opacity: var(--button-area-opacity); }
+.pdf-marker-coverage-area {
+    opacity: calc(var(--plan-annotation-opacity, 1) * var(--button-area-opacity));
+    border-width: 1px;
+}
+.pdf-marker-coverage-area:is(.selected, .focused) { opacity: var(--button-area-opacity); }
 .plan-annotations-hidden .plan-sectors-layer { visibility: hidden; pointer-events: none; }
 :is(.pdf-plan-marker, .motor-target):is(.selected, :focus-visible) { opacity: 1; }
 .motor-hover-name { display: none; text-anchor: middle; fill: #17324d; stroke: white; stroke-width: 3px; paint-order: stroke; pointer-events: none; }
@@ -120,11 +126,10 @@
 .pdf-plan-marker:is(.selected, :focus-visible)::after, .motor-target:is(.selected, :focus-visible) .motor-hover-name { display: block; }
 .motor-target.selected .motor-pin { transform-box: fill-box; transform-origin: center; transform: scale(1.3); }
 @media (hover: hover) {
-    .pdf-marker-coverage-area.hovered { opacity: 1; }
+    .pdf-marker-coverage-area.hovered { opacity: var(--button-area-opacity); }
     :is(.pdf-plan-marker, .motor-target):hover { opacity: 1; }
     .pdf-plan-marker:hover { transform: translate(-50%, -50%) scale(1.3); z-index: 20; }
     .pdf-plan-marker:hover::after, .motor-target:hover .motor-hover-name { display: block; }
     .motor-target:hover .motor-pin { transform-box: fill-box; transform-origin: center; transform: scale(1.3); }
 }
-.pdf-marker-coverage-area { border-width: 1px; }
 @media(max-width:600px) { .plan-fullscreen .plan-display-dock { top: 65px; max-width: 55vw; } }

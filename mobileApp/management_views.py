@@ -1,4 +1,4 @@
-"""Administration of plan roles, user groups and reusable category workbooks."""
+"""Administration of plan roles, user groups and button categories."""
 from functools import wraps
 from pathlib import Path
 
@@ -11,7 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .access import api_permissions, is_administrator
 from .accounts import can_edit_user, registration_data, user_data
-from .models import ButtonCategory, CategoryWorkbook, PlanRole, PlanRoleGroup, Plan, PdfPlan, RegistrationRequest
+from .models import ButtonCategory, PlanRole, PlanRoleGroup, Plan, PdfPlan, RegistrationRequest
 from .pdf_views import error_response, json_body
 
 
@@ -70,8 +70,7 @@ def pending_registrations(request):
 
 
 def category_data(category):
-    return {'id': str(category.pk), 'name': category.name, 'templates': [
-        {'id': item.pk, 'name': item.name, 'sheet': item.sheet} for item in category.templates.all()]}
+    return {'id': str(category.pk), 'name': category.name}
 
 
 @require_GET
@@ -102,7 +101,7 @@ def management_data(request):
         'plans': [{'id': f'{kind}:{pk}', 'name': name, 'kind': kind.upper()}
                   for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]
                   for pk, name in model.objects.values_list('pk', 'name')],
-        'categories': [category_data(c) for c in ButtonCategory.objects.prefetch_related('templates')],
+        'categories': [category_data(c) for c in ButtonCategory.objects.all()],
     })
 
 
@@ -192,22 +191,21 @@ def manage_category(request):
             from .authorization import capabilities
             if not capabilities(request.user)['can_create_category'] or data.get('id') or data.get('action') not in (None, '', 'create'):
                 return error_response('Solo los administradores pueden modificar o eliminar categorías. Los trabajadores pueden crearlas.', 403)
+        if request.FILES:
+            raise ValidationError('Las categorías solo admiten un nombre.')
+        action = data.get('action')
+        if action not in (None, '', 'create', 'update', 'delete'):
+            raise ValidationError('La acción de categoría no es válida.')
+        if action == 'delete' and not data.get('id'):
+            raise ValidationError('Seleccione una categoría para eliminar.')
         with transaction.atomic():
             category = get_object_or_404(ButtonCategory, pk=data['id']) if data.get('id') else ButtonCategory()
-            if data.get('action') == 'delete':
+            if action == 'delete':
                 category.delete()
-                return JsonResponse({'deleted': True})
-            if data.get('action') == 'delete_template':
-                get_object_or_404(CategoryWorkbook, pk=data.get('template_id'), category=category).delete()
                 return JsonResponse({'deleted': True})
             category.name = name_value(data)
             category.full_clean()
             category.save()
-            upload = request.FILES.get('file')
-            if upload:
-                from .button_import import inspect_button_file
-                content, sheet = inspect_button_file(upload, data.get('sheet'), allow_default=True)
-                CategoryWorkbook.objects.create(category=category, name=upload.name[:255], content=content, sheet=sheet)
         return JsonResponse(category_data(category))
     except (ValidationError, IntegrityError) as exc:
         return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe una categoría con ese nombre.')

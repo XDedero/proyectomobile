@@ -108,7 +108,6 @@
           <option value="upload">Importar Excel o CSV</option>
           <option value="sheet">Hoja del Excel del plano</option>
           <option value="piece">Pieza guardada</option>
-          <option value="category">Excel permanente de la categoría</option>
         </select>
         <div id="newButtonUploadOptions" class="mb-3" hidden>
           <label for="newButtonFile" class="form-label">Archivo Excel o CSV</label>
@@ -121,10 +120,6 @@
         <div id="newButtonPieceOptions" class="mb-3" hidden>
           <label for="newButtonPiece" class="form-label">Pieza guardada</label>
           <select id="newButtonPiece" class="form-select"></select>
-        </div>
-        <div id="newButtonCategoryTemplates" class="mb-3" hidden>
-          <label for="newButtonTemplate" class="form-label">Excel permanente</label>
-          <select id="newButtonTemplate" class="form-select"></select>
         </div>
         <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
         <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
@@ -199,7 +194,7 @@
         byId('newButtonDescriptions').replaceChildren();
         byId('newButtonFile').value = '';
         byId('newButtonOrigin').value = 'blank';
-        for (const id of ['UploadOptions', 'SheetOptions', 'PieceOptions', 'CategoryTemplates']) byId('newButton' + id).hidden = true;
+        for (const id of ['UploadOptions', 'SheetOptions', 'PieceOptions']) byId('newButton' + id).hidden = true;
         byId('newButtonCategory').replaceChildren(new Option('Elija una categoría', ''));
         message(newButtonModal, '');
         newButtonModal.controller.show();
@@ -207,7 +202,6 @@
         try {
             const data = await load(context);
             if (newButton?.context === context) {
-                newButton.categories = data.button_categories;
                 for (const item of data.button_categories) byId('newButtonCategory').append(new Option(item.name, item.id));
                 byId('newButtonSheet').replaceChildren(new Option('Elija una hoja', ''), ...data.sheet_options.filter(row => !row.is_listing).map(row => new Option(row.name, row.name)));
                 if (!data.button_categories.length) message(newButtonModal, 'Cree una categoría para añadir botones.', true);
@@ -220,10 +214,6 @@
         return selection;
     }
 
-    document.addEventListener('category:created', event => {
-        if (newButton) newButton.categories.push(event.detail);
-    });
-
     async function chooseNewButtonSource() {
         const draft = newButton;
         if (!draft || !valid(draft.context)) return;
@@ -232,7 +222,6 @@
         if (!byId('newButtonCategory').value) return message(newButtonModal, 'Seleccione una categoría.', true);
         if (origin === 'upload' && !file) return message(newButtonModal, 'Seleccione un archivo Excel o CSV.', true);
         if (origin === 'piece' && !byId('newButtonPiece').value) return message(newButtonModal, 'Seleccione una pieza.', true);
-        if (origin === 'category' && !byId('newButtonTemplate').value) return message(newButtonModal, 'Esta categoría no tiene un Excel permanente seleccionado.', true);
         if (origin === 'sheet' && !byId('newButtonSheet').value) return message(newButtonModal, 'Seleccione una hoja.', true);
         const descriptions = [...byId('newButtonDescriptions').children].map(row => ({key: row.querySelector('input').value.trim(), value: row.querySelector('textarea').value}));
         if (descriptions.some(row => !row.key) || new Set(descriptions.map(row => row.key.toLocaleLowerCase())).size !== descriptions.length) return message(newButtonModal, 'Cada descripción necesita una clave distinta.', true);
@@ -241,7 +230,6 @@
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
             draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined,
-                template_id: origin === 'category' ? Number(byId('newButtonTemplate').value) : undefined,
                 sheet: origin === 'sheet' ? byId('newButtonSheet').value : undefined,
                 category_id: byId('newButtonCategory').value, show_description: byId('newButtonDescriptionEnabled').checked,
                 button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined,
@@ -485,12 +473,6 @@
         newButton = null;
         draft?.resolve(valid(draft.context) ? draft.result : null);
     });
-    function updateNewButtonTemplates() {
-        const category = newButton?.categories?.find(item => item.id === byId('newButtonCategory').value);
-        byId('newButtonTemplate').replaceChildren();
-        for (const item of category?.templates || []) byId('newButtonTemplate').append(new Option(`${item.name} · ${item.sheet}`, item.id));
-    }
-    byId('newButtonCategory').onchange = updateNewButtonTemplates;
     byId('newButtonDescriptionEnabled').onchange = event => {
         byId('newButtonDescriptionOptions').hidden = !event.target.checked;
     };
@@ -503,8 +485,7 @@
     };
     byId('newButtonOrigin').onchange = async () => {
         const origin = byId('newButtonOrigin').value;
-        for (const [id, value] of [['UploadOptions','upload'], ['SheetOptions','sheet'], ['PieceOptions','piece'], ['CategoryTemplates','category']]) byId('newButton' + id).hidden = origin !== value;
-        updateNewButtonTemplates();
+        for (const [id, value] of [['UploadOptions','upload'], ['SheetOptions','sheet'], ['PieceOptions','piece']]) byId('newButton' + id).hidden = origin !== value;
         if (origin !== 'piece') return;
         const draft=newButton;if(!draft) return;
         busy(newButtonModal,true);

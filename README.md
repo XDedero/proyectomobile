@@ -55,7 +55,7 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 ## Guardar y abrir
 
-**Añadir botón** reúne la categoría, el nombre opcional, las descripciones, el color y el origen de la ficha Excel en un único modal sobre el plano. Permite usar un formato vacío, importar Excel/CSV, vincular una hoja del plano o elegir una pieza o plantilla de categoría. Después de confirmar, se toca la ubicación del botón.
+**Añadir botón** reúne la categoría, el nombre opcional, las descripciones, el color y el origen de la ficha Excel en un único modal sobre el plano. Permite usar un formato vacío, importar Excel/CSV, vincular una hoja del plano o elegir una pieza guardada. Después de confirmar, se toca la ubicación del botón.
 
 **Opacidad** es el único control de visualización junto al plano: la barra y su porcentaje permiten atenuar los botones y sectores, hasta ocultarlos por completo al 0 %. Está disponible también para lectores. Su valor solo afecta al visor abierto; se reinicia al 100 % al volver a abrirlo y no se guarda en el plano, los proyectos exportados ni la nube. Las preferencias de visualización de versiones anteriores se descartan mediante la migración `0026`.
 
@@ -153,7 +153,7 @@ Las pruebas aisladas utilizan `APP_SHARED_ACCOUNTS=0`.
 
 - **Solicitudes:** muestra únicamente las pendientes y se actualiza cada cinco segundos, al abrir la pestaña, volver a la aplicación o recuperar la conexión. **Actualizar solicitudes** permite consultar de inmediato; si falla la consulta, se avisa y se conserva la última lista confirmada. Todos los administradores pueden elegir el rol Espectador, Trabajador o Administrador antes de aceptar. El tick verde crea la cuenta con ese rol y retira la solicitud; la X roja pide confirmación y elimina definitivamente la solicitud. Otorgar administración pide confirmación adicional. No se almacena un historial de solicitudes resueltas. La migración `0029` retira los registros resueltos de versiones anteriores.
 - **Usuarios:** al abrir la pestaña se muestran y actualizan todas las cuentas existentes. Permite buscar por nombre, apellido o RUT, editar datos y contraseña, cambiar el rol y eliminar con confirmación. Todos los administradores pueden otorgar cualquiera de los tres roles a trabajadores y espectadores. `admin`, el **administrador principal**, conserva la facultad de modificar o eliminar otros administradores. Los demás administradores pueden editarse a sí mismos y gestionar trabajadores y espectadores. La protección de otros administradores se aplica también en Django Admin. Otorgar administración pide una confirmación adicional. Cambiar el rol o la contraseña invalida las sesiones de esa cuenta: debe volver a iniciar sesión.
-- **Categorías:** crear, consultar, editar y eliminar categorías y asociar Excel permanentes con una hoja seleccionada. Cada botón recibe una copia editable de la plantilla.
+- **Categorías:** crear, consultar, renombrar y eliminar las etiquetas que se asignan a los botones. La ficha se elige al crear o editar cada botón.
 
 Los roles de la aplicación son:
 
@@ -167,7 +167,7 @@ La migración `0030_primary_administrator` configura la cuenta existente `admin`
 
 La migración `0028_registration_accounts` conserva las cuentas, contraseñas y planos existentes; asigna a cada cuenta un RUT de prueba válido y único (marcado en el panel). Los administradores conservan su rol y las demás cuentas existentes pasan a trabajador. Los nombres de acceso anteriores siguen funcionando. Las cuentas nuevas utilizan un identificador interno estable para conservar la autoría aunque se cambie su RUT. Los roles y grupos antiguos se conservan para compatibilidad, pero el panel utiliza los tres roles anteriores para las cuentas con perfil.
 
-La opacidad del radio acompaña a la del botón en PDF y DXF: al volver el control al 100 %, ambos recuperan ese nivel. Seleccionar el botón o pasar sobre él también muestra el botón y su radio al 100 %.
+En PDF y DXF, la opacidad general se multiplica por la opacidad base del radio (25 %). Al seleccionar el botón o pasar el puntero sobre él, el botón recupera el 100 % y el radio su 25 %.
 
 ## Actualizaciones pendientes de planos
 
@@ -208,4 +208,4 @@ Las pruebas usan bases de datos y archivos temporales. Cubren PDF/DXF, libros co
 
 `pdf_compatibility_browser_smoke.py` comprueba Chromium y WebKit con sesiones independientes, funciones JavaScript ausentes en la página y el worker y un PDF cuyo archivo en `media/` se ha eliminado. Abre la copia guardada, páginas giradas y escaneadas y verifica el zoom a 1280 píxeles. También comprueba el mensaje de archivo inaccesible y la reapertura posterior.
 
-La migración `0020` incorpora los roles, sus grupos, las plantillas permanentes de categorías y la identidad del autor de las copias de nube. `management_browser_smoke.py` verifica sesiones independientes, avisos de actualización PDF/DXF, el bloqueo de modificaciones ajenas y el panel administrativo en escritorio y móvil.
+La migración `0032` retira las antiguas plantillas de categoría del almacenamiento local. Las fichas ya copiadas a los botones se conservan. `management_browser_smoke.py` verifica sesiones independientes, avisos de actualización PDF/DXF, el bloqueo de modificaciones ajenas y el panel administrativo en escritorio y móvil.

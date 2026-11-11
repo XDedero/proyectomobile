@@ -263,7 +263,6 @@
                 const category = await post('/api/administration/categories/', { name: input.value.trim() });
                 if (![...select.options].some(option => option.value === category.id)) select.append(new Option(category.name, category.id));
                 select.value = category.id; select.dispatchEvent(new Event('change'));
-                document.dispatchEvent(new CustomEvent('category:created', { detail: category }));
                 input.value = ''; feedback.textContent = 'Categoría creada.';
             } catch (error) { feedback.textContent = error.message; }
             finally { save.disabled = false; }
