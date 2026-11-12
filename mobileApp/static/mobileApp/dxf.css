@@ -11,11 +11,14 @@
     cursor: grab;
 }
 .dxf-viewport.dragging { cursor: grabbing; }
+.dxf-viewport.placing-marker { cursor: crosshair; }
 .dxf-viewport > svg { display: block; width: 100%; height: 100%; }
 .dxf-viewport:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
 .motor-target { cursor: pointer; }
 .motor-bounds { fill: transparent; stroke: transparent; vector-effect: non-scaling-stroke; }
 .motor-pin { fill: #fbbf24; stroke: #0f172a; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.motor-pin-hit { fill: transparent; }
+.plan-pin-pending .motor-pin { stroke: #fff; stroke-dasharray: 3 2; }
 .motor-label { fill: #0f172a; text-anchor: middle; dominant-baseline: central; font-weight: 800; pointer-events: none; }
 .motor-target.has-excel .motor-pin { fill: #4ade80; }
 .motor-target.selected .motor-pin, .motor-target:focus .motor-pin { fill: #60a5fa; stroke: white; stroke-width: 3; }
@@ -28,5 +31,8 @@
 .motor-coordinates { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #selectedMotorName, #excelFileName { overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
+@media (max-width: 600px), (max-width: 950px) and (pointer: coarse) {
+    .dxf-viewport { --pin-density: .83; }
+}
 .excel-table-wrapper { overflow: auto; max-height: 360px; }
 .excel-table-wrapper th, .excel-table-wrapper td { white-space: pre-wrap; min-width: 65px; max-width: 240px; overflow-wrap: anywhere; }

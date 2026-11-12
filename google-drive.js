@@ -189,7 +189,15 @@ const PROJECT_KEY_PATTERN = /^(?:local_(pdf|dxf)_\d+|project_[a-f0-9]{32})$/;
 
 const GoogleDriveService = {
     BASE_URL: 'https://www.googleapis.com/drive/v3',
-    UPLOAD_URL: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size,parents,appProperties,webViewLink,webContentLink',
+    FILE_FIELDS: 'id,name,mimeType,size,modifiedTime,version,sha256Checksum,parents,trashed,appProperties,webViewLink,webContentLink',
+
+    fileMetadata: async function (id) {
+        const params = new URLSearchParams({fields: this.FILE_FIELDS});
+        const response = await this._fetchWithAuth(`${this.BASE_URL}/files/${encodeURIComponent(id)}?${params}`);
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`No se pudo comprobar el archivo de Drive (HTTP ${response.status}).`);
+        return response.json();
+    },
 
     /**
      * Realiza peticiones autenticadas con reintento automático si el token expiró
@@ -312,7 +320,7 @@ const GoogleDriveService = {
             base64Data +
             closeDelim;
 
-        const res = await this._fetchWithAuth(this.UPLOAD_URL, {
+        const res = await this._fetchWithAuth(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=${this.FILE_FIELDS}`, {
             method: 'POST',
             headers: {
                 'Content-Type': `multipart/related; boundary=${boundary}`
@@ -338,7 +346,11 @@ const GoogleDriveService = {
         const target = this.resolveTargetFolder(fileName);
         const assocKey = associationKey || this.generateAssociationKey(fileName);
 
-        const existingFiles = await this.listFilesInFolder(target.folderId);
+        const knownId = driveTarget?.id;
+        const knownFile = knownId ? await this.fileMetadata(knownId) : null;
+        const existingFiles = knownId
+            ? [knownFile].filter(file => file && !file.trashed && file.parents?.includes(target.folderId))
+            : await this.listFilesInFolder(target.folderId, driveTarget?.missing ? assocKey : null);
         let existing = null;
         if (driveTarget?.missing) {
             const matching = existingFiles.filter(file => file.appProperties?.associationKey === assocKey);
@@ -384,6 +396,26 @@ const GoogleDriveService = {
             metadata.parents = [target.folderId];
         }
 
+        if (existing && target.mimeType === 'application/pdf' && existing.sha256Checksum
+                && typeof Buffer !== 'undefined' && typeof require === 'function' && Buffer.isBuffer(content)
+                && existing.sha256Checksum.toLowerCase() === require('node:crypto').createHash('sha256').update(content).digest('hex')) {
+            let file = existing;
+            if (existing.name !== metadata.name) {
+                const params = new URLSearchParams({fields: this.FILE_FIELDS});
+                const response = await this._fetchWithAuth(`${this.BASE_URL}/files/${encodeURIComponent(existing.id)}?${params}`, {
+                    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: metadata.name}),
+                });
+                if (!response.ok) throw new Error(`No se pudo actualizar el nombre del PDF en Drive (HTTP ${response.status}).`);
+                file = await response.json();
+                if (file.sha256Checksum !== existing.sha256Checksum) {
+                    throw new Error('El PDF cambió en Drive mientras se guardaba. Vuelve a guardar el plano.');
+                }
+            }
+            return {...this._formatDriveRecordForDB(file, target, assocKey, companyId),
+                action: 'reused', modified_time: file.modifiedTime, drive_version: file.version};
+        }
+
         const base64Data = await this._toBase64(content);
         const boundary = '-------DriveProjectBoundary' + Date.now();
         const delimiter = `\r\n--${boundary}\r\n`;
@@ -399,9 +431,8 @@ const GoogleDriveService = {
             base64Data +
             closeDelim;
 
-        const url = existing
-            ? `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=multipart&fields=id,name,mimeType,size,parents,appProperties,webViewLink,webContentLink,modifiedTime`
-            : this.UPLOAD_URL;
+        const path = existing ? `/${encodeURIComponent(existing.id)}` : '';
+        const url = `https://www.googleapis.com/upload/drive/v3/files${path}?uploadType=multipart&fields=${this.FILE_FIELDS}`;
         const method = existing ? 'PATCH' : 'POST';
 
         const res = await this._fetchWithAuth(url, {
@@ -420,7 +451,7 @@ const GoogleDriveService = {
         const driveFile = await res.json();
         return Object.assign(
             this._formatDriveRecordForDB(driveFile, target, assocKey, companyId),
-            { action: existing ? 'updated' : 'created', modified_time: driveFile.modifiedTime }
+            { action: existing ? 'updated' : 'created', modified_time: driveFile.modifiedTime, drive_version: driveFile.version }
         );
     },
 
@@ -529,12 +560,16 @@ const GoogleDriveService = {
     /**
      * LISTA TODOS LOS ARCHIVOS DENTRO DE UNA DE LAS DOS CARPETAS ("pdf" o "excel(xlsx-csv)")
      */
-    listFilesInFolder: async function (folderId) {
-        const q = `'${folderId}' in parents and trashed = false`;
+    listFilesInFolder: async function (folderId, associationKey = null) {
+        let q = `'${folderId}' in parents and trashed = false`;
+        if (associationKey !== null) {
+            const key = String(associationKey).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            q += ` and appProperties has { key='associationKey' and value='${key}' }`;
+        }
         const params = new URLSearchParams({
             q: q,
             pageSize: '100',
-            fields: 'nextPageToken,files(id, name, mimeType, size, modifiedTime, parents, appProperties, webViewLink, webContentLink)'
+            fields: `nextPageToken,files(${this.FILE_FIELDS})`
         });
 
         const files = [];

@@ -430,17 +430,24 @@
         return copy?.revision===copyRevision(plan) ? copy : null;
     }
 
+    async function cachedSource(owner,plan) {
+        const copy=await get('downloads',copyKey(owner,plan));
+        if(!copy || copy.user!==owner) return null;
+        // A new workbook revision need not invalidate the immutable PDF bytes.
+        const samePdf=plan.kind==='pdf'&&plan.source_revision&&copy.source_revision===plan.source_revision;
+        if(copy.revision!==copyRevision(plan)&&!samePdf) return null;
+        const file=await get('downloadFiles',copy.key+'|'+new URL(copy.source_url,location.href).href);
+        return account?.id===owner ? file?.body : null;
+    }
+
     async function planSource(plan) {
         if(!savedPlan(plan)) return null;
         const owner=appState.user?.id;
         await ready;
         if(!owner||owner!==account?.id) return null;
         const source=plan.source_url||plan.svg_url;
-        const copy=await currentCopy(owner,plan);
-        if(copy) {
-            const file=await get('downloadFiles',copy.key+'|'+new URL(source,location.href).href);
-            if(file&&account?.id===owner) return file.body;
-        }
+        const cached=await cachedSource(owner,plan);
+        if(cached) return cached;
         if(!navigator.onLine||disconnected||account?.id!==owner) return null;
         const running=copiesInProgress.get(copyKey(owner,plan));
         if(!running?.cancelled && running?.revision===copyRevision(plan) && running.sourceBody) return running.sourceBody;
@@ -477,7 +484,7 @@
         const source=detail.source_url||detail.svg_url;
         append(detail.detail_url,json(detail));
         append(detail.sectors_url,json({sectors:detail.sectors||[]}));
-        append(source,sourceBody||await fileBody(await checkedDownload(source,owner)));
+        append(source,sourceBody||await cachedSource(owner,detail)||await fileBody(await checkedDownload(source,owner)));
         const book=detail.workbook;
         let workbookUrl;
         if(book?.download_url&&detail.permissions?.can_export===true) {
@@ -502,6 +509,7 @@
             user:owner,kind:detail.kind,plan_id:detail.id,name:detail.name,version:detail.project_version,
             date:detail.saved_at||detail.date,time:started,cloud_key:detail.cloud_key,cloud_origin:detail.cloud_origin,
             detail_url:detail.detail_url,source_url:source,workbook_url:workbookUrl,workbook_name:book?.name,
+            source_revision:detail.source_revision,
             urls,paths:[...new Set(paths.filter(Boolean).map(url=>new URL(url,location.href).pathname))],
             size:files.reduce((size,file)=>size+file.body.size,0),
         };

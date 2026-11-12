@@ -2,6 +2,7 @@
 from io import BytesIO
 import json
 from pathlib import Path
+import re
 import sys
 from uuid import uuid4
 from zipfile import ZipFile
@@ -17,7 +18,9 @@ def hit_point(page, identifier, selectable=True):
         for(const [u,v] of [[.2,.2],[-.2,.2],[0,.3],[.25,0],[-.25,0],[0,0]]) {
             const p=new DOMPoint(u*s.width,v*s.height).matrixTransform(matrix);
             const target=document.elementFromPoint(p.x,p.y);
-            if(target?.closest('[data-sector-id]')?.dataset.sectorId===id && (!selectable || target.closest('.sector-selectable'))) return {x:p.x,y:p.y};
+            if(selectable && target?.closest('.sector-selectable')?.dataset.sectorId===id) return {x:p.x,y:p.y};
+            if(!selectable && target && active.viewport.contains(target) &&
+                !target.closest('[data-sector-id], [data-pdf-marker-id], [data-motor-id]')) return {x:p.x,y:p.y};
         }
         throw Error('No visible point on sector '+s.name);
     }''', {'id': identifier, 'selectable': selectable})
@@ -42,6 +45,81 @@ def open_plan(page, url, kind, plan):
     page.evaluate('''async ({kind,plan}) => {
         await (kind==='pdf'?pdfWorkflow:planWorkflow).open(plan);
     }''', {'kind': kind, 'plan': data})
+
+
+def check_button_placement(page, kind, plan):
+    from playwright.sync_api import expect
+
+    viewport = page.locator('#pdfViewport' if kind == 'pdf' else '#dxfViewport')
+    drawing = viewport.locator('.pdf-plan-page' if kind == 'pdf' else 'svg').first
+    pending = viewport.locator('.plan-pin-pending')
+    saved = viewport.locator('[data-pdf-marker-id]' if kind == 'pdf' else '[data-motor-id]')
+    initial = saved.count()
+    requests = []
+    pattern = '**' + plan['markers_url']
+    hold = lambda route: requests.append(route)
+    page.route(pattern, hold)
+    try:
+        for reject in (True, False):
+            page.evaluate('''async () => {
+                const context = projectWorkspace.active;
+                await context.setMode('add', {origin:'blank', category_id:context.plan.button_categories[0].id});
+            }''')
+            expect(viewport).to_have_class(re.compile('placing-marker'))
+            box = drawing.bounding_box()
+            point = {'x': box['width'] * .16, 'y': box['height'] * .2}
+            if kind == 'dxf':
+                point = drawing.evaluate('''svg => {
+                    const bounds = svg.getBoundingClientRect();
+                    const {x, y, width, height} = svg.viewBox.baseVal;
+                    const point = new DOMPoint(x + width * .16, y + height * .2).matrixTransform(svg.getScreenCTM());
+                    return {x:point.x-bounds.left, y:point.y-bounds.top};
+                }''')
+            with page.expect_request(pattern):
+                drawing.click(position=point)
+            expect(pending).to_be_visible()
+            assert 'placing-marker' not in viewport.get_attribute('class')
+            expect(saved).to_have_count(initial)
+            drawing.click(position=point)
+            assert len(requests) == 1
+            route = requests.pop()
+            if reject:
+                route.fulfill(status=503, json={'error': 'Fallo simulado al guardar.'})
+                expect(pending).to_have_count(0)
+                expect(saved).to_have_count(initial)
+            else:
+                # DXF must confirm by adding a pin to the SVG already on screen.
+                svg = drawing.element_handle() if kind == 'dxf' else None
+                with page.expect_response(pattern) as response:
+                    route.continue_()
+                assert response.value.status == 201, response.value.text()
+                expect(pending).to_have_count(0)
+                expect(saved).to_have_count(initial + 1)
+                if svg:
+                    assert svg.evaluate('node => node.isConnected')
+    finally:
+        page.unroute(pattern, hold)
+
+
+def check_button_sizes(page, kind):
+    from playwright.sync_api import expect
+
+    pin = page.locator('.pdf-plan-marker' if kind == 'pdf' else '.motor-pin').first
+    diameter = '''node => node instanceof SVGCircleElement
+        ? 2 * node.r.baseVal.value * node.ownerSVGElement.getScreenCTM().a : node.offsetWidth'''
+    desktop = pin.evaluate(diameter)
+    size = page.viewport_size
+    page.set_viewport_size({'width': 390, 'height': 844})
+    try:
+        page.wait_for_function('''({kind,desktop}) => {
+            const pin = document.querySelector(kind==='pdf'?'.pdf-plan-marker':'.motor-pin');
+            const width = pin instanceof SVGCircleElement
+                ? 2 * pin.r.baseVal.value * pin.ownerSVGElement.getScreenCTM().a : pin?.offsetWidth;
+            return width >= 18 && width < desktop;
+        }''', arg={'kind': kind, 'desktop': desktop})
+        expect(pin).to_be_visible()
+    finally:
+        page.set_viewport_size(size)
 
 
 def check_browser(url, directory):
@@ -71,10 +149,10 @@ def check_browser(url, directory):
                         directory / ('plano_pdf_configurable.pdf' if kind == 'pdf' else 'motores_demo.dxf'))
                 plan = response.value.json()
                 expect(page.locator('#pdfViewport canvas').first if kind == 'pdf' else page.locator('.motor-target').first).to_be_visible()
-                if kind == 'pdf':
-                    added = page.request.post(url.rstrip('/') + plan['markers_url'], data={'page': 1, 'x': .15, 'y': .18},
-                                              headers={'X-CSRFToken': page.evaluate('csrfToken()')})
-                    assert added.status == 201
+                expect(page.locator(f'#btn{prefix}EditSectors')).to_be_hidden()
+                check_button_placement(page, kind, plan)
+                check_button_sizes(page, kind)
+                print(f'PASS: {kind.upper()} responsive pins, immediate preview, rollback and confirmation', flush=True)
                 dims = page.evaluate('''() => {
                     const {kind,viewer}=projectWorkspace.active;
                     const d=kind==='pdf'?viewer.baseViewport:viewer.initial,unit=Math.max(d.width,d.height)/1000;
@@ -97,12 +175,20 @@ def check_browser(url, directory):
                                            headers={'X-CSRFToken': page.evaluate('csrfToken()')})
                 assert result.status == 200
                 open_plan(page, url, kind, plan)
+                expect(page.locator(f'#btn{prefix}EditSectors')).to_be_visible()
+                expect(page.locator('.sector-selectable')).to_have_count(0)
                 page.locator(f'#btn{prefix}Fullscreen').click()
                 expect(page.get_by_text('Vista de botones', exact=True)).to_have_count(0)
                 expect(page.locator('.plan-color-legend')).to_have_count(0)
                 expect(page.locator('.plan-display-dock input:visible')).to_have_count(1)
-                # Every preset can be selected and dragged in its first gesture.
+                edit = page.locator('#fullscreenEditSectors')
+                drag(page, hit_point(page, sectors[0]['id'], selectable=False), 18, 9)
+                expect(page.locator('.sector-editor-dock')).to_be_hidden()
+                expect(edit).to_have_attribute('aria-pressed', 'false')
+                # Once editing is enabled, each figure moves on its first gesture.
                 for original in sectors:
+                    edit.click()
+                    expect(edit).to_have_attribute('aria-pressed', 'true')
                     drag(page, hit_point(page, original['id']), 18, 9)
                     expect(page.locator('.sector-editor-dock')).to_be_visible()
                     expect(page.locator('#planSectorSettings')).to_be_hidden()
@@ -118,6 +204,8 @@ def check_browser(url, directory):
                     changed = next(row for row in saved.value.json()['sectors'] if row['id'] == original['id'])
                     assert changed['x'] != original['x'] and changed['width'] != original['width']
                     assert changed['height'] == original['height']
+                    expect(edit).to_have_attribute('aria-pressed', 'false')
+                    expect(page.locator('.sector-selectable')).to_have_count(0)
                 assert 'sector-selectable' not in page.locator(f'[data-sector-id="{brush["id"]}"]').get_attribute('class')
                 # A painted region lets a tap pass through to plan navigation.
                 p = page.evaluate('''id=>{
@@ -127,7 +215,7 @@ def check_browser(url, directory):
                 }''', brush['id'])
                 page.mouse.click(p['x'], p['y'])
                 expect(page.locator('.sector-editor-dock')).to_be_hidden()
-                print(f'PASS: {kind.upper()} direct selection/drag, free stretching, shape changes and nonselectable brush', flush=True)
+                print(f'PASS: {kind.upper()} free navigation, explicit sector editing and return to explore', flush=True)
 
                 posts = []
                 page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' and request.url.endswith('/display/') else None)
@@ -179,7 +267,9 @@ def check_browser(url, directory):
                         open_plan(touch, url, kind, plan)
                         touch.locator('#btnPdfFullscreen').click()
                         expect(touch.locator('#planAnnotationOpacity')).to_be_enabled()
+                        expect(touch.locator('.sector-selectable')).to_have_count(0)
                         if user == 'empleado':
+                            touch.locator('#fullscreenEditSectors').tap()
                             p = hit_point(touch, sectors[0]['id'])
                             figure = touch.locator(f'[data-sector-id="{sectors[0]["id"]}"]')
                             before = figure.get_attribute('transform')
@@ -192,7 +282,9 @@ def check_browser(url, directory):
                             assert figure.get_attribute('transform') != before
                             touch.locator('#btnSectorCancel').tap()
                             assert figure.get_attribute('transform') == before
+                            expect(touch.locator('#fullscreenEditSectors')).to_have_attribute('aria-pressed', 'false')
                         else:
+                            expect(touch.locator('#fullscreenEditSectors')).to_be_hidden()
                             expect(touch.locator('.sector-selectable')).to_have_count(0)
                         opacity(touch, 0)
                         expect(touch.locator('.pdf-plan-marker')).to_have_css('opacity', '0')

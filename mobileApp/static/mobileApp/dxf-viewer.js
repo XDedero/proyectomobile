@@ -58,29 +58,47 @@ class DxfViewer {
         const box = this.svg.viewBox.baseVal;
         this.initial = { x: box.x, y: box.y, width: box.width, height: box.height };
         this.view = { ...this.initial };
-        const layer = this.element('g', { class: 'motor-layer' });
-        this.svg.append(layer);
-        for (const motor of motors) {
-            const group = this.element('g', {
-                'data-motor-id': motor.id, class: `motor-target${motor.excel ? ' has-excel' : ''}`, tabindex: '0',
-                role: 'button', 'aria-label': `${motor.name}, X ${motor.x}, Y ${motor.y}`,
-                'aria-pressed': 'false',
-            });
-            const title = this.element('title');
-            title.textContent = `${motor.name} · X: ${motor.x} · Y: ${motor.y}`;
-            const [x, y, width, height] = motor.svg_bounds;
-            const bounds = this.element('rect', { x, y, width, height, class: 'motor-bounds' });
-            const circle = this.element('circle', { cx: motor.svg_x, cy: motor.svg_y, class: 'motor-pin' });
-            const label = this.element('text', { class: 'motor-label', 'font-size': 11, x: 0, y: 0 });
-            const hover = this.element('text', {class: 'motor-hover-name', x: 0, y: 30, 'font-size': 12});
-            const area = this.element(motor.area_shape === 'rectangle' ? 'rect' : 'ellipse', {class:'motor-coverage'});
-            label.textContent = String(this.pins.size + 1);
-            group.append(title, area, bounds, circle, label, hover);
-            layer.append(group);
-            this.pins.set(motor.id, { group, circle, label, hover, area, motor });
-            this.updateButtonAppearance(motor);
-        }
+        this.motorLayer = this.element('g', { class: 'motor-layer' });
+        this.svg.append(this.motorLayer);
+        for (const motor of motors) this.addMotor(motor);
         this.update();
+    }
+
+    addMotor(motor) {
+        if (!this.motorLayer || this.pins.has(motor.id)) return;
+        const group = this.element('g', {
+            'data-motor-id': motor.id, class: `motor-target${motor.excel ? ' has-excel' : ''}`, tabindex: '0',
+            role: 'button', 'aria-pressed': 'false',
+        });
+        const title = this.element('title');
+        const [x, y, width, height] = motor.svg_bounds;
+        const bounds = this.element('rect', { x, y, width, height, class: 'motor-bounds' });
+        const hit = this.element('circle', {cx: motor.svg_x, cy: motor.svg_y, class: 'motor-pin-hit'});
+        const circle = this.element('circle', {cx: motor.svg_x, cy: motor.svg_y, class: 'motor-pin'});
+        const label = this.element('text', {class: 'motor-label', x: 0, y: 0});
+        const hover = this.element('text', {class: 'motor-hover-name', x: 0, 'font-size': 12});
+        const area = this.element(motor.area_shape === 'rectangle' ? 'rect' : 'ellipse', {class:'motor-coverage'});
+        label.textContent = String(this.pins.size + 1);
+        group.append(title, area, bounds, hit, circle, label, hover);
+        this.motorLayer.append(group);
+        this.pins.set(motor.id, {group, hit, circle, label, hover, area, motor});
+        this.updateButtonAppearance(motor);
+    }
+
+    setPendingMarker(marker) {
+        if (!marker && !this.pendingPin) return;
+        this.pendingPin?.group.remove();
+        this.pendingPin = null;
+        if (!marker || !this.motorLayer) return;
+        const group = this.element('g', {class: 'motor-target plan-pin-pending', 'aria-hidden': 'true'});
+        const circle = this.element('circle', {cx: marker.x, cy: marker.y, class: 'motor-pin'});
+        const label = this.element('text', {class: 'motor-label', x: 0, y: 0});
+        circle.style.fill = marker.color;
+        label.textContent = String(marker.number);
+        group.append(circle, label);
+        this.motorLayer.append(group);
+        this.pendingPin = {group, circle, label, motor: {svg_x: marker.x, svg_y: marker.y, button_scale: marker.scale}};
+        this.updatePins();
     }
 
     updateButtonAppearance(motor) {
@@ -112,6 +130,10 @@ class DxfViewer {
         this.pointers.clear();
         this.pins.clear();
         this.svg = null;
+        this.motorLayer = null;
+        this.pendingPin = null;
+        this.placing = this.moving = false;
+        this.container.classList.remove('placing-marker', 'moving-markers', 'dragging');
         this.gesture = false;
     }
 
@@ -145,24 +167,35 @@ class DxfViewer {
         this.container.dispatchEvent(new Event('plan-view-changed'));
         const scale = this.svg.getScreenCTM()?.a;
         if (!scale) return;
+        const density = this.pinDensity();
         for (const pin of this.pins.values()) {
-            const { label, hover, area, motor } = pin;
-            this.resizePin(pin, motor.button_scale ?? 1, scale);
-            // Keep text in pixel-sized local coordinates: very large SVG font
-            // sizes are clamped by browsers when the CAD viewBox uses 1e6 units.
-            label.setAttribute('transform', `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`);
-            hover.setAttribute('transform', `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`);
+            const { area, motor } = pin;
+            this.positionPin(pin, scale, density);
             const rx = (motor.area_radius_x || .05)*this.initial.width, ry = (motor.area_radius_y || .05)*this.initial.height;
             const attrs = motor.area_shape === 'rectangle' ? {x:motor.svg_x-rx,y:motor.svg_y-ry,width:rx*2,height:ry*2} : {cx:motor.svg_x,cy:motor.svg_y,rx,ry};
             for (const [key,value] of Object.entries(attrs)) area.setAttribute(key,value);
         }
+        if (this.pendingPin) this.positionPin(this.pendingPin, scale, density);
     }
 
-    resizePin(pin, size, scale = this.svg?.getScreenCTM()?.a) {
+    pinDensity() { return Number(getComputedStyle(this.container).getPropertyValue('--pin-density')) || 1; }
+
+    positionPin(pin, scale, density) {
+        const { motor, label, hover } = pin;
+        this.resizePin(pin, motor.button_scale ?? 1, scale, density);
+        // Keep text in pixel-sized local coordinates even in very large drawings.
+        const transform = `translate(${motor.svg_x} ${motor.svg_y}) scale(${1 / scale})`;
+        label.setAttribute('transform', transform);
+        hover?.setAttribute('transform', transform);
+    }
+
+    resizePin(pin, size, scale = this.svg?.getScreenCTM()?.a, density = this.pinDensity()) {
         if (!scale || !pin) return;
-        pin.circle.setAttribute('r', 12 * size / scale);
-        pin.label.setAttribute('font-size', 11 * size);
-        pin.hover.setAttribute('y', 16 * size + 13);
+        const scaledSize = size * density;
+        pin.circle.setAttribute('r', 12 * scaledSize / scale);
+        pin.hit?.setAttribute('r', density < 1 ? 13 / scale : 0);
+        pin.label.setAttribute('font-size', 11 * scaledSize);
+        pin.hover?.setAttribute('y', 16 * scaledSize + 13);
     }
 
     fit() {

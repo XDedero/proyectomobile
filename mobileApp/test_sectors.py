@@ -11,7 +11,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, PlanRole
+from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, PlanRole, UserProfile
 from .project_service import export_project, import_project
 from .sectors import clean_sectors
 from .test_pdf import pdf_upload
@@ -81,6 +81,33 @@ class SectorTests(TestCase):
         self.assertEqual(client.get(plan['sectors_url']).status_code, 403)
         self.client.force_login(self.admin)
         self.assertEqual(self.post(plan['sectors_url'], {'action': 'delete', 'id': sector['id'], 'previous': sector}).status_code, 200)
+
+    def test_worker_on_another_plan_and_viewer_cannot_move_or_delete_sectors(self):
+        UserProfile.objects.create(user=self.reader, rut='12345678-5', role='worker')
+        worker = get_user_model().objects.create_user('otro-trabajador')
+        viewer = get_user_model().objects.create_user('sector-espectador')
+        UserProfile.objects.create(user=worker, rut='11111111-1', role='worker')
+        UserProfile.objects.create(user=viewer, rut='22222222-2', role='viewer')
+        for kind in ('pdf', 'dxf'):
+            plan = self.import_plan(kind)
+            url = plan['sectors_url']
+            sector = self.sector()
+            self.assertEqual(self.post(url, {'action': 'save', 'sector': sector}).status_code, 200)
+            self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+            moved = dict(sector, x=sector['x']+10)
+            for user in (worker, viewer):
+                with self.subTest(kind=kind, user=user.username):
+                    client = Client()
+                    client.force_login(user)
+                    detail = client.get(plan['detail_url']).json()
+                    self.assertFalse(detail['permissions']['can_assign'])
+                    self.assertEqual(client.get(url).json(), {'sectors': [sector], 'can_edit': False})
+                    self.assertEqual(self.post(url, {'action': 'save', 'sector': moved, 'previous': sector}, client).status_code, 403)
+                    self.assertEqual(self.post(url, {'action': 'delete', 'id': sector['id'], 'previous': sector}, client).status_code, 403)
+            self.assertEqual(self.client.get(url).json(), {'sectors': [sector], 'can_edit': True})
+            admin = Client()
+            admin.force_login(self.admin)
+            self.assertEqual(self.post(url, {'action': 'save', 'sector': moved, 'previous': sector}, admin).status_code, 200)
 
     def test_project_roundtrip_includes_sectors_and_accepts_older_projects(self):
         for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:

@@ -39,6 +39,10 @@
         window.projectWorkspace?.update();
     }
 
+    function waitForPlacementPaint() {
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+
     async function request(url, file, values) {
         if (location.protocol === 'file:') throw new Error('Abra la aplicación completa para acceder a sus archivos locales.');
         const options = { credentials: 'same-origin', cache: 'no-store' };
@@ -211,6 +215,7 @@
         excelFileInput.value = '';
         remember(null);
         viewer.clear();
+        setBusy(false);
         updatePlanCardUI();
         status.textContent = '';
     }
@@ -332,26 +337,49 @@
         const plan = appState.currentPlan;
         if (!plan || busy || !placing || !permissions().can_assign) return;
         const currentRevision = revision;
-        const fromPiece = placementOptions?.origin === 'piece';
-        setBusy(true, 'Guardando botón…');
+        const options = placementOptions;
+        const source = options?.origin === 'copy' ? plan.motors.find(item => item.id === options.copy_button_id) : null;
+        const isCurrent = () => currentRevision === revision && appState.currentPlan === plan;
+        const number = plan.motors.length + 1;
+        const position = { svg_x, svg_y, name: `Botón ${number}` };
+        let openPiece = false;
+        setMode('explore');
+        errorNoPlanAlert.style.display = 'none';
+        viewer.setPendingMarker({x: svg_x, y: svg_y, number,
+            color: source?.button_color || options?.button_color || '#2563eb', scale: source?.button_scale ?? 1});
+        status.textContent = 'Confirmando el botón…';
+        if (window.projectWorkspace?.full) window.projectWorkspace.reportStatus('Confirmando el botón…');
         try {
-            const position = { svg_x, svg_y, name: `Botón ${plan.motors.length + 1}` };
-            const { motor } = placementOptions
-                ? await window.planExcel.createButton(plan.markers_url, position, placementOptions)
+            await waitForPlacementPaint();
+            if (!isCurrent()) return;
+            setBusy(true);
+            const { motor } = options
+                ? await window.planExcel.createButton(plan.markers_url, position, options)
                 : await request(plan.markers_url, null, position);
-            if (currentRevision !== revision || appState.currentPlan?.id !== plan.id) return;
-            const previousView = { ...viewer.view };
+            if (!isCurrent()) return;
+            if (!motor?.id) throw new Error('No se recibió la confirmación del botón.');
+            viewer.setPendingMarker(null);
             plan.motors.push(motor);
-            await openPlan(plan, currentRevision);
-            viewer.view = previousView;
-            viewer.update();
+            viewer.addMotor(motor);
+            viewer.updatePins();
+            updatePlanCardUI();
             selectMotor(motor.id);
-            setMode('explore');
             status.textContent = 'Botón creado y seleccionado. Pulse de nuevo para abrir su ficha.';
+            if (window.projectWorkspace?.full) window.projectWorkspace.reportStatus('Botón creado y seleccionado.');
             window.projectWorkspace?.dirty();
-        } catch (error) { showError(error.message); }
-        finally { setBusy(false); updateActions(); }
-        if (fromPiece && currentRevision === revision && appState.currentPlan?.id === plan.id) await showPreview();
+            openPiece = options?.origin === 'piece';
+        } catch (error) {
+            if (isCurrent()) {
+                status.textContent = 'No se pudo confirmar la creación del botón.';
+                showError(error.message);
+            }
+        } finally {
+            if (isCurrent()) {
+                viewer.setPendingMarker(null);
+                setBusy(false);
+            }
+        }
+        if (openPiece && isCurrent() && viewImportAutoCAD.classList.contains('active')) await showPreview();
     };
     async function setMode(mode, placement = null) {
         if (mode === 'move' && !permissions().can_change_plan) return;
@@ -365,6 +393,7 @@
         }
         placing = viewer.placing = mode === 'add';
         viewer.moving = mode === 'move';
+        viewer.container.classList.toggle('placing-marker', viewer.placing);
         viewer.container.classList.toggle('moving-markers', viewer.moving);
         document.getElementById('btnAddCadMarker').setAttribute('aria-pressed', String(placing));
         document.getElementById('btnMoveCadMarker').setAttribute('aria-pressed', String(viewer.moving));
@@ -385,8 +414,10 @@
             Object.assign(motor, moved);
             const pin = viewer.pins.get(id);
             if (pin) {
-                pin.circle.setAttribute('cx', motor.svg_x);
-                pin.circle.setAttribute('cy', motor.svg_y);
+                for (const circle of [pin.circle, pin.hit]) {
+                    circle.setAttribute('cx', motor.svg_x);
+                    circle.setAttribute('cy', motor.svg_y);
+                }
                 const bounds = pin.group.querySelector('.motor-bounds');
                 for (const [index, name] of ['x', 'y', 'width', 'height'].entries()) bounds.setAttribute(name, motor.svg_bounds[index]);
             }
@@ -483,7 +514,10 @@
         },
         async open(plan) {
             switchView(viewImportAutoCAD);
-            return openPlan(plan, ++revision);
+            const currentRevision = ++revision;
+            setBusy(true);
+            try { return await openPlan(plan, currentRevision); }
+            finally { if (currentRevision === revision) setBusy(false); }
         },
     };
     window.updatePlanCardUI = updatePlanCardUI;

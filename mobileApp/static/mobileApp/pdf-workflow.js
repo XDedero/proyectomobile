@@ -93,6 +93,9 @@
         updatePermissions();
         window.projectWorkspace?.update();
     }
+    function waitForPlacementPaint() {
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
     function selectedMarker() { return plan?.markers.find((marker) => marker.id === selectedId); }
     function markerName(marker) {
         return marker.label || `Botón ${plan?.markers.findIndex((item) => item.id === marker.id) + 1}`;
@@ -281,27 +284,48 @@
     }
 
     async function placeMarker(position) {
-        if (!plan || busy || !appState.user) return;
+        if (!plan || busy || mode !== 'add' || !getPermissions().can_assign) return;
+        const target = plan;
         const currentRevision = revision;
-        const fromPiece = placementOptions?.origin === 'piece';
+        const options = placementOptions;
+        const source = options?.origin === 'copy' ? target.markers.find(item => item.id === options.copy_button_id) : null;
+        const isCurrent = () => currentRevision === revision && plan === target;
         let pieceWorkbook = null;
-        setBusy(true);
         clearError();
+        setMode('explore');
+        viewer.setPendingMarker({ ...position, number: target.markers.length + 1,
+            color: source?.button_color || options?.button_color || '#2563eb', scale: source?.button_scale ?? 1 });
+        status('Confirmando el botón…');
+        if (window.projectWorkspace?.full) window.projectWorkspace.reportStatus('Confirmando el botón…');
         try {
-            const { marker } = placementOptions
-                ? await window.planExcel.createButton(plan.markers_url, position, placementOptions)
-                : await post(plan.markers_url, position);
-            if (currentRevision !== revision) return;
-            plan.markers.push(marker);
+            await waitForPlacementPaint();
+            if (!isCurrent()) return;
+            setBusy(true);
+            const { marker } = options
+                ? await window.planExcel.createButton(target.markers_url, position, options)
+                : await post(target.markers_url, position);
+            if (!isCurrent()) return;
+            if (!marker?.id) throw new Error('No se recibió la confirmación del botón.');
+            viewer.setPendingMarker(null);
+            target.markers.push(marker);
             selectedId = marker.id;
             updateMarkers();
-            setMode('explore');
             status('Botón creado y seleccionado. Pulse de nuevo para abrir su ficha.');
+            if (window.projectWorkspace?.full) window.projectWorkspace.reportStatus('Botón creado y seleccionado.');
             window.projectWorkspace?.dirty();
-            if (fromPiece) pieceWorkbook = marker.workbook;
-        } catch (error) { showError(error); }
-        finally { setBusy(false); }
-        if (pieceWorkbook && currentRevision === revision) await openWorkbook(pieceWorkbook);
+            if (options?.origin === 'piece' && marker.page === page) pieceWorkbook = marker.workbook;
+        } catch (error) {
+            if (isCurrent()) {
+                status('No se pudo confirmar la creación del botón.');
+                showError(error);
+            }
+        } finally {
+            if (isCurrent()) {
+                viewer.setPendingMarker(null);
+                setBusy(false);
+            }
+        }
+        if (pieceWorkbook && isCurrent() && view.classList.contains('active')) await openWorkbook(pieceWorkbook);
     }
 
     async function moveMarker(id, position) {
@@ -320,8 +344,9 @@
         finally { if (currentRevision === revision) updateMarkers(); setBusy(false); }
     }
 
-    async function openPlan(nextPlan, currentRevision) {
-        nextPlan = await window.planVersions.beforeOpen(nextPlan);
+    async function openPlan(nextPlan, currentRevision, {versionChecked = false} = {}) {
+        if (versionChecked) window.planVersions.remember(nextPlan);
+        else nextPlan = await window.planVersions.beforeOpen(nextPlan);
         if (!nextPlan) return false;
         if (currentRevision !== revision || !appState.user) return;
         closeAreaControls();
@@ -553,9 +578,9 @@
         },
         permissionsChanged: updatePermissions,
         canLeave() { return editor.requestClose(); },
-        async open(nextPlan) {
+        async open(nextPlan, options) {
             switchView(view);
-            return openPlan(nextPlan, ++revision);
+            return openPlan(nextPlan, ++revision, options);
         },
     };
 

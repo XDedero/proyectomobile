@@ -62,7 +62,7 @@ def open_plan_source(kind, plan):
     raise ValidationError('El archivo original del plano no está disponible y no hay una copia válida en el proyecto guardado. Vuelva a importar el plano.', code='plan_source_missing')
 
 
-def export_project(kind, plan):
+def export_project(kind, plan, *, source=None):
     from .display_settings import clean_display
     from .button_descriptions import TemplateReader, snapshot_details
     from .plan_workbook import ensure_workbook
@@ -100,8 +100,9 @@ def export_project(kind, plan):
     }
     manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode('utf-8')
     content = bytes(document.content)
-    with open_plan_source(kind, plan) as stream:
-        source = stream.read()
+    if source is None:
+        with open_plan_source(kind, plan) as stream:
+            source = stream.read()
     if len(markers) > MAX_MOTORS or len(manifest_bytes) > 8 * 1024 * 1024 or len(source) + len(content) + len(manifest_bytes) > MAX_PROJECT_UNPACKED:
         raise ValidationError('El proyecto supera el tamaño transportable permitido.')
     output = BytesIO()

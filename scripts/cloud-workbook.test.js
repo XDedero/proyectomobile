@@ -54,14 +54,15 @@ test('two PCs with the same local ID cannot overwrite each other under new proje
 });
 
 test('a shared workbook updates its original Drive ID only while the expected version exists', async () => {
-    const { GoogleDriveService: drive } = require('../google-drive');
-    const oldList = drive.listFilesInFolder, oldFetch = drive._fetchWithAuth;
-    const file = { id: 'shared-excel', name: 'Motor.xlsx', modifiedTime: 'original-date', appProperties: { associationKey: key } };
+    const { GoogleDriveService: drive, GOOGLE_DRIVE_CONFIG } = require('../google-drive');
+    const oldMetadata = drive.fileMetadata, oldFetch = drive._fetchWithAuth;
+    const file = { id: 'shared-excel', name: 'Motor.xlsx', modifiedTime: 'original-date',
+        parents: [GOOGLE_DRIVE_CONFIG.FOLDERS.EXCEL_CSV], appProperties: { associationKey: key } };
     const args = { fileName: 'Nuevo nombre.xlsx', content: source, associationKey: key,
         driveTarget: { id: file.id, modifiedTime: file.modifiedTime } };
     let patches = 0;
     try {
-        drive.listFilesInFolder = async () => [file];
+        drive.fileMetadata = async () => file;
         drive._fetchWithAuth = async (url, options) => {
             assert.match(url, /\/files\/shared-excel\?/);
             assert.equal(options.method, 'PATCH');
@@ -71,11 +72,11 @@ test('a shared workbook updates its original Drive ID only while the expected ve
         assert.equal((await drive.upsertFileToProjectFolder(args)).modified_time, 'new-date');
         file.modifiedTime = 'changed-by-another-pc';
         await assert.rejects(drive.upsertFileToProjectFolder(args));
-        drive.listFilesInFolder = async () => [];
+        drive.fileMetadata = async () => null;
         await assert.rejects(drive.upsertFileToProjectFolder(args));
         assert.equal(patches, 1);
     } finally {
-        drive.listFilesInFolder = oldList;
+        drive.fileMetadata = oldMetadata;
         drive._fetchWithAuth = oldFetch;
     }
 });

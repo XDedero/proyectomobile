@@ -44,6 +44,7 @@
         <div class="plan-quick-actions" aria-label="Acciones del plano">
           <button type="button" id="fullscreenAddMarker" aria-label="Añadir botón al plano" title="Añadir botón al plano" aria-pressed="false"><i class="bi bi-plus-circle" aria-hidden="true"></i><span>Botón</span></button>
           <button type="button" id="fullscreenMoveMarkerQuick" aria-pressed="false" hidden><i class="bi bi-arrows-move" aria-hidden="true"></i><span>Mover</span></button>
+          <button type="button" id="fullscreenEditSectors" aria-pressed="false" hidden><i class="bi bi-bounding-box" aria-hidden="true"></i><span>Editar sectores</span></button>
           <button type="button" id="fullscreenSavePlan" class="quick-save" hidden><i class="bi bi-floppy" aria-hidden="true"></i><span>Guardar plano</span></button>
           <button type="button" id="fullscreenDeletePlan" class="quick-danger" hidden><i class="bi bi-trash" aria-hidden="true"></i><span>Eliminar plano</span></button>
         </div>
@@ -644,7 +645,7 @@
             }
             if (appState.user?.id !== user) return;
             exitFullscreen();
-            const opened = await openPlan(result.plan.kind, result.plan);
+            const opened = await openPlan(result.plan.kind, result.plan, {versionChecked: remote});
             if (opened === false) return;
             modalSavedPlans.hide();
             if (remote) status(result.warning || 'Plano y Excel abiertos desde la nube.', Boolean(result.warning));
@@ -761,8 +762,8 @@
         const pending = ['pending', 'uploaded', 'partial'].includes(active?.plan.cloud_status);
         if (Date.now() - localCheckedAt >= (pending ? 2000 : 15000)) synchronize();
     }, 1000);
-    async function openPlan(kind, plan) {
-        if (kind === 'pdf') return window.pdfWorkflow.open(plan);
+    async function openPlan(kind, plan, options) {
+        if (kind === 'pdf') return window.pdfWorkflow.open(plan, options);
         return window.planWorkflow.open(plan);
     }
 
@@ -777,6 +778,7 @@
         if (active && !isBusy() && canMove()) active.setMode(byId('fullscreenMoveMarkerQuick').getAttribute('aria-pressed') === 'true' ? 'explore' : 'move');
     });
     function modeChanged(mode, copying = false) {
+        window.planSectors?.leaveSelection();
         for (const [id, value] of [['fullscreenAddMarker', 'add'], ['fullscreenMoveMarkerQuick', 'move']]) byId(id).setAttribute('aria-pressed', String(mode === value));
         if (copying) status('Elige dónde colocar la copia del botón.');
     }
@@ -812,7 +814,7 @@
         }
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || window.planSectors?.editing || !byId('pdfMarkerDialog').hidden || document.querySelector('.modal.show')) return;
+        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || window.planSectors?.editing || window.planSectors?.selecting || !byId('pdfMarkerDialog').hidden || document.querySelector('.modal.show')) return;
         event.preventDefault();
         if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
     });
@@ -846,6 +848,7 @@
     window.projectWorkspace = {
         get active() { return active; }, get full() { return full; }, get selected() { return selectedActions; },
         activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged, keepOnDevice,
+        reportStatus(message) { status(message); },
         reportError(message) { status(message, true); },
         reset() {
             libraryRequestVersion += 1;

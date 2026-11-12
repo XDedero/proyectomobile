@@ -126,6 +126,7 @@ def pdf_data(plan, *, detail=True):
         'pages': plan.pages, 'page_count': len(plan.pages),
         'detail_url': reverse('detail_pdf', args=[plan.pk]),
         'source_url': reverse('source_pdf', args=[plan.pk]),
+        'source_revision': (plan.cloud_base_state or {}).get('source', ''),
         'markers_url': reverse('create_marker', args=[plan.pk]),
         'update_url': reverse('update_pdf_plan', args=[plan.pk]),
         'delete_url': reverse('delete_pdf_plan', args=[plan.pk]),

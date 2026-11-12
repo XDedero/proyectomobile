@@ -19,7 +19,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 
 from .models import PdfPlan, SavedProject
-from .project_service import MAX_PROJECT_BYTES, finite, import_shared_project, validate_pdf_source
+from .project_service import MAX_PROJECT_BYTES, export_project, finite, import_shared_project, validate_pdf_source
 
 
 class CloudUnavailable(Exception):
@@ -265,8 +265,16 @@ def workbook_version(project):
     return f"{project['excelId']}:{project['date']}"
 
 
+def drive_pair_version(project):
+    fields = ('projectKey', 'id', 'pdfRevision', 'excelId', 'excelRevision')
+    values = [project.get(field) for field in fields]
+    return values if all(isinstance(value, str) and value for value in values) else None
+
+
 def snapshot_identity(project, metadata, portable):
-    return hashlib.sha256(json.dumps([project, metadata, portable], sort_keys=True).encode()).hexdigest()
+    transport_fields = {'pdfChecksum', 'excelChecksum'}
+    stable_project = {key: value for key, value in project.items() if key not in transport_fields}
+    return hashlib.sha256(json.dumps([stable_project, metadata, portable], sort_keys=True).encode()).hexdigest()
 
 
 def manifest_metadata(manifest):
@@ -282,6 +290,9 @@ def read_cloud_snapshot(pdf_id):
         portable = result.get('manifest')
         source = (Path(directory) / 'plan.pdf').read_bytes()
         content = (Path(directory) / 'project.xlsx').read_bytes()
+    for field, data in (('pdfChecksum', source), ('excelChecksum', content)):
+        if project.get(field) and project[field].lower() != hashlib.sha256(data).hexdigest():
+            raise CloudUnavailable('Los archivos cambiaron durante la descarga. Vuelve a abrir el plano.')
     warning = ''
     metadata = None
     if portable is None:
@@ -302,27 +313,57 @@ def read_cloud_snapshot(pdf_id):
     return project, source, content, metadata, portable, warning
 
 
+def cloud_project_reference(pdf_id):
+    """Look up the pair without transferring file contents."""
+    return drive_command('--publish-target', '--drive-id', pdf_id)['project']
+
+
 def shared_publish_target(plan_id, pdf_id, source):
     """Resolve the original files; an explicit save replaces their current contents."""
-    project = drive_command('--publish-target', '--drive-id', pdf_id)['project']
+    project = cloud_project_reference(pdf_id)
     if project is None:
         raise CloudUnavailable('El PDF original ya no está disponible en la nube.')
     return project
 
 
 def open_cloud_project(pdf_id, user, replace_plan=None):
+    from .authorization import can_access_plan
     from .views import validate_excel
+
+    candidates = PdfPlan.objects.filter(cloud_origin=pdf_id, cloud_snapshot__isnull=False)
+    candidates = [plan for plan in candidates if (plan.cloud_base_state or {}).get('drive_pair')
+                  and can_access_plan(user, plan)]
+    if candidates:
+        reference = cloud_project_reference(pdf_id)
+        if not reference or not reference.get('excelId'):
+            raise CloudUnavailable('El par PDF y Excel ya no está disponible en la nube.')
+        version = drive_pair_version(reference)
+        previous = next((plan for plan in candidates if plan.cloud_base_state['drive_pair'] == version), None)
+        if previous:
+            if replace_plan and previous.pk != replace_plan.pk:
+                _replace_cached_plan(replace_plan, previous)
+            return previous, ''
 
     project, source, content, metadata, portable, warning = read_cloud_snapshot(pdf_id)
     version = workbook_version(project)
+    # Only the embedded manifest binds the configuration to the exact Drive
+    # bytes. Legacy projects can get independent metadata updates in Supabase.
+    pair = drive_pair_version(project) if portable and project.get('pdfChecksum') and project.get('excelChecksum') else None
     identity = snapshot_identity(project, metadata, portable)
     previous = PdfPlan.objects.filter(cloud_snapshot=identity).first()
     if replace_plan and previous and previous.pk != replace_plan.pk:
         # Reuse an already validated download, preserving role assignments.
         _replace_cached_plan(replace_plan, previous)
     if previous:
+        fields = {}
         if not previous.cloud_workbook_version:
-            PdfPlan.objects.filter(pk=previous.pk).update(cloud_origin=pdf_id, cloud_workbook_version=version)
+            fields.update(cloud_origin=pdf_id, cloud_workbook_version=version)
+        if pair and previous.cloud_base_state:
+            fields['cloud_base_state'] = {**previous.cloud_base_state, 'drive_pair': pair}
+        if fields:
+            PdfPlan.objects.filter(pk=previous.pk).update(**fields)
+            for key, value in fields.items():
+                setattr(previous, key, value)
         return previous, warning
 
     name = (metadata or {}).get('name') or project_title(project['name'])
@@ -373,10 +414,13 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
             import_shared_project(plan, 'pdf', source, None, markers,
                                   {'w1': {'name': excel_name, 'content': content, 'sheets': sheets}}, manifest, user)
             from .cloud_save import capture_base_state
-            plan.cloud_base_state = capture_base_state(plan)
+            bundle = export_project('pdf', plan, source=source)
+            plan.cloud_base_state = capture_base_state(plan, bundle)
+            if pair:
+                plan.cloud_base_state['drive_pair'] = pair
             plan.save(update_fields=['cloud_base_state'])
             if replace_plan and replace_plan.pk != plan.pk:
-                _replace_cached_plan(replace_plan, plan)
+                _replace_cached_plan(replace_plan, plan, content=bundle)
     except Exception as exc:
         if plan.source:
             plan.source.delete(save=False)
@@ -391,10 +435,9 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
 
 
 @transaction.atomic
-def _replace_cached_plan(old, new):
+def _replace_cached_plan(old, new, *, content=None):
     from .models import PlanRole
     from .project_views import clear_plan_files
-    from .project_service import export_project
     if old.pk == new.pk or not PdfPlan.objects.filter(pk=old.pk).exists():
         return
     for role in PlanRole.objects.filter(pdf_plans=old):
@@ -402,7 +445,7 @@ def _replace_cached_plan(old, new):
     saved = SavedProject.objects.filter(pdf_plan=old).first()
     if saved:
         SavedProject.objects.update_or_create(pdf_plan=new, defaults={
-            'name': new.name, 'content': export_project('pdf', new), 'saved_by': saved.saved_by,
+            'name': new.name, 'content': content if content is not None else export_project('pdf', new), 'saved_by': saved.saved_by,
             'cloud_status': 'synced', 'cloud_error': ''})
     original_key = old.cloud_key
     clear_plan_files('pdf', old)

@@ -153,7 +153,7 @@ def run_gdrive_upload_sync(file_path, file_name, assoc_key, local_key, extra_arg
         data = json.loads(last_line)
         if data.get('ok') and data.get('record'):
             rec = data['record']
-            verb = 'Actualizado en' if rec.get('action') == 'updated' else 'Subido a'
+            verb = {'updated': 'Actualizado en', 'reused': 'Reutilizado en'}.get(rec.get('action'), 'Subido a')
             _log_line(
                 f"  ↳ [{now}] [GDRIVE-CLOUD OK] {verb} carpeta '{rec.get('folder_name')}': "
                 f"'{rec.get('name')}' (Drive ID: {rec.get('drive_file_id')})"
@@ -638,7 +638,8 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     """Publish one immutable save, then record its actual remote outcome."""
     if not is_monitor_enabled():
         return
-    from .cloud_projects import CloudUnavailable, manifest_metadata, shared_publish_target, snapshot_identity, workbook_version
+    from .cloud_projects import (CloudUnavailable, drive_pair_version, manifest_metadata,
+                                 shared_publish_target, snapshot_identity, workbook_version)
     from .cloud_save import capture_base_state
 
     plan_pk, plan_name = plan.pk, plan.name
@@ -654,14 +655,26 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     base_state = capture_base_state(plan, content) if kind == 'pdf' else None
     target = {'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan_pk, 'saved_at': saved_at}
     SavedProject.objects.filter(**target).update(cloud_status='pending', cloud_error='', cloud_stage='queued', cloud_progress=5)
+    queued_at = time.perf_counter()
 
     def publish():
         state, error = 'error', 'No se pudo almacenar el proyecto completo en la nube. Vuelva a pulsar Guardar plano.'
         completed = 5
-        def progress(stage, value):
+        timings = []
+        stage, started = 'queued', queued_at
+        pdf_reused = False
+
+        def next_stage(name):
+            nonlocal stage, started
+            now = time.perf_counter()
+            timings.append(f'{stage}={(now - started) * 1000:.0f}ms')
+            stage, started = name, now
+
+        def progress(name, value):
             nonlocal completed
+            next_stage(name)
             completed = value
-            SavedProject.objects.filter(**target).update(cloud_stage=stage, cloud_progress=value)
+            SavedProject.objects.filter(**target).update(cloud_stage=name, cloud_progress=value)
         try:
             with ZipFile(BytesIO(content)) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
@@ -688,6 +701,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                 pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, register=False, **pdf_options) if kind == 'pdf' else None
                 if kind == 'pdf' and not pdf:
                     raise RuntimeError('No se pudo subir el PDF.')
+                pdf_reused = bool(pdf and pdf.get('action') == 'reused')
                 progress('excel', 50)
                 book = _sync_workbook_worker(*workbook_args, workbook_content, key,
                     f'{basename}.xlsx', manifest, source, register=False, **workbook_options)
@@ -699,6 +713,10 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                     remote.update(excelId=book['drive_file_id'], name=f'{basename}.pdf', pdfVersion=pdf['modified_time'],
                                   excelName=f'{basename}.xlsx', date=book['modified_time'])
                     remote.pop('pdfHash', None)
+                    for field, record in [('pdfRevision', pdf), ('excelRevision', book)]:
+                        remote.pop(field, None)
+                        if record.get('drive_version'):
+                            remote[field] = record['drive_version']
                     identity = snapshot_identity(remote, manifest_metadata(manifest), manifest)
                     local = PdfPlan.objects.filter(pk=plan_pk)
                     local.update(cloud_origin=pdf['drive_file_id'], cloud_workbook_version=workbook_version(remote),
@@ -715,6 +733,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                 sql = f'BEGIN; {sql} COMMIT; SELECT true AS saved;'
                 # Receipt survives restarts: retry database registration without uploading files again.
                 SavedProject.objects.filter(**target).update(cloud_receipt={'sql': sql}, cloud_status='uploaded', cloud_error='', cloud_stage='database', cloud_progress=100)
+                next_stage('database')
                 completed = 100
                 database_ok = run_supabase_sql_sync('Proyecto completo registrado en una transacción', sql, attempts=1)
                 if not database_ok:
@@ -722,11 +741,16 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                         pdf['drive_file_id'] if pdf else '', book['drive_file_id'], key, document.revision, f'{basename}.xlsx')
                 state = 'synced' if database_ok else 'uploaded'
                 error = ''
+                if database_ok and kind == 'pdf' and (pair := drive_pair_version(remote)):
+                    local.filter(cloud_workbook_version=workbook_version(remote), saved_project__saved_at=saved_at).update(
+                        cloud_base_state={**base_state, 'drive_pair': pair})
         except CloudUnavailable as exc:
             error = str(exc)
         except Exception as exc:
             _log_line(f'  ↳ [SYNC ERROR] No se completó la publicación de {plan_name}: {exc}')
         finally:
+            next_stage('finished')
+            _log_line(f"  [PROJECT PERF] kind={kind} state={state} pdf_reused={pdf_reused} {' '.join(timings)}")
             SavedProject.objects.filter(**target).update(cloud_status=state, cloud_error=error,
                 cloud_stage='done' if state == 'synced' else state, cloud_progress=100 if state == 'synced' else completed)
 

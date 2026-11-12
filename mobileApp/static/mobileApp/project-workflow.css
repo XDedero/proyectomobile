@@ -106,6 +106,7 @@
 .plan-opacity-control input { display: block; width: 100%; margin-top: .35rem; }
 .plan-fullscreen .plan-display-dock { position: absolute; right: .5rem; top: 65px; max-width: min(240px, 65vw); }
 :is(.motor-target, .pdf-plan-marker, .plan-sectors-layer) { opacity: var(--plan-annotation-opacity, 1); }
+.plan-pin-pending { opacity: 1; pointer-events: none; }
 :is(.pdf-marker-coverage-area, .motor-coverage) { --button-area-opacity: .25; }
 .motor-coverage { opacity: var(--button-area-opacity); }
 .pdf-marker-coverage-area {

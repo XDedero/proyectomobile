@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime
+import hashlib
 from io import BytesIO, StringIO
 import json
 from pathlib import Path
@@ -470,6 +471,62 @@ class ProjectTests(TestCase):
             manifest['markers'][0]['x'] = 'invalid'
             self.assertEqual(self.post(listed[0]['open_url']).status_code, 400)
 
+    def test_opening_verified_pair_transfers_no_files_until_a_drive_revision_changes(self):
+        from . import cloud_projects
+
+        _, bundle = self.bundle('pdf')
+        with ZipFile(BytesIO(bundle)) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            source = archive.read('plan/source.pdf')
+            workbook = archive.read('workbooks/w1.xlsx')
+        project = {
+            'id': 'remote-pdf', 'name': 'Plano.pdf', 'projectKey': 'project_one',
+            'pdfVersion': '2026-11-06T15:07:35Z', 'excelId': 'remote-book',
+            'excelName': 'Plano.xlsx', 'date': '2026-11-06T15:07:38Z',
+            'pdfRevision': '5', 'excelRevision': '7',
+            'pdfChecksum': hashlib.sha256(source).hexdigest(),
+            'excelChecksum': hashlib.sha256(workbook).hexdigest(),
+        }
+        commands = []
+
+        def drive(*args):
+            commands.append(args[0])
+            if args[0] == '--read-project':
+                directory = Path(args[-1])
+                (directory / 'plan.pdf').write_bytes(source)
+                (directory / 'project.xlsx').write_bytes(workbook)
+                return {'project': project, 'manifest': manifest}
+            self.assertEqual(args, ('--publish-target', '--drive-id', project['id']))
+            return {'project': project}
+
+        url = reverse('open_cloud_project', args=[project['id']])
+        with patch.object(cloud_projects, 'drive_command', side_effect=drive):
+            first = self.post(url)
+            self.assertEqual(first.status_code, 200, first.content)
+            plan = first.json()['plan']
+            self.assertEqual(plan['source_revision'], project['pdfChecksum'])
+            self.assertEqual(commands, ['--read-project'])
+            self.assertEqual(self.post(url).json()['plan']['id'], plan['id'])
+            self.assertEqual(commands, ['--read-project', '--publish-target'])
+
+            # A PDF-only revision is detectable even when the workbook date and
+            # the displayed filename have not changed.
+            project['pdfRevision'] = '6'
+            version = self.client.get(plan['version_url']).json()
+            self.assertTrue(version['verified'])
+            self.assertTrue(version['stale'])
+            self.assertTrue(version['remote'])
+            next_plan = self.post(url).json()['plan']
+            self.assertNotEqual(next_plan['id'], plan['id'])
+            self.assertEqual(next_plan['source_revision'], plan['source_revision'])
+            self.assertEqual(commands[-2:], ['--publish-target', '--read-project'])
+
+            project['excelRevision'] = '8'
+            project['excelChecksum'] = hashlib.sha256(b'different workbook').hexdigest()
+            failed = self.post(url)
+            self.assertEqual(failed.status_code, 503, failed.content)
+            self.assertTrue(PdfPlan.objects.filter(pk=next_plan['id']).exists())
+
     def test_cloud_status_reports_failures_and_does_not_overwrite_a_newer_save(self):
         from . import terminal_monitor as monitor
         self.client.force_login(self.admin)
@@ -509,14 +566,17 @@ class ProjectTests(TestCase):
                 saved = SavedProject.objects.get(pdf_plan_id=plan['id'])
                 observed.append(saved.cloud_stage)
                 self.assertEqual((saved.cloud_status, saved.cloud_stage, saved.cloud_progress), ('uploaded' if name == 'database' else 'pending', name, percent))
+                if name == 'database':
+                    self.assertIn(f"association_key = '{saved.pdf_plan.cloud_key}'", args[1])
+                    self.assertNotIn("'excelRevision'", args[1])
                 return record
             return run
         with (
             patch.object(monitor, 'is_monitor_enabled', return_value=True),
             patch.object(monitor, '_log_line'),
             patch.object(monitor, 'enqueue_sync_task') as queue,
-            patch.object(monitor, '_sync_pdf_plan_worker', side_effect=stage('pdf', 20, {'drive_file_id':'pdf1', 'modified_time':'v1', 'supabase_ok':True})),
-            patch.object(monitor, '_sync_workbook_worker', side_effect=stage('excel', 50, {'drive_file_id':'xlsx1', 'modified_time':'v1', 'supabase_ok':True})),
+            patch.object(monitor, '_sync_pdf_plan_worker', side_effect=stage('pdf', 20, {'drive_file_id':'pdf1', 'modified_time':'v1', 'drive_version':'3', 'action':'reused'})),
+            patch.object(monitor, '_sync_workbook_worker', side_effect=stage('excel', 50, {'drive_file_id':'xlsx1', 'modified_time':'v1', 'drive_version':'9'})),
             patch.object(monitor, '_sync_marker_snapshot', wraps=monitor._sync_marker_snapshot),
             patch.object(monitor, 'run_supabase_sql_sync', side_effect=stage('database', 100, True)),
         ):
@@ -528,6 +588,8 @@ class ProjectTests(TestCase):
             state = self.client.get(reverse('saved_projects')).json()['plans'][0]
             self.assertEqual((state['cloud_status'], state['cloud_stage'], state['cloud_progress']), ('synced','done',100))
             self.assertEqual(observed, ['pdf','excel','database'])
+            project = PdfPlan.objects.get(pk=plan['id'])
+            self.assertEqual(project.cloud_base_state['drive_pair'], [project.cloud_key, 'pdf1', '3', 'xlsx1', '9'])
 
     def test_lost_database_response_is_verified_before_showing_a_failure(self):
         from . import terminal_monitor as monitor

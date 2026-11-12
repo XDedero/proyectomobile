@@ -33,19 +33,24 @@ async function cloudProjects() {
 
 async function cloudPublishTarget(pdfId) {
     if (typeof pdfId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(pdfId)) throw new Error('Identificador de PDF no válido.');
+    const file = await GoogleDriveService.fileMetadata(pdfId);
+    if (!file || file.trashed || !file.parents?.includes(GOOGLE_DRIVE_CONFIG.FOLDERS.PDF) || !/\.pdf$/i.test(file.name)) return null;
+    const key = file.appProperties?.associationKey;
+    if (!key) throw new Error('El PDF no tiene una asociación válida en Drive.');
     const [pdfs, books] = await Promise.all([
-        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.PDF),
-        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.EXCEL_CSV),
+        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.PDF, key),
+        GoogleDriveService.listFilesInFolder(GOOGLE_DRIVE_CONFIG.FOLDERS.EXCEL_CSV, key),
     ]);
     const pdf = pdfs.find(file => file.id === pdfId && /\.pdf$/i.test(file.name));
     if (!pdf) return null;
-    const key = pdf.appProperties?.associationKey;
-    if (!key || pdfs.filter(file => file.appProperties?.associationKey === key).length !== 1) throw new Error('La asociación del PDF en Drive no es única.');
+    if (pdfs.filter(file => file.appProperties?.associationKey === key).length !== 1) throw new Error('La asociación del PDF en Drive no es única.');
     const matching = books.filter(file => file.appProperties?.associationKey === key);
     if (matching.length > 1 || (matching.length && !/\.xlsx$/i.test(matching[0].name))) throw new Error('La asociación del Excel en Drive no es única o no es válida.');
     const excel = matching[0];
     const project = { id: pdf.id, name: pdf.name, projectKey: key, pdfVersion: pdf.modifiedTime,
-        excelId: excel?.id || null, excelName: excel?.name || '', date: excel?.modifiedTime || pdf.modifiedTime };
+        excelId: excel?.id || null, excelName: excel?.name || '', date: excel?.modifiedTime || pdf.modifiedTime,
+        pdfRevision: pdf.version, excelRevision: excel?.version,
+        pdfChecksum: pdf.sha256Checksum, excelChecksum: excel?.sha256Checksum };
     return project;
 }
 
@@ -229,16 +234,21 @@ async function main() {
         console.log(JSON.stringify({ok:true, library, pieces})); return;
     }
 
-    if (args['list-projects'] || args['read-project']) {
-        const projects = await cloudProjects();
-        if (args['list-projects']) {
-            console.log(JSON.stringify({ ok: true, projects }));
-            return;
-        }
-        const project = projects.find(item => item.id === args['drive-id']);
-        if (!project) throw new Error('El par PDF y Excel ya no está disponible.');
-        await downloadProjectFile(project.id, path.join(args.output, 'plan.pdf'), 20 * 1024 * 1024);
-        await downloadProjectFile(project.excelId, path.join(args.output, 'project.xlsx'), 100 * 1024 * 1024);
+    if (args['list-projects']) {
+        console.log(JSON.stringify({ ok: true, projects: await cloudProjects() }));
+        return;
+    }
+
+    if (args['read-project']) {
+        const project = await cloudPublishTarget(args['drive-id']);
+        if (!project?.excelId) throw new Error('El par PDF y Excel ya no está disponible.');
+        // Settle both transfers before the caller can remove the temporary directory.
+        const results = await Promise.allSettled([
+            downloadProjectFile(project.id, path.join(args.output, 'plan.pdf'), 20 * 1024 * 1024),
+            downloadProjectFile(project.excelId, path.join(args.output, 'project.xlsx'), 100 * 1024 * 1024),
+        ]);
+        const failed = results.find(result => result.status === 'rejected');
+        if (failed) throw failed.reason;
         const manifest = await readMetadata(fs.readFileSync(path.join(args.output, 'project.xlsx')),
             fs.readFileSync(path.join(args.output, 'plan.pdf')), project.projectKey);
         console.log(JSON.stringify({ ok: true, project, manifest }));

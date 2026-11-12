@@ -43,6 +43,18 @@ def check_browser(url, directory):
                 }
                 throw new Error('El plano guardado no se conservó automáticamente en el dispositivo.');
             }""")
+            page.evaluate("""async () => {
+                const detail = projectWorkspace.active.plan;
+                const source = await relOffline.planSource(detail);
+                const sourceRevision = 'verified-pdf-fixture';
+                await relOffline.keepPlan({...detail, project_version:'first', source_revision:sourceRevision}, source);
+                // With the same verified PDF, a new book and URL can use the
+                // saved blob. Fetching this URL would fail the test.
+                const reused = await relOffline.planSource({...detail, project_version:'second',
+                    source_revision:sourceRevision, source_url:detail.source_url.replace('/'+detail.id+'/', '/2147483647/')});
+                if (!reused || reused.size !== source.size) throw new Error('El cambio de XLSX volvió a descargar el PDF.');
+                await relOffline.keepPlan({...detail, source_revision:sourceRevision}, source);
+            }""")
             expect(page.locator('.plan-sector-legend')).to_be_hidden()
             sector = {'id': str(uuid4()), 'name': 'Sala offline', 'shape': 'rectangle', 'color': '#ef4444',
                       'page': 1, 'x': 450, 'y': 300, 'width': 200, 'height': 100, 'rotation': 0}
@@ -120,7 +132,8 @@ def check_browser(url, directory):
             page.evaluate('switchView(viewMainMenu)')
             context.set_offline(True)
             page.locator('#btnSavedPlans').click()
-            row = page.locator('.saved-plan-row').filter(has_text='Descargado en este dispositivo')
+            row = page.locator('.saved-plan-row').filter(
+                has=page.get_by_role('button', name='Quitar copia de este dispositivo'))
             expect(row).to_be_visible()
             assert page.evaluate("""async url => {
                 const response = await fetch(url);

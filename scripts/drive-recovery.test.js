@@ -3,12 +3,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { GoogleDriveService } = require('../google-drive.js');
+const { createHash } = require('node:crypto');
+const { GoogleDriveService, GOOGLE_DRIVE_CONFIG } = require('../google-drive.js');
 
 function resolver(pdfs, books) {
     const service = {
         BASE_URL: 'https://drive.test',
-        listFilesInFolder: async folder => folder === 'pdf' ? pdfs : books,
+        fileMetadata: async id => pdfs.find(file => file.id === id) || null,
+        listFilesInFolder: async (folder, key) => {
+            assert.equal(key, 'project_one');
+            return folder === 'pdf' ? pdfs : books;
+        },
         _fetchWithAuth: async () => new Response('%PDF-local-copy'),
     };
     const source = fs.readFileSync(path.join(__dirname, '../gdrive-sync-cli.js'), 'utf8').split('const AUTH_WRITE_URL')[0];
@@ -23,7 +28,7 @@ function resolver(pdfs, books) {
     return context.resolveTarget;
 }
 
-const pdf = { id: 'pdf1', name: 'Plano.pdf', modifiedTime: 'v1', appProperties: { associationKey: 'project_one' } };
+const pdf = { id: 'pdf1', name: 'Plano.pdf', modifiedTime: 'v1', parents: ['pdf'], appProperties: { associationKey: 'project_one' } };
 
 test('missing Excel still resolves the original PDF for local recovery', async () => {
     const result = await resolver([pdf], [])('pdf1');
@@ -73,7 +78,8 @@ test('explicit forced save replaces a newer Excel at the same Drive ID', async (
     const uploads = [];
     const service = {
         ...GoogleDriveService,
-        listFilesInFolder: async () => [{ id: 'original-excel', modifiedTime: 'newer', appProperties: { associationKey: 'project_one' } }],
+        fileMetadata: async () => ({ id: 'original-excel', modifiedTime: 'newer',
+            parents: [GOOGLE_DRIVE_CONFIG.FOLDERS.EXCEL_CSV], appProperties: { associationKey: 'project_one' } }),
         _fetchWithAuth: async (url, options) => {
             uploads.push({ url, ...options });
             return { ok: true, json: async () => ({ id: 'original-excel', name: 'Plano.xlsx', modifiedTime: 'saved' }) };
@@ -85,6 +91,56 @@ test('explicit forced save replaces a newer Excel at the same Drive ID', async (
     assert.equal(uploads[0].method, 'PATCH');
     assert.match(uploads[0].url, /files\/original-excel\?/);
     assert.match(uploads[0].body, /bG9jYWwtY29ycmVjdA==/);
+});
+
+test('an identical published PDF reuses its ID and only patches its name', async () => {
+    const content = Buffer.from('%PDF-original');
+    const file = { ...pdf, parents: [GOOGLE_DRIVE_CONFIG.FOLDERS.PDF], version: '8',
+        sha256Checksum: createHash('sha256').update(content).digest('hex') };
+    const calls = [];
+    const service = {
+        ...GoogleDriveService,
+        fileMetadata: async id => {
+            assert.equal(id, file.id);
+            return file;
+        },
+        listFilesInFolder: async () => assert.fail('Unexpected folder listing'),
+        _fetchWithAuth: async (url, options) => {
+            calls.push(url);
+            assert.match(url, /\/drive\/v3\/files\/pdf1\?/);
+            assert.equal(options.method, 'PATCH');
+            assert.deepEqual(JSON.parse(options.body), {name: 'Renombrado.pdf'});
+            return {ok: true, json: async () => ({...file, name: 'Renombrado.pdf', version: '9'})};
+        },
+    };
+    const args = {fileName: file.name, content, associationKey: 'project_one',
+        driveTarget: {id: file.id, modifiedTime: file.modifiedTime}};
+    const reused = await service.upsertFileToProjectFolder(args);
+    assert.equal(reused.action, 'reused');
+    assert.equal(reused.drive_file_id, file.id);
+    assert.equal(calls.length, 0);
+    const renamed = await service.upsertFileToProjectFolder({...args, fileName: 'Renombrado.pdf'});
+    assert.equal(renamed.action, 'reused');
+    assert.equal(renamed.drive_version, '9');
+    assert.equal(calls.length, 1);
+});
+
+test('a different PDF still uploads its bytes to the validated original ID', async () => {
+    const file = { ...pdf, parents: [GOOGLE_DRIVE_CONFIG.FOLDERS.PDF], sha256Checksum: 'different' };
+    const content = Buffer.from('%PDF-updated');
+    const service = {
+        ...GoogleDriveService,
+        fileMetadata: async () => file,
+        _fetchWithAuth: async (url, options) => {
+            assert.match(url, /\/upload\/drive\/v3\/files\/pdf1\?/);
+            assert.equal(options.method, 'PATCH');
+            assert.ok(options.body.includes(content.toString('base64')));
+            return {ok: true, json: async () => file};
+        },
+    };
+    const result = await service.upsertFileToProjectFolder({fileName: file.name, content,
+        associationKey: 'project_one', driveTarget: {id: file.id, modifiedTime: file.modifiedTime}});
+    assert.equal(result.action, 'updated');
 });
 
 test('forced recovery updates an Excel recreated since the initial lookup', async () => {

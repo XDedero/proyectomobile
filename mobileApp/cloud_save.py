@@ -111,20 +111,28 @@ def added_buttons(base, current):
     return additions
 
 
-def merge_only_additions(plan, user):
-    from .cloud_projects import open_cloud_project, shared_publish_target, workbook_version
+def merge_only_additions(plan, user, content=None):
+    from .cloud_projects import drive_pair_version, open_cloud_project, shared_publish_target, workbook_version
     from .plan_workbook import EMPTY_SHEET, organize_project_sheets, store
     from .project_views import clear_plan_files
 
     if not plan.cloud_origin or not plan.cloud_base_state:
         return False
-    additions = added_buttons(plan.cloud_base_state, capture_base_state(plan))
+    if content is None:
+        content = export_project('pdf', plan)
+    additions = added_buttons(plan.cloud_base_state, capture_base_state(plan, content))
     if not additions:
         return False
-    with open_plan_source('pdf', plan) as stream:
-        source = stream.read()
+    with ZipFile(BytesIO(content)) as archive:
+        source = archive.read('plan/source.pdf')
     target = shared_publish_target(plan.pk, plan.cloud_origin, source)
-    if not target.get('excelId') or workbook_version(target) == plan.cloud_workbook_version:
+    if not target.get('excelId'):
+        return False
+    prior = plan.cloud_base_state.get('drive_pair')
+    latest = drive_pair_version(target)
+    unchanged = (prior[3:] == latest[3:] if prior and latest else
+                 workbook_version(target) == plan.cloud_workbook_version)
+    if unchanged:
         return False
     existing = set(PdfPlan.objects.values_list('pk', flat=True))
     remote, _ = open_cloud_project(plan.cloud_origin, user)

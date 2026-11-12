@@ -4,6 +4,7 @@ from copy import copy
 import csv
 from io import BytesIO, StringIO
 from pathlib import Path
+from time import perf_counter
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -253,6 +254,7 @@ def can_open_cloud(user, project):
 def open_cloud_project(request, pdf_id):
     from .cloud_projects import CloudUnavailable, open_cloud_project as restore, list_cloud_projects
 
+    started = perf_counter()
     try:
         from .authorization import application_profile, roles_for, has_role_configuration
         roles = roles_for(request.user)
@@ -268,7 +270,9 @@ def open_cloud_project(request, pdf_id):
             plan, warning = restore(pdf_id, request.user)
         if not can_access_plan(request.user, plan):
             return error_response('Su rol no permite abrir este plano.', 403)
-        return JsonResponse({'plan': pdf_data(plan), 'warning': warning})
+        response = JsonResponse({'plan': pdf_data(plan), 'warning': warning})
+        response['Server-Timing'] = f'cloud-open;dur={(perf_counter() - started) * 1000:.1f}'
+        return response
     except CloudUnavailable as exc:
         return error_response(exc, status=503)
     except ValidationError as exc:
@@ -324,6 +328,7 @@ def save_project(request, kind, plan_id):
     from .plan_workbook import materialize_button_sources, organize_project_sheets
     from .terminal_monitor import is_monitor_enabled, queue_saved_project_sync
 
+    started = perf_counter()
     permission = 'can_save_pdf_plan' if kind == 'pdf' else 'can_save_plan'
     if not capabilities(request.user)[permission]:
         return error_response('No tiene permiso para guardar planos.', status=403)
@@ -332,9 +337,10 @@ def save_project(request, kind, plan_id):
         with transaction.atomic():
             layout_changed = materialize_button_sources(plan, request.user)
             layout_changed = organize_project_sheets(plan, request.user) or layout_changed
-            if kind == 'pdf' and is_monitor_enabled():
-                layout_changed = merge_only_additions(plan, request.user) or layout_changed
             content = export_project(kind, plan)
+            if kind == 'pdf' and is_monitor_enabled() and merge_only_additions(plan, request.user, content):
+                layout_changed = True
+                content = export_project(kind, plan)
             saved, _ = SavedProject.objects.update_or_create(
                 **{'pdf_plan' if kind == 'pdf' else 'cad_plan': plan},
                 defaults={'name': plan.name, 'content': content, 'saved_by': request.user},
@@ -347,7 +353,9 @@ def save_project(request, kind, plan_id):
     if layout_changed:
         from .views import plan_data
         result['plan'] = pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True)
-    return JsonResponse(result)
+    response = JsonResponse(result)
+    response['Server-Timing'] = f'save-prepare;dur={(perf_counter() - started) * 1000:.1f}'
+    return response
 
 
 def project_file(content, name):
@@ -519,19 +527,26 @@ def workbook_csv(request, workbook_id):
 @require_GET
 @api_permissions()
 def project_version(request, kind, plan_id):
-    from .cloud_projects import CloudUnavailable, list_cloud_projects, workbook_version
+    from .cloud_projects import CloudUnavailable, cloud_project_reference, drive_pair_version, workbook_version
     plan = get_plan(kind, plan_id)
-    current = project_plan_data(kind, plan)['project_version']
+    target = {'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}
+    saved_at = SavedProject.objects.filter(**target).values_list('saved_at', flat=True).first()
+    current = saved_at.isoformat() if saved_at else ''
     known = request.GET.get('version', current)
     stale = bool(known and current and known != current)
     result = {'stale': stale, 'remote': False, 'latest_version': current,
               'refresh_url': reverse('refresh_project', args=[kind, plan.pk]), 'verified': True}
     if kind == 'pdf' and plan.cloud_origin and plan.cloud_workbook_version:
         try:
-            remote = next((p for p in list_cloud_projects() if p['id'] == plan.cloud_origin), None)
-            if remote:
-                result['remote'] = workbook_version(remote) != plan.cloud_workbook_version
+            remote = cloud_project_reference(plan.cloud_origin)
+            if remote and remote.get('excelId'):
+                previous = (plan.cloud_base_state or {}).get('drive_pair')
+                latest = drive_pair_version(remote)
+                result['remote'] = (latest != previous if previous and latest else
+                                    workbook_version(remote) != plan.cloud_workbook_version)
                 result['stale'] = stale or result['remote']
+            else:
+                result.update(verified=False, warning='El par PDF y Excel no está disponible en la nube. Se conserva la copia descargada.')
         except CloudUnavailable:
             result.update(verified=False, warning='No se pudo comprobar la versión en la nube. Se conserva la última copia descargada.')
     return JsonResponse(result)

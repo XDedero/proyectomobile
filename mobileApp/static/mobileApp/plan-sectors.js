@@ -57,10 +57,10 @@
     const legend=document.createElement('ul');
     legend.className='plan-sector-legend';legend.hidden=true;
     legend.setAttribute('aria-label','Leyenda de sectores');
-    let current=null,layer=null,editing=null,gesture=null,saving=false,paint=false,memberSector=null,configTarget=null;
+    let current=null,layer=null,selecting=false,editing=null,gesture=null,saving=false,paint=false,memberSector=null,configTarget=null;
     const editable=()=>Boolean(current?.plan.permissions?.can_assign);
-    const selectable=sector=>sector?.shape!=='brush' && editable() && !editing && !saving && !current.isBusy?.() &&
-        !current.viewer.placing && !current.viewer.moving && !current.viewport.classList.contains('plan-annotations-hidden');
+    const selectable=()=>selecting && editable() && !editing && !saving && !current.isBusy?.() &&
+        !current.viewer.placing && !current.viewer.moving;
     const valid=context=>context && appState.user && window.projectWorkspace?.active?.plan===context.plan;
     const clone=value=>JSON.parse(JSON.stringify(value));
     const status=(target,text)=>{target.node.querySelector('[role=status]').textContent=text;};
@@ -97,7 +97,7 @@
     }
     function drawSector(sector,selected=false) {
         const group=svgNode('g',{'data-sector-id':sector.id,'class':'plan-sector',transform:`translate(${sector.x} ${sector.y}) rotate(${sector.rotation})`});
-        if(selectable(sector)) {
+        if(selectable()) {
             group.classList.add('sector-selectable');
             group.setAttribute('tabindex','0');group.setAttribute('role','button');
             group.setAttribute('aria-label',`Seleccionar sector ${sector.name}`);
@@ -130,7 +130,35 @@
         }
         layer.append(group);
     }
+    function updateEditButtons() {
+        const available=editable() && Boolean(current.plan.sectors?.length);
+        const pressed=selecting||Boolean(editing);
+        for(const [id,kind] of [['btnPdfEditSectors','pdf'],['btnCadEditSectors','dxf'],['fullscreenEditSectors',null]]) {
+            const button=byId(id);
+            button.hidden=!available||(kind!==null&&current?.kind!==kind);
+            button.disabled=Boolean(editing||saving||current?.isBusy?.());
+            button.setAttribute('aria-pressed',String(pressed));
+            button.classList.toggle('active',pressed);
+            button.title=selecting?'Volver a explorar el plano':'Seleccionar un sector para moverlo o ajustarlo';
+        }
+    }
+    function leaveSelection() {
+        if(!selecting) return;
+        selecting=false;
+        draw();
+    }
+    async function toggleSelection() {
+        if(selecting) {leaveSelection();return;}
+        if(!editable()||!current.plan.sectors?.length||editing||saving||current.isBusy?.()) return;
+        const context=current;
+        if(!(await window.workbookEditor.requestClose())||!valid(context)||!editable()) return;
+        await context.setMode('explore');
+        if(!valid(context)||!editable()) return;
+        selecting=true;
+        draw();
+    }
     function draw() {
+        updateEditButtons();
         legend.hidden=true;
         if(!current||!ensureLayer()) return;
         layer.replaceChildren();
@@ -164,14 +192,17 @@
         byId('btnSectorTransform').setAttribute('aria-pressed',String(!paint));
         byId('sectorDrawingHint').textContent=paint?'Dibuja sobre el plano. Puedes añadir varios trazos; «Mover / ajustar» permite transformar el sector.':'Arrastra la figura para moverla, sus bordes o esquinas para estirarla y el punto superior para girarla. Mayús mantiene las proporciones.';
     }
-    function beginEditing(draft,previous) {
-        editing={context:current,previous,draft};paint=draft.shape==='brush';
+    function beginEditing(draft,previous,{transform=false}={}) {
+        selecting=false;
+        editing={context:current,previous,draft};paint=!transform&&draft.shape==='brush';
         byId('sectorKeepRatio').checked=false;
         current.viewport.classList.add('sector-editing');dock.hidden=false;syncFields();draw();
         window.projectWorkspace.update();
     }
     function stopEditing() {
-        gesture=null;editing=null;paint=false;dock.hidden=true;
+        const pointer=gesture?.id;
+        selecting=false;gesture=null;editing=null;paint=false;dock.hidden=true;
+        if(pointer!==undefined&&current?.viewport.hasPointerCapture(pointer)) current.viewport.releasePointerCapture(pointer);
         if(current) current.viewport.classList.remove('sector-editing');
         for(const id of ['fullscreenCreateSector','btnPdfCreateSector','btnCadCreateSector','fullscreenSectors','btnPdfSectors','btnCadSectors']) {
             if(byId(id)) byId(id).disabled=Boolean(current?.isBusy?.());
@@ -222,7 +253,8 @@
             return {page:button.page,x:button.x*d.width,y:button.y*d.height,radius};
         }
         const scale=current.viewer.svg.getScreenCTM()?.a||1;
-        return {page:1,x:(button.svg_x-current.viewer.initial.x)/d.unit,y:(button.svg_y-current.viewer.initial.y)/d.unit,radius:12*(button.button_scale ?? 1)/scale/d.unit};
+        const radius=current.viewer.pins.get(button.id)?.circle.r.baseVal.value || 12*(button.button_scale ?? 1)/scale;
+        return {page:1,x:(button.svg_x-current.viewer.initial.x)/d.unit,y:(button.svg_y-current.viewer.initial.y)/d.unit,radius:radius/d.unit};
     }
     async function showMembers(sector) {
         // Load the selected PDF page so membership uses the same geometry and
@@ -280,8 +312,9 @@
         if(!target||!valid(target.context)||!editable()) return;
         const name=byId('sectorName').value.trim();if(!name) {status(settings,'Escribe un nombre para el sector.');return;}
         const shape=byId('sectorShape').value,color=byId('sectorColor').value;
-        await hide(settings);if(!valid(target.context)) return;
+        await hide(settings);if(!valid(target.context)||!editable()) return;
         await current.setMode('explore');
+        if(!valid(target.context)||!editable()) return;
         const d=dimensions();if(!d) return;
         const previous=target.previous;
         let draft=previous?clone(previous):{id:newId(),page:d.page,x:d.width/2,y:d.height/2,width:Math.min(d.width,d.height)*.35,height:Math.min(d.width,d.height)*.35,rotation:0};
@@ -302,6 +335,7 @@
     byId('btnSectorCancel').onclick=()=>{if(!saving)stopEditing();};
     byId('btnSectorSave').onclick=async()=>{
         const draft=editing;if(!draft||saving||gesture) return;
+        if(!editable()||!valid(draft.context)) return;
         if(draft.draft.shape==='brush'&&!draft.draft.strokes?.length) {byId('sectorDrawingHint').textContent='Dibuja al menos un trazo antes de guardar.';return;}
         saving=true;dock.querySelectorAll('button,input,select').forEach(node=>{node.disabled=true;});
         try {
@@ -330,16 +364,14 @@
         return [(dx*Math.cos(angle)-dy*Math.sin(angle))/s.width,(dx*Math.sin(angle)+dy*Math.cos(angle))/s.height];
     }
     function pointerDown(event) {
-        if(!current||saving||!valid(current)||event.button!==0||!layer) return;
+        if(!editable()||saving||!valid(current)||event.button!==0||!layer||event.currentTarget!==current.viewport) return;
         if(gesture) {event.preventDefault();event.stopImmediatePropagation();return;}
         let handle=event.target.closest('[data-sector-handle]')?.dataset.sectorHandle;
         if(!editing) {
             const id=event.target.closest('.sector-selectable')?.dataset.sectorId;
             const sector=current.plan.sectors?.find(row=>row.id===id);
-            if(!sector||!selectable(sector)) return;
-            // Select and start moving on the initial press: no modal or second click.
-            current.setMode('explore');
-            beginEditing(clone(sector),clone(sector));handle='move';
+            if(!sector||!selectable()) return;
+            beginEditing(clone(sector),clone(sector),{transform:true});handle='move';
         }
         const p=point(event),d=dimensions();if(!p) return;
         if(!paint&&!handle) return;
@@ -393,10 +425,11 @@
     }
     const bound=new WeakSet();
     function render(context) {
-        if(!context) {stopEditing();removeLayer();legend.remove();legend.hidden=true;current=null;list.modal.hide();settings.modal.hide();return;}
+        if(!context) {stopEditing();removeLayer();legend.remove();legend.hidden=true;current=null;updateEditButtons();list.modal.hide();settings.modal.hide();return;}
         if(current?.plan!==context.plan) {stopEditing();removeLayer();list.modal.hide();settings.modal.hide();}
         current=context;
-        if(editing&&!editable()) stopEditing();
+        if(!editable()&&(editing||selecting)) stopEditing();
+        if(selecting&&!current.plan.sectors?.length) leaveSelection();
         for(const prefix of ['Pdf','Cad']) {
             const relevant=context.kind===(prefix==='Pdf'?'pdf':'dxf');
             byId(`btn${prefix}CreateSector`).hidden=!relevant||!editable();
@@ -413,12 +446,12 @@
                 if(event.target.closest('.sector-selectable,[data-sector-handle]')) event.preventDefault();
             });
             context.viewport.addEventListener('keydown',event=>{
-                if(!['Enter',' '].includes(event.key)||editing) return;
+                if(!['Enter',' '].includes(event.key)||editing||event.currentTarget!==current?.viewport) return;
                 const id=event.target.closest('.sector-selectable')?.dataset.sectorId;
                 const sector=current?.plan.sectors?.find(row=>row.id===id);
-                if(!sector||!selectable(sector)) return;
+                if(!sector||!selectable()) return;
                 event.preventDefault();event.stopImmediatePropagation();
-                current.setMode('explore');beginEditing(clone(sector),clone(sector));byId('btnSectorSave').focus();
+                beginEditing(clone(sector),clone(sector),{transform:true});byId('btnSectorSave').focus();
             },true);
             context.viewport.addEventListener('plan-view-changed',()=>{if(current?.viewport===context.viewport)draw();});
         }
@@ -426,7 +459,7 @@
         draw();
     }
     for(const prefix of ['Pdf','Cad']) {
-        for(const [suffix,label,action] of [['Sectors','Sectores',openList],['CreateSector','Crear sector',()=>configure()]]) {
+        for(const [suffix,label,action] of [['Sectors','Sectores',openList],['CreateSector','Crear sector',()=>configure()],['EditSectors','Editar sectores',toggleSelection]]) {
             const button=document.createElement('button');button.id=`btn${prefix}${suffix}`;button.type='button';button.className='btn btn-outline-primary btn-sm';button.textContent=label;button.onclick=action;
             byId(`btn${prefix}ExportProject`).before(button);
         }
@@ -435,7 +468,12 @@
         const button=document.createElement('button');button.id=id;button.type='button';button.textContent=label;
         button.onclick=()=>{byId('btnPlanFullscreenMenu').click();action();};byId('fullscreenPlanMenu').append(button);
     }
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&editing&&!saving) {event.preventDefault();stopEditing();}});
-    window.planSectors={render,open:openList,create:()=>configure(),get editing(){return Boolean(editing);}};
+    byId('fullscreenEditSectors').onclick=toggleSelection;
+    document.addEventListener('keydown',event=>{
+        if(event.key!=='Escape'||saving) return;
+        if(editing) {event.preventDefault();stopEditing();}
+        else if(selecting) {event.preventDefault();leaveSelection();}
+    });
+    window.planSectors={render,open:openList,create:()=>configure(),leaveSelection,get selecting(){return selecting;},get editing(){return Boolean(editing);}};
     render(window.projectWorkspace?.active);
 })();

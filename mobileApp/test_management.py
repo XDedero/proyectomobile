@@ -179,7 +179,7 @@ class ManagementAndVersionTests(TestCase):
         plan = self.create_plan(); obj = PdfPlan.objects.get(pk=plan['id'])
         obj.cloud_origin = 'remote-pdf'; obj.cloud_workbook_version = 'remote-excel:old'; obj.save()
         self.client.force_login(self.other)
-        with patch('mobileApp.cloud_projects.list_cloud_projects', return_value=[self.remote_snapshot()[0]]):
+        with patch('mobileApp.cloud_projects.cloud_project_reference', return_value=self.remote_snapshot()[0]):
             result = self.client.get(plan['version_url']).json()
         self.assertTrue(result['stale']); self.assertTrue(result['remote'])
         self.assertTrue(PdfPlan.objects.filter(pk=obj.pk).exists())

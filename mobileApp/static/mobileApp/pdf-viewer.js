@@ -4,6 +4,7 @@ class PdfPlanViewer {
         this.container = container;
         this.options = options;
         this.markers = [];
+        this.pendingMarker = null;
         this.buttons = new Map();
         this.pointers = new Map();
         this.version = 0;
@@ -433,16 +434,7 @@ class PdfPlanViewer {
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
             button.style.setProperty('--button-scale', marker.button_scale ?? 1);
-            const buttonColor = marker.button_color || '#2563eb';
-            if (buttonColor) {
-                button.style.backgroundColor = buttonColor;
-                const rgb = buttonColor.slice(1).match(/../g).map(value => parseInt(value, 16));
-                const luminance = rgb.reduce((sum, value, channel) => {
-                    const normalized = value / 255;
-                    return sum + [.2126, .7152, .0722][channel] * (normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4);
-                }, 0);
-                button.style.color = luminance > .179 ? '#111' : '#fff';
-            }
+            this.colorMarker(button, marker.button_color || '#2563eb');
             const label = marker.label || `Botón ${index + 1}`;
             button.dataset.hoverName = label;
             button.title = `${label} · ${marker.workbook ? marker.workbook.name : 'Sin Excel asignado'}`;
@@ -461,6 +453,37 @@ class PdfPlanViewer {
             this.buttons.set(Number(marker.id), button);
         }
         this.select(this.selectedId);
+        this.renderPendingMarker();
+    }
+
+    setPendingMarker(marker) {
+        if (!marker && !this.pendingMarker) return;
+        this.pendingMarker = marker;
+        this.renderPendingMarker();
+    }
+
+    colorMarker(pin, color) {
+        pin.style.backgroundColor = color;
+        const rgb = color.slice(1).match(/../g).map(value => parseInt(value, 16));
+        const luminance = rgb.reduce((sum, value, channel) => {
+            const normalized = value / 255;
+            return sum + [.2126, .7152, .0722][channel] * (normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4);
+        }, 0);
+        pin.style.color = luminance > .179 ? '#111' : '#fff';
+    }
+
+    renderPendingMarker() {
+        this.layer.querySelector('.plan-pin-pending')?.remove();
+        const marker = this.pendingMarker;
+        if (!marker || Number(marker.page) !== this.pageNumber) return;
+        const pin = document.createElement('span');
+        pin.className = 'pdf-plan-marker plan-pin-pending';
+        pin.setAttribute('aria-hidden', 'true');
+        this.colorMarker(pin, marker.color);
+        pin.style.setProperty('--button-scale', marker.scale);
+        pin.textContent = String(marker.number);
+        this.positionButton(pin, marker.x, marker.y);
+        this.layer.append(pin);
     }
 
     positionButton(button, x, y) {
@@ -708,6 +731,7 @@ class PdfPlanViewer {
         this.pageNumber = 0;
         this.pageCount = 0;
         this.markers = [];
+        this.pendingMarker = null;
         this.buttons.clear();
         this.layer.replaceChildren();
         this.stage.hidden = true;
