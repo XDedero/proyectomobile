@@ -169,7 +169,11 @@
             drawSector(editing.draft,!paint);sectors.push(editing.draft);
         }
         legend.replaceChildren();
+        const legendEntries=new Set();
         for(const sector of sectors) {
+            const key=JSON.stringify([sector.name,sector.color.toLowerCase()]);
+            if(legendEntries.has(key)) continue;
+            legendEntries.add(key);
             const row=document.createElement('li');row.className='sector-row';
             const swatch=document.createElement('span');swatch.className='sector-swatch';
             swatch.style.background=sector.color;swatch.setAttribute('aria-hidden','true');
@@ -269,6 +273,7 @@
         if(editable()) {
             const actions=document.createElement('div');actions.className='d-flex gap-2 mb-3';
             const edit=document.createElement('button');edit.type='button';edit.className='btn btn-outline-primary btn-sm';edit.textContent='Editar sector';edit.onclick=()=>configure(sector);
+            const copy=document.createElement('button');copy.type='button';copy.id='btnCopyPlanSector';copy.className='btn btn-outline-primary btn-sm';copy.textContent='Copiar sector';copy.onclick=()=>copySector(sector);
             const remove=document.createElement('button');remove.type='button';remove.className='btn btn-outline-danger btn-sm';remove.textContent='Eliminar sector';
             remove.onclick=async()=>{
                 if(saving || !confirm(`¿Eliminar el sector «${sector.name}»? Sus botones se conservarán.`)) return;
@@ -280,7 +285,7 @@
                 } catch(error){status(list,error.message);}
                 finally{saving=false;remove.disabled=false;draw();}
             };
-            actions.append(edit,remove);body.append(actions);
+            actions.classList.add('flex-wrap');actions.append(edit,copy,remove);body.append(actions);
         }
         const rows=document.createElement('div');rows.className='sector-list';body.append(rows);
         const buttons=context.kind==='pdf'?context.plan.markers:context.plan.motors;
@@ -297,6 +302,20 @@
         }
         const total=document.createElement('p');total.className='small text-muted';total.textContent=`${count} ${count===1?'botón pertenece':'botones pertenecen'} a este sector.`;title.after(total);
         if(!count) rows.textContent='No hay botones con más del 50 % de su superficie dentro del sector.';
+    }
+    async function copySector(sector) {
+        if(!editable()||editing||saving||current?.isBusy?.()||!(await window.workbookEditor.requestClose())) return;
+        const context=current;
+        await hide(list);if(!valid(context)||!editable()) return;
+        await context.setMode('explore');if(!valid(context)||!editable()) return;
+        const dims=dimensions();if(!dims) return;
+        const draft=clone(sector);
+        draft.id=newId();draft.page=dims.page;
+        draft.x=Math.max(0,Math.min(dims.width,sector.x+30));
+        draft.y=Math.max(0,Math.min(dims.height,sector.y+30));
+        beginEditing(draft,null,{transform:true});
+        byId('sectorDrawingHint').textContent='Copia del sector: arrástrala hasta su nueva ubicación. Conserva el nombre, color y leyenda del original. Guardar sector confirma la copia; Cancelar la descarta.';
+        byId('btnSectorSave').focus();
     }
     async function configure(sector=null) {
         if(!editable()||editing||!(await window.workbookEditor.requestClose())) return;
@@ -459,9 +478,9 @@
         draw();
     }
     for(const prefix of ['Pdf','Cad']) {
-        for(const [suffix,label,action] of [['Sectors','Sectores',openList],['CreateSector','Crear sector',()=>configure()],['EditSectors','Editar sectores',toggleSelection]]) {
+        for(const [suffix,label,action] of [['Sectors','Sectores',openList],['EditSectors','Editar sectores',toggleSelection],['CreateSector','Crear sector',()=>configure()]]) {
             const button=document.createElement('button');button.id=`btn${prefix}${suffix}`;button.type='button';button.className='btn btn-outline-primary btn-sm';button.textContent=label;button.onclick=action;
-            byId(`btn${prefix}ExportProject`).before(button);
+            byId(prefix==='Pdf'?'pdfSectorActions':'cadSectorActions').append(button);
         }
     }
     for(const [id,label,action] of [['fullscreenSectors','Sectores',openList],['fullscreenCreateSector','Crear sector',()=>configure()]]) {
