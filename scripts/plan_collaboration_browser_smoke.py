@@ -30,6 +30,54 @@ def serve():
     call_command('runserver', '127.0.0.1:' + os.environ['PLAN_BROWSER_PORT'], use_reloader=False)
 
 
+def check_absolute_navigation(page, context, kind, mobile):
+    """Use actual wheel/touch input, never call zoom() to simulate a gesture."""
+    zoom = "(() => { const v=projectWorkspace.active.viewer; return projectWorkspace.active.kind === 'pdf' ? v.scale / v.fitScale() : v.initial.width / v.view.width; })()"
+    position = "(() => { const v=projectWorkspace.active.viewer; return projectWorkspace.active.kind === 'pdf' ? [v.container.scrollLeft,v.container.scrollTop] : [v.view.x,v.view.y]; })()"
+    original_buttons = page.evaluate('JSON.stringify(projectWorkspace.active.plan.markers || projectWorkspace.active.plan.motors)')
+    rect = page.locator('#fullscreenPlanViewport').bounding_box()
+    cx, cy = rect['x'] + rect['width'] / 2, rect['y'] + rect['height'] / 2
+    before = page.evaluate(zoom)
+    if mobile:
+        cdp = context.new_cdp_session(page)
+        def touch(event, points):
+            cdp.send('Input.dispatchTouchEvent', {'type': event, 'touchPoints': [
+                {'id': i, 'x': x, 'y': y} for i, (x, y) in enumerate(points)]})
+        touch('touchStart', [(cx - 35, cy), (cx + 35, cy)])
+        touch('touchMove', [(cx - 80, cy), (cx + 80, cy)])
+        touch('touchEnd', [])
+    else:
+        page.mouse.move(cx, cy)
+        page.mouse.wheel(0, -240)
+    page.wait_for_function(f'{zoom} > {before} * 1.2')
+    enlarged = page.evaluate(zoom)
+    previous_position = page.evaluate(position)
+    if mobile:
+        touch('touchStart', [(cx, cy)])
+        touch('touchMove', [(cx - 40, cy - 25)])
+        touch('touchEnd', [])
+    else:
+        page.mouse.move(cx, cy)
+        page.mouse.down()
+        page.mouse.move(cx - 40, cy - 25, steps=6)
+        page.mouse.up()
+    page.wait_for_function(f'previous => JSON.stringify({position}) !== JSON.stringify(previous)', arg=previous_position)
+    if mobile:
+        touch('touchStart', [(cx - 80, cy), (cx + 80, cy)])
+        touch('touchMove', [(cx - 35, cy), (cx + 35, cy)])
+        touch('touchEnd', [])
+        cdp.detach()
+    else:
+        page.mouse.wheel(0, 240)
+    page.wait_for_function(f'{zoom} < {enlarged} * .9')
+    assert page.evaluate('window.visualViewport.scale') == 1, 'Browser page zoom intercepted the drawing gesture'
+    assert page.evaluate('JSON.stringify(projectWorkspace.active.plan.markers || projectWorkspace.active.plan.motors)') == original_buttons
+    assert not page.evaluate('projectWorkspace.active.plan._projectDirty'), 'Navigation changed the saved plan'
+    assert not page.locator('.workbook-editor-overlay').is_visible(), 'A gesture opened a button by accident'
+    page.evaluate('projectWorkspace.active.viewer.fit()')
+    print(f'PASS: absolute {kind} {"touch pinch in/out and one-finger pan" if mobile else "wheel in/out and mouse pan"}', flush=True)
+
+
 def check(url, directory):
     from playwright.sync_api import sync_playwright, expect
     from scripts.browser_smoke import login
@@ -85,6 +133,7 @@ def check(url, directory):
                     assert abs(geometry['width'] - window_size['width']) < 2 and abs(geometry['height'] - window_size['height']) < 2, (geometry, window_size)
                     expect(page.locator('.plan-button-sidebar:visible')).to_have_count(0)
                     expect(page.locator('#fullscreenSavePlan')).to_be_hidden()
+                    check_absolute_navigation(page, context, kind, mobile)
                     expect(page.locator('#absoluteBack')).to_have_css('opacity', '0', timeout=7000)
                     if mobile: page.touchscreen.tap(window_size['width'] - 10, 10)
                     else: page.mouse.move(1, 1)

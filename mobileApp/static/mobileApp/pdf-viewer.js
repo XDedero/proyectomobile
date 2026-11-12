@@ -52,7 +52,8 @@ class PdfPlanViewer {
             if (this.pointers.has(event.pointerId)) this.pointerUp(event, true);
         }, { signal });
         this.container.addEventListener('wheel', (event) => {
-            if (!this.page || (!event.ctrlKey && !event.metaKey)) return;
+            const absolute = this.container.closest('.plan-absolute') !== null;
+            if (!this.page || (!absolute && !event.ctrlKey && !event.metaKey)) return;
             event.preventDefault();
             this.zoom(Math.exp(-Math.max(-100, Math.min(100, event.deltaY)) * 0.007), event.clientX, event.clientY);
         }, { passive: false, signal });
