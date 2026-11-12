@@ -76,7 +76,11 @@ Los sectores son opcionales y se guardan dentro del propio plano, con sus mismos
 
 **Ver planos guardados** en el menú principal, el menú de usuario y el módulo PDF abre una biblioteca común. Cada registro muestra **PDF** o **DXF** en pequeño. Volver a guardar el mismo plano actualiza su registro; no crea otra copia. Los planos existentes antes de esta actualización se conservan mediante la migración `0006`.
 
-Las modificaciones y asignaciones del trabajo abierto se mantienen en el servidor. El botón Guardar plano registra o actualiza la copia completa de la biblioteca y su archivo de proyecto. Un plano nuevo no aparece en esa biblioteca hasta guardarlo.
+Las modificaciones y asignaciones del trabajo abierto se mantienen en un borrador privado del usuario. Agregar o mover botones, cambiar sectores y editar el Excel no actualiza la versión compartida. Solo **Guardar plano** publica el conjunto y actualiza la copia de la biblioteca. Un plano nuevo no aparece en esa biblioteca hasta guardarlo. **Exportar proyecto** descarga el trabajo abierto sin guardarlo automáticamente. Si otro usuario ya guardó una versión posterior, se bloquea la sobrescritura y se conserva el borrador; al reabrir se ofrece descartarlo para cargar la versión más reciente. La migración `0036` añade los borradores y permisos sin cambiar los planos existentes.
+
+Dentro del menú de pantalla completa, **Plano absoluto** utiliza toda la superficie disponible para el plano y sus botones, sin listado lateral, herramientas ni indicadores. Un toque o clic directo en un botón abre su Excel. Solo queda un control pequeño **Volver**, que regresa a la pantalla completa anterior: se oculta tras cinco segundos sin actividad y reaparece al tocar la pantalla o mover el mouse. Funciona también cuando el dispositivo no ofrece la API nativa de pantalla completa.
+
+**Permisos de edición** aparece únicamente al creador del plano, tanto junto al visor como en el menú de pantalla completa. Permite seleccionar o retirar trabajadores y administradores activos para ese plano. Los lectores no pueden recibir edición. Un usuario autorizado trabaja sobre su propio borrador; el acceso se comprueba nuevamente en el servidor en cada operación. Delegar edición no concede eliminación del plano ni gestión de permisos. Los administradores conservan su acceso administrativo existente.
 
 **Eliminar plano** aparece junto a Guardar plano, en pantalla completa y como papelera en la biblioteca, exclusivamente para el creador del plano y los administradores. Tras confirmar, elimina el plano original, sus botones y su copia guardada; también cierra cualquier copia abierta de ese plano y descarta su restauración automática. No vuelve a la biblioteca hasta importarlo y guardarlo de nuevo. Los motores guardados y las fichas independientes se conservan.
 
@@ -119,7 +123,7 @@ La biblioteca permite buscar por nombre, consultar una ficha e incorporarla al b
 
 ## Transportar un proyecto
 
-**Exportar proyecto** permite a trabajadores y administradores descargar un archivo **.planproj**, actualizando primero su copia guardada cuando corresponde. Es un ZIP versionado que reúne:
+**Exportar proyecto** permite a trabajadores y administradores descargar un archivo **.planproj** con el trabajo abierto, sin actualizar su copia guardada. Para actualizar la biblioteca y la nube debe pulsarse **Guardar plano**. Es un ZIP versionado que reúne:
 
 - El PDF o DXF original.
 - Las páginas y posiciones de los botones.

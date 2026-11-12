@@ -21,6 +21,8 @@ def application_profile(user):
 
 
 def owns_plan(user, plan):
+    if getattr(plan, 'draft_of_id', None):
+        return owns_plan(user, plan.draft_of)
     if getattr(plan, 'owner_username', ''):
         return plan.owner_username == user.get_username()
     if getattr(plan, 'cloud_origin', ''):
@@ -45,17 +47,21 @@ def has_role_configuration(user):
 def can_edit_plan(user, plan):
     if not user.is_authenticated or not user.is_active:
         return False
+    if getattr(plan, 'draft_of_id', None):
+        return plan.draft_user_id == user.pk and can_edit_plan(user, plan.draft_of)
     if is_administrator(user):
         return True
     profile = application_profile(user)
     if profile is not None:
-        return profile.role == 'worker' and owns_plan(user, plan)
+        return profile.role == 'worker' and (owns_plan(user, plan) or user.plan_edit_grants.filter(cloud_key=plan.cloud_key).exists())
     return owns_plan(user, plan)
 
 
 def can_access_plan(user, plan, action='can_view'):
     if not user.is_authenticated or not user.is_active:
         return False
+    if getattr(plan, 'draft_of_id', None):
+        return can_edit_plan(user, plan)
     profile = application_profile(user)
     if profile is not None:
         if action == 'can_export':
@@ -73,6 +79,7 @@ def can_access_plan(user, plan, action='can_view'):
 
 
 def visible_plans(user, queryset):
+    queryset = queryset.filter(draft_of__isnull=True)
     profile = application_profile(user)
     if profile is not None:
         if profile.role == 'viewer':
@@ -144,6 +151,7 @@ def capabilities(user, plan=None):
     if plan is not None:
         result['can_export'] = can_access_plan(user, plan, 'can_export')
         result['can_copy_button'] = edit
+        result['can_manage_plan_permissions'] = bool(edit and owns_plan(user, plan))
     return result
 
 
@@ -202,6 +210,10 @@ def api_permissions(*permissions):
             if permissions and plan is None and not request.user.has_perms(permissions):
                 return JsonResponse({'error': 'No tiene permisos para realizar esta acción.'}, status=403)
             response = view(request, *args, **kwargs)
+            if mutation and response.status_code < 300 and view.__name__ not in ('save_project', 'edit_plan_draft', 'plan_edit_permissions', 'refresh_project'):
+                for changed_plan in ([plan] if plan is not None else plans):
+                    if changed_plan.draft_of_id:
+                        type(changed_plan).objects.filter(pk=changed_plan.pk).update(draft_dirty=True)
             if response.get('Content-Type', '').startswith('application/json') and response.status_code < 300:
                 data = json.loads(response.content)
                 def attach(value):

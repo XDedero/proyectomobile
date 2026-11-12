@@ -32,8 +32,9 @@ def get_plan(kind, plan_id):
 def project_plan_data(kind, plan):
     from .display_settings import clean_display
     from .plan_workbook import workspace_data
+    original = plan.draft_of if plan.draft_of_id else plan
     try:
-        saved = plan.saved_project
+        saved = original.saved_project
     except SavedProject.DoesNotExist:
         saved = None
     return {
@@ -42,6 +43,13 @@ def project_plan_data(kind, plan):
         'display_settings': clean_display(plan.display_settings),
         'display_url': reverse('project_display', args=[kind, plan.pk]),
         'kind': kind, 'saved_at': saved.saved_at.isoformat() if saved else None,
+        'is_draft': bool(plan.draft_of_id),
+        'has_pending_changes': plan.draft_dirty,
+        'draft_stale': bool(plan.draft_of_id and plan.draft_version != (saved.saved_at.isoformat() if saved else '')),
+        'original_plan_id': original.pk,
+        'draft_url': reverse('edit_plan_draft', args=[kind, original.pk]),
+        'permissions_url': reverse('plan_edit_permissions', args=[kind, original.pk]),
+        'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[original.pk]),
         'project_version': saved.saved_at.isoformat() if saved else '',
         'cloud_status': saved.cloud_status if saved else 'local',
         'cloud_error': public_cloud_error(saved.cloud_error) if saved else '',
@@ -49,7 +57,7 @@ def project_plan_data(kind, plan):
         'cloud_progress': saved.cloud_progress if saved else 0,
         'version_url': reverse('project_version', args=[kind, plan.pk]),
         'refresh_url': reverse('refresh_project', args=[kind, plan.pk]),
-        'cloud_key': plan.cloud_key,
+        'cloud_key': original.cloud_key,
         'cloud_origin': getattr(plan, 'cloud_origin', ''),
         'save_project_url': reverse('save_project', args=[kind, plan.pk]),
         'export_project_url': reverse('download_project', args=[kind, plan.pk]),
@@ -138,9 +146,9 @@ def saved_projects(request):
         'id', 'cad_plan_id', 'pdf_plan_id', 'saved_at',
         'cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress',
         'cad_plan__id', 'cad_plan__name', 'cad_plan__cloud_key', 'cad_plan__imported_by_id',
-        'cad_plan__owner_username',
+        'cad_plan__owner_username', 'cad_plan__draft_of_id',
         'pdf_plan__id', 'pdf_plan__name', 'pdf_plan__cloud_key', 'pdf_plan__cloud_origin', 'pdf_plan__imported_by_id',
-        'pdf_plan__owner_username',
+        'pdf_plan__owner_username', 'pdf_plan__draft_of_id',
     )
     if mine:
         from django.db.models import Q
@@ -175,14 +183,16 @@ def saved_projects(request):
 
 
 def cached_projects(user):
-    plans = PdfPlan.objects.exclude(cloud_origin='').filter(saved_project__isnull=True).only(
-        'id', 'name', 'cloud_key', 'cloud_origin', 'owner_username', 'imported_by_id', 'imported_at')
+    plans = PdfPlan.objects.exclude(cloud_origin='').filter(saved_project__isnull=True, draft_of__isnull=True).only(
+        'id', 'name', 'cloud_key', 'cloud_origin', 'owner_username', 'imported_by_id', 'imported_at', 'draft_of_id')
     return [{**local_copy_data('pdf', plan, user), 'date': plan.imported_at.isoformat(),
              'export_url': reverse('download_project', args=['pdf', plan.pk])} for plan in plans if can_access_plan(user, plan)]
 
 
 def can_clear_local(kind, plan, user):
     from django.conf import settings
+    if getattr(plan, 'draft_of_id', None):
+        return False
     if settings.PLANOS_CLOUD_MODE:
         return False
     from .authorization import application_profile
@@ -262,7 +272,7 @@ def open_cloud_project(request, pdf_id):
             project = next((p for p in list_cloud_projects() if p['id'] == pdf_id), None)
             if not project or not can_open_cloud(request.user, project):
                 return error_response('Su rol no permite abrir este plano de la nube.', 403)
-        cached = next((p for p in PdfPlan.objects.filter(cloud_origin=pdf_id)
+        cached = next((p for p in PdfPlan.objects.filter(cloud_origin=pdf_id, draft_of__isnull=True)
                        if can_access_plan(request.user, p)), None)
         if cached:
             plan, warning = restore(pdf_id, request.user, replace_plan=cached)
@@ -310,7 +320,7 @@ def delete_cloud_project(request, pdf_id):
     except CloudUnavailable as exc:
         return error_response(exc, status=503)
     with transaction.atomic():
-        copies = list(PdfPlan.objects.filter(cloud_origin=pdf_id))
+        copies = list(PdfPlan.objects.filter(cloud_origin=pdf_id, draft_of__isnull=True))
         original = PdfPlan.objects.filter(cloud_key=project.get('projectKey')).first()
         if original and (original.cloud_key.startswith('project_') or project_title(original.name).casefold() == project_title(project['name']).casefold()):
             copies.append(original)
@@ -333,8 +343,12 @@ def save_project(request, kind, plan_id):
     if not capabilities(request.user)[permission]:
         return error_response('No tiene permiso para guardar planos.', status=403)
     plan = get_plan(kind, plan_id)
+    working = plan if plan.draft_of_id else None
     try:
         with transaction.atomic():
+            if working:
+                from .plan_drafts import publish_draft
+                plan = publish_draft(working, request.user)
             layout_changed = materialize_button_sources(plan, request.user)
             layout_changed = organize_project_sheets(plan, request.user) or layout_changed
             content = export_project(kind, plan)
@@ -347,13 +361,27 @@ def save_project(request, kind, plan_id):
             )
             queue_saved_project_sync(kind, plan, content, saved.saved_at,
                                      content_reference=saved.__dict__['content'])
+            if working:
+                from .plan_drafts import copy_document, copy_markers
+                documents = {}
+                working.workbook = copy_document(plan.workbook, documents)
+                working.listing = copy_document(plan.listing, documents)
+                for field in ('name', 'sectors', 'display_settings'):
+                    setattr(working, field, getattr(plan, field))
+                inverse = {str(original): int(draft) for draft, original in working.draft_markers.items()}
+                mapping = copy_markers(plan, working, documents, inverse)
+                working.draft_markers = {str(draft): int(original) for original, draft in mapping.items()}
+                working.draft_version = saved.saved_at.isoformat()
+                working.draft_dirty = False
+                working.save(update_fields=['workbook', 'listing', 'name', 'sectors', 'display_settings', 'draft_markers', 'draft_version', 'draft_dirty'])
     except (ValidationError, OSError, CloudUnavailable) as exc:
-        return error_response(exc)
+        return error_response(exc, status=409 if getattr(exc, 'code', '') == 'draft_conflict' else 400)
     saved.refresh_from_db(fields=['cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress'])
     result = {'saved': saved_data(saved, request.user), 'saved_at': saved.saved_at.isoformat()}
-    if layout_changed:
+    if layout_changed or working:
         from .views import plan_data
-        result['plan'] = pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True)
+        shown = working or plan
+        result['plan'] = pdf_data(shown) if kind == 'pdf' else plan_data(shown, detail=True)
     response = JsonResponse(result)
     response['Server-Timing'] = f'save-prepare;dur={(perf_counter() - started) * 1000:.1f}'
     return response
@@ -532,6 +560,8 @@ def workbook_csv(request, workbook_id):
 def project_version(request, kind, plan_id):
     from .cloud_projects import CloudUnavailable, cloud_project_reference, drive_pair_version, workbook_version
     plan = get_plan(kind, plan_id)
+    if plan.draft_of_id:
+        plan = plan.draft_of
     target = {'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}
     saved_at = SavedProject.objects.filter(**target).values_list('saved_at', flat=True).first()
     current = saved_at.isoformat() if saved_at else ''
@@ -561,6 +591,8 @@ def refresh_project(request, kind, plan_id):
     from .cloud_projects import CloudUnavailable, open_cloud_project as restore
     from .views import plan_data
     plan = get_plan(kind, plan_id)
+    if plan.draft_of_id:
+        plan = plan.draft_of
     try:
         warning = ''
         if kind == 'pdf' and plan.cloud_origin:

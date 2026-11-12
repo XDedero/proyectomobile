@@ -36,7 +36,7 @@ def open_plan_source(kind, plan):
             return plan.source.open('rb')
         except FileNotFoundError:
             pass
-    record = SavedProject.objects.filter(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}).only('content').first()
+    record = SavedProject.objects.filter(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.draft_of_id or plan.pk}).only('content').first()
     try:
         saved = record.content if record else b''
     except OSError:

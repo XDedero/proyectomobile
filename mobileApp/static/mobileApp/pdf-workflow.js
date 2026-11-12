@@ -182,7 +182,11 @@
         const alreadySelected = selectedId === marker.id;
         selectedId = marker.id;
         updateMarkers();
-        if (!open || !alreadySelected || mode === 'move') return;
+        if (!open || (!alreadySelected && !window.projectWorkspace?.absolute) || mode === 'move') return;
+        if (window.projectWorkspace?.absolute) {
+            if (marker.workbook) await openWorkbook(marker.workbook);
+            return;
+        }
         await openSelectedButton(marker);
     }
 
@@ -348,6 +352,7 @@
         if (versionChecked) window.planVersions.remember(nextPlan);
         else nextPlan = await window.planVersions.beforeOpen(nextPlan);
         if (!nextPlan) return false;
+        nextPlan = await window.projectWorkspace.preparePlan(nextPlan);
         if (currentRevision !== revision || !appState.user) return;
         closeAreaControls();
         hideDialog();
@@ -372,7 +377,6 @@
             activateProject();
             status('Plano listo. Puede recorrer sus páginas y añadir botones.');
             clearError();
-            window.projectWorkspace?.keepOnDevice(nextPlan, source);
             return true;
         } finally { if (currentRevision === revision) setBusy(false); }
     }
@@ -571,7 +575,7 @@
         deselect: deselectMarker,
         editButtonDetails(marker, mode = 'description') { return showButtonDetails(marker, mode); },
         removeDeleted(id) {
-            if (plan?.id !== id) return;
+            if (plan?.id !== id && plan?.original_plan_id !== id) return;
             const documentId = editor.metadata?.id;
             const closeEditor = Boolean(documentId && (plan.workbook?.id === documentId || plan.listing?.id === documentId || plan.markers.some(marker => marker.workbook?.id === documentId)));
             reset({ closeEditor });

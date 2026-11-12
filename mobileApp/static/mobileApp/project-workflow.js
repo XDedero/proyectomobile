@@ -5,6 +5,7 @@
     let selectedActions = null;
     let previousOverflow = '', fullscreenOwned = false;
     let pickingFile = false;
+    let absolute = false, absoluteTimer = null;
     let libraryRequestVersion = 0, libraryLoading = false, librarySignature = null;
     let localRows = [], cloudRows = [], deviceRows = [];
     let ownHistory = false;
@@ -38,8 +39,11 @@
           <button type="button" data-project-action="open-listing" id="fullscreenOpenListing">Ver listados</button>
           <button type="button" data-project-action="save" id="fullscreenSaveMenu" hidden>Guardar plano</button>
           <button type="button" data-project-action="export">Exportar proyecto</button>
+          <button type="button" data-project-action="absolute" id="fullscreenAbsolute">Plano absoluto</button>
+          <button type="button" data-project-action="permissions" id="fullscreenPermissions" hidden>Permisos de edición</button>
           <div class="fullscreen-zoom-actions"><button type="button" data-project-action="zoom-out" aria-label="Alejar">−</button><button type="button" data-project-action="fit">Ajustar</button><button type="button" data-project-action="zoom-in" aria-label="Ampliar">+</button></div>
         </nav>
+        <button type="button" id="absoluteBack" class="absolute-back" aria-label="Volver a pantalla completa" hidden>← Volver</button>
         <div id="fullscreenPlanViewport" class="fullscreen-plan-viewport"></div>
         <div class="plan-quick-actions" aria-label="Acciones del plano">
           <button type="button" id="fullscreenAddMarker" aria-label="Añadir botón al plano" title="Añadir botón al plano" aria-pressed="false"><i class="bi bi-plus-circle" aria-hidden="true"></i><span>Botón</span></button>
@@ -52,6 +56,42 @@
         <p id="fullscreenPlanStatus" class="fullscreen-plan-status" role="status"></p>`;
     document.body.append(overlay);
     const fullMenu = byId('fullscreenPlanMenu');
+    const permissionDialog = document.createElement('dialog');
+    permissionDialog.className = 'app-confirm plan-permissions-dialog';
+    permissionDialog.setAttribute('aria-label', 'Permisos de edición del plano');
+    permissionDialog.innerHTML = `<h2>Permisos de edición</h2><p>Selecciona los usuarios que pueden editar este plano. Los administradores conservan su acceso de administración.</p>
+        <div class="plan-permission-users"></div><p class="plan-permission-status" role="status"></p>
+        <div class="app-confirm-actions"><button type="button" class="btn btn-light" data-permission-close>Cancelar</button><button type="button" class="btn btn-primary" data-permission-save>Aplicar permisos</button></div>`;
+    document.body.append(permissionDialog);
+    permissionDialog.querySelector('[data-permission-close]').onclick = () => permissionDialog.close();
+    async function managePermissions() {
+        if (!active || !rights().can_manage_plan_permissions || isBusy()) return;
+        const current = active, user = appState.user?.id;
+        const list = permissionDialog.querySelector('.plan-permission-users');
+        const feedback = permissionDialog.querySelector('.plan-permission-status');
+        const save = permissionDialog.querySelector('[data-permission-save]');
+        list.replaceChildren(); feedback.textContent = 'Cargando usuarios…'; save.disabled = true;
+        permissionDialog.showModal();
+        try {
+            const data = await request(current.plan.permissions_url);
+            if (active !== current || appState.user?.id !== user) { permissionDialog.close(); return; }
+            for (const account of data.users) {
+                const label = document.createElement('label'), input = document.createElement('input');
+                input.type = 'checkbox'; input.value = account.id; input.checked = account.can_edit;
+                label.append(input, document.createTextNode(` ${account.name} (${account.username})`)); list.append(label);
+            }
+            feedback.textContent = data.users.length ? '' : 'No hay otros trabajadores o administradores activos.';
+            save.disabled = false;
+            save.onclick = async () => {
+                save.disabled = true; feedback.textContent = 'Aplicando permisos…';
+                try {
+                    await post(current.plan.permissions_url, {user_ids: [...list.querySelectorAll('input:checked')].map(input => Number(input.value))});
+                    permissionDialog.close(); status('Permisos de edición actualizados.');
+                } catch (error) { feedback.textContent = error.message; }
+                finally { save.disabled = false; }
+            };
+        } catch (error) { feedback.textContent = error.message; }
+    }
     const uploadStages = { queued: 'Guardado en este PC. Esperando turno para subir…', preparing: 'Preparando los archivos para la nube…',
         pdf: 'Subiendo el PDF a la nube…', excel: 'Subiendo el Excel y sus hojas a la nube…',
         database: 'Guardando el plano, las hojas y los botones en la base de datos…', confirming: 'Confirmando el guardado completo…' };
@@ -143,6 +183,10 @@
         byId('fullscreenSavePlan').hidden = byId('fullscreenSaveMenu').hidden = !active || !canSave();
         byId('fullscreenDeletePlan').hidden = !active || !canDelete();
         byId('fullscreenMoveMarkerQuick').hidden = !active || !canMove();
+        byId('fullscreenPermissions').hidden = !rights().can_manage_plan_permissions;
+        for (const [kind, prefix] of [['pdf', 'Pdf'], ['dxf', 'Cad']]) {
+            byId(`btn${prefix}PlanPermissions`).hidden = !rights(kind).can_manage_plan_permissions;
+        }
         renderSidebarActions();
         for (const id of ['fullscreenSavePlan', 'fullscreenSaveMenu', 'fullscreenDeletePlan', 'fullscreenAddMarker', 'fullscreenMoveMarkerQuick']) byId(id).disabled = isBusy();
         renderUploadProgress();
@@ -241,8 +285,7 @@
     async function exportActive() {
         const current = active;
         if (!current || isBusy()) return;
-        // Read-only users may export without creating/updating a saved plan.
-        if (canSave() && !(await saveActive())) return;
+        // Export is a download, never an implicit Guardar plano.
         download(current.plan.export_project_url);
     }
 
@@ -353,6 +396,7 @@
     }
     function exitFullscreen() {
         if (!full) return;
+        leaveAbsolute(false);
         resetOutsideClicks();
         full = false;
         setMenu(false);
@@ -371,6 +415,53 @@
         fullscreenOwned = false;
         active?.viewer.fit();
         window.planDisplay?.render(active, selectedActions);
+    }
+    function showAbsoluteBack() {
+        if (!absolute) return;
+        byId('absoluteBack').classList.remove('is-idle');
+        clearTimeout(absoluteTimer);
+        absoluteTimer = setTimeout(() => {
+            if (absolute && !window.workbookEditor?.visible) byId('absoluteBack').classList.add('is-idle');
+        }, 5000);
+    }
+    async function enterAbsolute() {
+        if (!full || !active || isBusy() || window.planSectors?.editing) return;
+        await active.setMode('explore');
+        window.planSectors?.leaveSelection();
+        absolute = true;
+        setMenu(false);
+        overlay.classList.add('plan-absolute');
+        byId('absoluteBack').hidden = false;
+        active.viewport.style.setProperty('--plan-annotation-opacity', '1');
+        active.viewport.classList.remove('plan-annotations-hidden');
+        active.viewer.fit();
+        showAbsoluteBack();
+    }
+    function leaveAbsolute(fit = true) {
+        absolute = false;
+        clearTimeout(absoluteTimer);
+        overlay.classList.remove('plan-absolute');
+        byId('absoluteBack').hidden = true;
+        if (fit) {
+            active?.viewer.fit();
+            window.planDisplay?.render(active, selectedActions);
+            byId('fullscreenAbsolute').focus();
+        }
+    }
+    byId('absoluteBack').onclick = () => leaveAbsolute();
+    document.addEventListener('pointermove', showAbsoluteBack, {passive: true});
+    document.addEventListener('pointerdown', showAbsoluteBack, {passive: true});
+    document.addEventListener('keydown', showAbsoluteBack);
+
+    async function preparePlan(plan) {
+        if (!plan?.draft_url || !plan.permissions?.can_assign || window.relOffline?.offline) return plan;
+        let result = plan.is_draft ? plan : (await post(plan.draft_url)).plan;
+        if (result.draft_stale && await window.confirmAppAction('Versión más reciente',
+            'Otro usuario guardó este plano. ¿Descartar tu borrador privado y abrir la versión más reciente? Cancelar conserva tu borrador.', 'Abrir versión reciente')) {
+            result = (await post(plan.draft_url, {discard: true})).plan;
+        }
+        result._projectDirty = Boolean(result.has_pending_changes);
+        return result;
     }
     function selection(configuration) {
         if (selectedActions?.buttonId !== configuration?.buttonId) resetOutsideClicks();
@@ -485,7 +576,7 @@
                 status('Este plano fue eliminado de la aplicación.', false, kind);
             }
             if (!statusOnly) byId('savedCountBadge').textContent = data.plans.length;
-            const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === active?.plan.id);
+            const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === (active?.plan.original_plan_id || active?.plan.id));
             if (currentSaved && !saving && (!active.plan.saved_at || Date.parse(currentSaved.date) >= Date.parse(active.plan.saved_at))) {
                 if (!active.plan.saved_at || Date.parse(currentSaved.date) > Date.parse(active.plan.saved_at)) active.plan._saveRequestError = '';
                 applyCloudState(active.plan, currentSaved);
@@ -798,6 +889,8 @@
         else if (action === 'open-listing') openListing();
         else if (action === 'save') saveActive();
         else if (action === 'export') exportActive();
+        else if (action === 'absolute') enterAbsolute();
+        else if (action === 'permissions') managePermissions();
         else if (action === 'fit') active.viewer.fit();
         else if (action === 'zoom-in') active.viewer.zoom(1.4);
         else if (action === 'zoom-out') active.viewer.zoom(1/1.4);
@@ -814,12 +907,20 @@
         }
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || window.planSectors?.editing || window.planSectors?.selecting || !byId('pdfMarkerDialog').hidden || document.querySelector('.modal.show')) return;
+        if (event.key !== 'Escape' || !full || window.workbookEditor.visible || window.planSectors?.editing || window.planSectors?.selecting || !byId('pdfMarkerDialog').hidden || document.querySelector('.modal.show, dialog[open]')) return;
         event.preventDefault();
-        if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
+        if (absolute) leaveAbsolute(); else if (!fullMenu.hidden) setMenu(false); else exitFullscreen();
     });
     overlay.addEventListener('pointerdown', (event) => { if (!fullMenu.contains(event.target) && !byId('btnPlanFullscreenMenu').contains(event.target)) setMenu(false); });
     for (const prefix of ['Cad', 'Pdf']) {
+        const permissionButton = document.createElement('button');
+        permissionButton.id = `btn${prefix}PlanPermissions`;
+        permissionButton.type = 'button';
+        permissionButton.className = 'btn btn-outline-primary btn-sm';
+        permissionButton.textContent = 'Permisos de edición';
+        permissionButton.hidden = true;
+        permissionButton.onclick = managePermissions;
+        byId(`btn${prefix}ExportProject`).before(permissionButton);
         byId(`btn${prefix}Fullscreen`).addEventListener('click', enterFullscreen);
         byId(`btn${prefix}SavePlan`).addEventListener('click', saveActive);
         byId(`btnDelete${prefix}Plan`).addEventListener('click', () => deletePlan());
@@ -846,11 +947,13 @@
     });
     document.addEventListener('workbook:saved', dirty);
     window.projectWorkspace = {
-        get active() { return active; }, get full() { return full; }, get selected() { return selectedActions; },
+        get active() { return active; }, get full() { return full; }, get absolute() { return absolute; }, get selected() { return selectedActions; },
+        preparePlan,
         activate, deactivate, selection, dirty, update, saveActive, exportActive, listSaved, showSaved, exitFullscreen, deletePlan, modeChanged, keepOnDevice,
         reportStatus(message) { status(message); },
         reportError(message) { status(message, true); },
         reset() {
+            permissionDialog.close();
             libraryRequestVersion += 1;
             libraryLoading = false;
             localRows = []; cloudRows = []; deviceRows = []; librarySignature = null;

@@ -184,7 +184,7 @@ class DriveCacheTests(TestCase):
 
 class ContentMigrationTests(TransactionTestCase):
     old = [('mobileApp', '0032_remove_category_workbook')]
-    latest = [('mobileApp', '0035_remove_binary_content')]
+    latest = [('mobileApp', '0036_private_plan_drafts_and_edit_grants')]
 
     def setUp(self):
         directory = TemporaryDirectory()

@@ -336,6 +336,8 @@ def on_pdf_plan_saved(sender, instance, created, **kwargs):
 @receiver(post_delete, sender=Plan)
 @receiver(post_delete, sender=PdfPlan)
 def on_plan_deleted(sender, instance, **kwargs):
+    if instance.draft_of_id:
+        return
     if not is_monitor_enabled() or getattr(instance, 'cloud_snapshot', None) or getattr(instance, '_keep_cloud', False):
         return
     kind = 'pdf' if sender is PdfPlan else 'dxf'

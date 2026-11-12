@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from . import pdf_views
 from . import project_views
+from . import plan_permission_views
 from . import motor_views
 from . import piece_views
 from . import button_views
@@ -11,6 +12,8 @@ from . import accounts_views
 from . import pwa
 
 urlpatterns = [
+    path('api/projects/<str:kind>/<int:plan_id>/draft/', plan_permission_views.edit_plan_draft, name='edit_plan_draft'),
+    path('api/projects/<str:kind>/<int:plan_id>/permissions/', plan_permission_views.plan_edit_permissions, name='plan_edit_permissions'),
     path('manifest.webmanifest', pwa.manifest, name='pwa_manifest'),
     path('service-worker.js', pwa.service_worker, name='pwa_service_worker'),
     path('api/projects/<str:kind>/<int:plan_id>/sectors/', sector_views.plan_sectors, name='plan_sectors'),

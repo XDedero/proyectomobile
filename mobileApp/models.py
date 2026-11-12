@@ -88,6 +88,11 @@ class RegistrationRequest(models.Model):
 
 
 class Plan(models.Model):
+    draft_dirty = models.BooleanField(default=False)
+    draft_of = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='drafts')
+    draft_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name='+')
+    draft_version = models.CharField(max_length=64, blank=True)
+    draft_markers = models.JSONField(default=dict, blank=True)
     sectors = models.JSONField(default=list, blank=True)
     display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
@@ -106,6 +111,7 @@ class Plan(models.Model):
 
     class Meta:
         ordering = ['-imported_at']
+        constraints = [models.UniqueConstraint(fields=['draft_of', 'draft_user'], name='unique_cad_private_draft')]
 
 
 class ButtonCategory(models.Model):
@@ -192,6 +198,11 @@ class Motor(ButtonSource):
 
 
 class PdfPlan(models.Model):
+    draft_dirty = models.BooleanField(default=False)
+    draft_of = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='drafts')
+    draft_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name='+')
+    draft_version = models.CharField(max_length=64, blank=True)
+    draft_markers = models.JSONField(default=dict, blank=True)
     sectors = models.JSONField(default=list, blank=True)
     display_settings = models.JSONField(default=dict, blank=True)
     owner_username = models.CharField(max_length=150, blank=True)
@@ -214,6 +225,7 @@ class PdfPlan(models.Model):
 
     class Meta:
         ordering = ['-imported_at']
+        constraints = [models.UniqueConstraint(fields=['draft_of', 'draft_user'], name='unique_pdf_private_draft')]
 
 
 class WorkbookDocument(models.Model):
@@ -317,3 +329,11 @@ class PieceDeletion(models.Model):
     id = models.UUIDField(primary_key=True, editable=False)
     synced = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PlanEditGrant(models.Model):
+    cloud_key = models.CharField(max_length=80)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='plan_edit_grants')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['cloud_key', 'user'], name='unique_plan_edit_grant')]

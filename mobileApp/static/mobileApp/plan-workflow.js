@@ -137,7 +137,10 @@
         if (busy || viewer.moving || !appState.currentPlan?.motors.some(item => item.id === id)) return;
         const alreadySelected = appState.selectedMotorId === id;
         selectMotor(id, center);
-        if (alreadySelected) openSelectedButton();
+        if (window.projectWorkspace?.absolute) {
+            const motor = selectedMotor();
+            if (motor?.excel) showPreview();
+        } else if (alreadySelected) openSelectedButton();
     }
 
     function deselectMotor() {
@@ -178,6 +181,7 @@
     async function openPlan(plan, currentRevision) {
         plan = await window.planVersions.beforeOpen(plan);
         if (!plan || currentRevision !== revision) return false;
+        plan = await window.projectWorkspace.preparePlan(plan);
         const source = await window.relOffline?.planSource(plan).catch(() => null);
         const response = source || await fetch(plan.svg_url, { credentials: 'same-origin' });
         if (!source && !response.ok) throw new Error('No se pudo cargar la vista del plano. Puede volver a abrirlo desde Planos guardados.');
@@ -194,7 +198,6 @@
             updatePlanCardUI();
             throw error;
         }
-        window.projectWorkspace?.keepOnDevice(plan, source);
         remember(plan.id);
         setMode('explore');
         activateProject();
@@ -505,7 +508,7 @@
         removeDeleted(id) {
             let remembered;
             try { remembered = localStorage.getItem(activeKey()); } catch (_) {}
-            if (appState.currentPlan?.id === id) {
+            if (appState.currentPlan?.id === id || appState.currentPlan?.original_plan_id === id) {
                 const documentId = window.workbookEditor?.metadata?.id;
                 const current = appState.currentPlan;
                 if (documentId && (current.workbook?.id === documentId || current.listing?.id === documentId || current.motors.some(motor => motor.excel?.id === documentId))) window.workbookEditor.close(true);
