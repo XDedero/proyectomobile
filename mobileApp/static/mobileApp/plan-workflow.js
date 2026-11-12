@@ -405,7 +405,6 @@
     }
     document.getElementById('btnAddCadMarker').addEventListener('click', () => setMode(placing ? 'explore' : 'add'));
     document.getElementById('btnMoveCadMarker').addEventListener('click', () => setMode(viewer.moving ? 'explore' : 'move'));
-    document.getElementById('btnExploreCad').addEventListener('click', () => setMode('explore'));
     viewer.onMove = async (id, position) => {
         const motor = appState.currentPlan?.motors.find((item) => item.id === id);
         if (!motor || busy || !permissions().can_change_plan) return;

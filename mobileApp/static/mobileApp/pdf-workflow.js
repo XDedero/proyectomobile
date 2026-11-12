@@ -113,7 +113,7 @@
         mode = next;
         viewer.setPlacing(next === 'add');
         viewer.setMoving(next === 'move');
-        for (const [id, value] of [['btnPdfExplore', 'explore'], ['btnPdfAddMarker', 'add'], ['btnPdfMoveMarker', 'move']]) {
+        for (const [id, value] of [['btnPdfAddMarker', 'add'], ['btnPdfMoveMarker', 'move']]) {
             byId(id).classList.toggle('active', value === next);
             byId(id).setAttribute('aria-pressed', String(value === next));
         }
@@ -425,7 +425,6 @@
         finally { setBusy(false); }
     });
     byId('btnPdfClosePlan').addEventListener('click', reset);
-    byId('btnPdfExplore').addEventListener('click', () => setMode('explore'));
     byId('btnPdfAddMarker').addEventListener('click', () => setMode('add'));
     byId('btnPdfMoveMarker').addEventListener('click', () => setMode('move'));
     pageSelect.addEventListener('change', () => { viewer.setPage(Number(pageSelect.value)).catch(showError); });

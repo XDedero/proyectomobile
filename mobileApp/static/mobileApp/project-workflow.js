@@ -31,7 +31,6 @@
         <button type="button" id="btnPlanFullscreenMenu" aria-label="Menú del plano" aria-expanded="false" aria-controls="fullscreenPlanMenu">⋮</button>
         </header>
         <nav id="fullscreenPlanMenu" class="fullscreen-plan-menu" aria-label="Acciones del plano" hidden>
-          <button type="button" data-project-action="explore">Explorar plano</button>
           <button type="button" data-project-action="add">Agregar botón</button>
           <button type="button" data-project-action="move" id="fullscreenMoveMarker">Mover botón</button>
           <button type="button" data-project-action="saved-motors">Importar pieza guardada</button>
