@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
 
+from .file_content import FileContentField
+
 
 def plan_upload_path(instance, filename):
     return f'plans/{uuid4().hex}.dxf'
@@ -218,7 +220,7 @@ class WorkbookDocument(models.Model):
     source_pieces = models.JSONField(default=dict, blank=True)
     plan_mode = models.CharField(max_length=12, blank=True)
     name = models.CharField(max_length=255)
-    content = models.BinaryField()
+    content = FileContentField(extension='xlsx')
     revision = models.PositiveIntegerField(default=1)
     is_motor = models.BooleanField(default=False)
     origin_uuid = models.UUIDField(null=True, blank=True)
@@ -259,7 +261,7 @@ class SavedProject(models.Model):
     cad_plan = models.OneToOneField(Plan, null=True, blank=True, on_delete=models.CASCADE, related_name='saved_project')
     pdf_plan = models.OneToOneField(PdfPlan, null=True, blank=True, on_delete=models.CASCADE, related_name='saved_project')
     name = models.CharField(max_length=255)
-    content = models.BinaryField(default=bytes)
+    content = FileContentField(extension='planproj')
     saved_at = models.DateTimeField(auto_now=True)
     saved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     cloud_status = models.CharField(max_length=16, default='local')

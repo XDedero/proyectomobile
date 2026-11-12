@@ -36,7 +36,11 @@ def open_plan_source(kind, plan):
             return plan.source.open('rb')
         except FileNotFoundError:
             pass
-    saved = SavedProject.objects.filter(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}).values_list('content', flat=True).first()
+    record = SavedProject.objects.filter(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan.pk}).only('content').first()
+    try:
+        saved = record.content if record else b''
+    except OSError:
+        saved = b''
     if saved and len(saved) <= MAX_PROJECT_BYTES:
         try:
             with ZipFile(BytesIO(bytes(saved))) as archive:

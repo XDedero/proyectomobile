@@ -423,9 +423,10 @@ def workbook_save(request, workbook_id):
 @require_GET
 @api_permissions()
 def workbook_download(request, workbook_id):
+    from .file_content import open_content
     document = get_object_or_404(WorkbookDocument, pk=workbook_id)
     response = FileResponse(
-        BytesIO(bytes(document.content)), as_attachment=True, filename=document.name,
+        open_content(document.__dict__['content']), as_attachment=True, filename=document.name,
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     response['X-Reloncavi-Workbook-Revision'] = str(document.revision)

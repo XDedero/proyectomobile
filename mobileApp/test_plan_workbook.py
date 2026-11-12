@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -39,6 +39,36 @@ def source_workbook():
 
 
 class SharedPlanWorkbookTests(TestCase):
+    def test_two_users_share_saved_plans_and_current_excel_in_both_formats(self):
+        reader = Client()
+        reader.force_login(self.other)
+        for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
+            with self.subTest(kind=kind):
+                plan = self.plan(kind)
+                self.imported(plan, as_listing=True)
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+                library = reader.get(reverse('saved_projects'))
+                self.assertEqual(library.status_code, 200)
+                entry = next(row for row in library.json()['plans'] if row['kind'] == kind and row['plan_id'] == plan['id'])
+                self.assertEqual(reader.get(entry['detail_url']).status_code, 200)
+                document = model.objects.get(pk=plan['id']).workbook
+                download_url = reverse('workbook_download', args=[document.pk])
+                response = reader.get(download_url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(b''.join(response.streaming_content), document.content)
+                response.close()
+                revision = document.revision
+                self.assertEqual(self.post(plan['assign_listing_url'], {'action': 'add'}).status_code, 200)
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+                document.refresh_from_db()
+                self.assertGreater(document.revision, revision)
+                response = reader.get(download_url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(b''.join(response.streaming_content), document.content)
+                self.assertEqual(int(response['X-Reloncavi-Workbook-Revision']), document.revision)
+                response.close()
+                self.assertEqual(reader.post(plan['save_project_url'], '{}', content_type='application/json').status_code, 403)
+
     @classmethod
     def setUpTestData(cls):
         cls.admin = get_user_model().objects.create_superuser('shared-admin', password='test')

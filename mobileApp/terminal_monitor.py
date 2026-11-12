@@ -13,6 +13,7 @@ import time
 import sys
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 from zipfile import ZipFile
@@ -35,6 +36,28 @@ from .models import (
     SavedProject,
     WorkbookDocument,
 )
+
+
+@receiver(post_delete, sender=WorkbookDocument)
+@receiver(post_delete, sender=SavedProject)
+def delete_private_content(sender, instance, using, **kwargs):
+    from django.core.files.storage import default_storage
+    name = instance.__dict__.get('content')
+    if not isinstance(name, str) or not name:
+        return
+
+    def remove():
+        # Fixtures or copied records can share a reference. Also respect a
+        # transaction rollback and readers of other still-live records.
+        if any(model.objects.using(using).filter(content=name).exists()
+               for model in (WorkbookDocument, SavedProject)):
+            return
+        try:
+            default_storage.delete(name)
+        except OSError:
+            _log_line('No se pudo retirar un archivo privado sin referencias.')
+
+    transaction.on_commit(remove, using=using)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_FILE = os.path.join(BASE_DIR, 'debug_app.log')
@@ -495,6 +518,8 @@ def _register_workbook_record(rec, wb_pk, wb_revision, wb_plan_mode, wb_is_motor
 
 @receiver(post_save, sender=WorkbookDocument)
 def on_workbook_saved(sender, instance, created, **kwargs):
+    if not is_monitor_enabled():
+        return
     action = 'NUEVO LIBRO EXCEL CREADO' if created else 'CAMBIOS GUARDADOS EN LIBRO EXCEL'
     print_live_event(
         action,
@@ -522,6 +547,8 @@ def on_sheet_saved(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=SavedProject)
 def on_project_saved(sender, instance, created, **kwargs):
+    if not is_monitor_enabled():
+        return
     action = 'PROYECTO GUARDADO EN BIBLIOTECA' if created else 'PROYECTO ACTUALIZADO EN BIBLIOTECA'
     content_bytes = bytes(instance.content) if instance.content else b''
     print_live_event(
@@ -634,7 +661,7 @@ def _verify_saved_registration(kind, manifest, source, content, pdf_id, excel_id
         return False
 
 
-def queue_saved_project_sync(kind, plan, content, saved_at):
+def queue_saved_project_sync(kind, plan, content, saved_at, *, content_reference=None):
     """Publish one immutable save, then record its actual remote outcome."""
     if not is_monitor_enabled():
         return
@@ -651,9 +678,13 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
     title = re.sub(r'\.(pdf|dxf|xlsx|csv)$', '', plan_name, flags=re.IGNORECASE).strip() or 'Plano'
     basename = f'{title[:255 - len(timestamp) - 8].rstrip()} - {timestamp}'
     workbook_args = document.pk, document.revision, document.plan_mode, document.is_motor
+    previous_workbook_version = getattr(plan, 'cloud_workbook_version', '')
+    has_snapshot = bool(getattr(plan, 'cloud_snapshot', None))
     pages = list(plan.pages) if kind == 'pdf' else []
     base_state = capture_base_state(plan, content) if kind == 'pdf' else None
     target = {'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': plan_pk, 'saved_at': saved_at}
+    if content_reference is None:
+        content_reference = SavedProject.objects.filter(**target).values_list('content', flat=True).get()
     SavedProject.objects.filter(**target).update(cloud_status='pending', cloud_error='', cloud_stage='queued', cloud_progress=5)
     queued_at = time.perf_counter()
 
@@ -676,7 +707,10 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
             completed = value
             SavedProject.objects.filter(**target).update(cloud_stage=name, cloud_progress=value)
         try:
-            with ZipFile(BytesIO(content)) as archive:
+            # Queued saves retain only a small immutable reference, not every
+            # multi-megabyte archive or its loaded model instances in RAM.
+            from .file_content import read_content
+            with ZipFile(BytesIO(read_content(content_reference))) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
                 source = archive.read(f'plan/source.{kind}')
                 key = assoc_key
@@ -695,16 +729,22 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                         workbook_options['drive_target'] = {'id': remote['excelId'], 'modifiedTime': remote['date'], 'force': True}
                     else:
                         workbook_options['drive_target'] = {
-                            'missing': True, 'previous_id': plan.cloud_workbook_version.partition(':')[0], 'force': True,
+                            'missing': True, 'previous_id': previous_workbook_version.partition(':')[0], 'force': True,
                         }
                 progress('pdf', 20)
-                pdf = _sync_pdf_plan_worker(plan_pk, plan_name, source, pages, f'{basename}.pdf', key, register=False, **pdf_options) if kind == 'pdf' else None
-                if kind == 'pdf' and not pdf:
-                    raise RuntimeError('No se pudo subir el PDF.')
-                pdf_reused = bool(pdf and pdf.get('action') == 'reused')
-                progress('excel', 50)
-                book = _sync_workbook_worker(*workbook_args, workbook_content, key,
-                    f'{basename}.xlsx', manifest, source, register=False, **workbook_options)
+                # Only the two independent file transfers overlap. SQL, version
+                # checks, receipts and the outer publication queue stay ordered.
+                with ThreadPoolExecutor(max_workers=2, thread_name_prefix='project-upload') as uploads:
+                    pdf_job = uploads.submit(_sync_pdf_plan_worker, plan_pk, plan_name, source, pages,
+                        f'{basename}.pdf', key, register=False, **pdf_options) if kind == 'pdf' else None
+                    book_job = uploads.submit(_sync_workbook_worker, *workbook_args, workbook_content, key,
+                        f'{basename}.xlsx', manifest, source, register=False, **workbook_options)
+                    pdf = pdf_job.result() if pdf_job else None
+                    if kind == 'pdf' and not pdf:
+                        raise RuntimeError('No se pudo subir el PDF.')
+                    pdf_reused = bool(pdf and pdf.get('action') == 'reused')
+                    progress('excel', 50)
+                    book = book_job.result()
                 if not book:
                     raise RuntimeError('No se pudo subir el Excel.')
                 if kind == 'pdf':
@@ -721,7 +761,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                     local = PdfPlan.objects.filter(pk=plan_pk)
                     local.update(cloud_origin=pdf['drive_file_id'], cloud_workbook_version=workbook_version(remote),
                                  owner_username=manifest.get('owner_username', ''), cloud_base_state=base_state)
-                    if plan.cloud_snapshot and not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
+                    if has_snapshot and not PdfPlan.objects.exclude(pk=plan_pk).filter(cloud_snapshot=identity).exists():
                         local.update(cloud_snapshot=identity)
                 sql = _register_pdf_record(pdf, plan_pk, plan_name, source, pages, key, pdf_options.get('drive_target'), sql_only=True) if kind == 'pdf' else ''
                 sql += _register_workbook_record(book, *workbook_args, workbook_content, key,
@@ -738,7 +778,7 @@ def queue_saved_project_sync(kind, plan, content, saved_at):
                 database_ok = run_supabase_sql_sync('Proyecto completo registrado en una transacción', sql, attempts=1)
                 if not database_ok:
                     database_ok = _verify_saved_registration(kind, manifest, source, workbook_content,
-                        pdf['drive_file_id'] if pdf else '', book['drive_file_id'], key, document.revision, f'{basename}.xlsx')
+                        pdf['drive_file_id'] if pdf else '', book['drive_file_id'], key, workbook_args[1], f'{basename}.xlsx')
                 state = 'synced' if database_ok else 'uploaded'
                 error = ''
                 if database_ok and kind == 'pdf' and (pair := drive_pair_version(remote)):

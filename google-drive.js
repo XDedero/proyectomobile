@@ -78,7 +78,15 @@ const GoogleDriveAuth = {
                     existing = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
                 }
                 const updated = Object.assign({}, existing, tokenData);
-                fs.writeFileSync(tokenPath, JSON.stringify(updated, null, 2), 'utf8');
+                // Readers in concurrent PDF/XLSX upload processes must always
+                // see a complete JSON document, including during token refresh.
+                const temporary = `${tokenPath}.${process.pid}.${require('crypto').randomUUID()}.tmp`;
+                try {
+                    fs.writeFileSync(temporary, JSON.stringify(updated, null, 2), { encoding: 'utf8', mode: 0o600 });
+                    fs.renameSync(temporary, tokenPath);
+                } finally {
+                    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+                }
             } catch (_) {}
         }
     },

@@ -345,7 +345,8 @@ def save_project(request, kind, plan_id):
                 **{'pdf_plan' if kind == 'pdf' else 'cad_plan': plan},
                 defaults={'name': plan.name, 'content': content, 'saved_by': request.user},
             )
-            queue_saved_project_sync(kind, plan, content, saved.saved_at)
+            queue_saved_project_sync(kind, plan, content, saved.saved_at,
+                                     content_reference=saved.__dict__['content'])
     except (ValidationError, OSError, CloudUnavailable) as exc:
         return error_response(exc)
     saved.refresh_from_db(fields=['cloud_status', 'cloud_error', 'cloud_stage', 'cloud_progress'])
@@ -380,11 +381,13 @@ def download_saved_project(request, saved_id):
     if not can_access_plan(request.user, plan) or not can_access_plan(request.user, plan, 'can_export'):
         return error_response('Su rol no permite exportar este plano.', 403)
     try:
-        content = bytes(saved.content)
-        if not content:
-            kind = 'pdf' if saved.pdf_plan_id else 'dxf'
-            content = export_project(kind, saved.pdf_plan if saved.pdf_plan_id else saved.cad_plan)
-        return project_file(content, saved.name)
+        reference = saved.__dict__['content']
+        if reference:
+            from .file_content import open_content
+            return FileResponse(open_content(reference), as_attachment=True,
+                                filename=Path(saved.name).stem + '.planproj', content_type='application/zip')
+        kind = 'pdf' if saved.pdf_plan_id else 'dxf'
+        return project_file(export_project(kind, plan), saved.name)
     except (ValidationError, OSError) as exc:
         return error_response(exc)
 

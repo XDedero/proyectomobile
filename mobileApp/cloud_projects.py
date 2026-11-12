@@ -250,13 +250,15 @@ def saved_manifest(project, source, content):
     if not key:
         return None
     saved = SavedProject.objects.filter(pdf_plan__cloud_key=key).only('content').first()
-    if not saved or not saved.content:
+    if not saved:
         return None
     try:
+        if not saved.content:
+            return None
         with ZipFile(BytesIO(saved.content)) as archive:
             if archive.read('plan/source.pdf') == source and archive.read('workbooks/w1.xlsx') == content:
                 return json.loads(archive.read('manifest.json'))
-    except (BadZipFile, KeyError, ValueError):
+    except (BadZipFile, KeyError, ValueError, OSError, CloudUnavailable):
         pass
     return None
 

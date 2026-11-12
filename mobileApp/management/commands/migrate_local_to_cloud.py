@@ -59,9 +59,11 @@ def local_original(record, field, media, source_alias):
     kind = {'mobileapp.pdfplan': 'pdf', 'mobileapp.plan': 'dxf'}.get(record['model'].lower())
     if kind:
         saved_model = apps.get_model('mobileApp', 'SavedProject')
-        content = saved_model.objects.using(source_alias).filter(
+        saved = saved_model.objects.using(source_alias).filter(
             **{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': record['pk']}
-        ).values_list('content', flat=True).first()
+        ).only('content').first()
+        content = local_original({'model': 'mobileapp.savedproject', 'pk': saved.pk, 'content': saved.__dict__['content']},
+                                 'content', media, source_alias) if saved and saved.__dict__['content'] else b''
         if content:
             try:
                 with ZipFile(BytesIO(bytes(content))) as archive:
@@ -84,6 +86,7 @@ def copy_installation(source_alias, media, storage):
     payload = json.loads(serializers.serialize('json', objects, use_natural_foreign_keys=True))
     # Serializer model labels are lowercase, including the legacy mixed-case app label.
     file_fields = {'mobileApp.plan': 'source', 'mobileApp.pdfplan': 'source', 'mobileApp.motor': 'excel'}
+    file_fields.update({'mobileApp.workbookdocument': 'content', 'mobileApp.savedproject': 'content'})
     file_fields.update({name.lower(): value for name, value in list(file_fields.items())})
     uploads = []
     memo = {}

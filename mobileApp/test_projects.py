@@ -563,10 +563,12 @@ class ProjectTests(TestCase):
         observed = []
         def stage(name, percent, record):
             def run(*args, **kwargs):
-                saved = SavedProject.objects.get(pdf_plan_id=plan['id'])
-                observed.append(saved.cloud_stage)
-                self.assertEqual((saved.cloud_status, saved.cloud_stage, saved.cloud_progress), ('uploaded' if name == 'database' else 'pending', name, percent))
+                # File transfers now run in independent threads without ORM
+                # access; database acknowledgement still runs in the publisher.
+                observed.append(name)
                 if name == 'database':
+                    saved = SavedProject.objects.get(pdf_plan_id=plan['id'])
+                    self.assertEqual((saved.cloud_status, saved.cloud_stage, saved.cloud_progress), ('uploaded', name, percent))
                     self.assertIn(f"association_key = '{saved.pdf_plan.cloud_key}'", args[1])
                     self.assertNotIn("'excelRevision'", args[1])
                 return record
@@ -587,7 +589,8 @@ class ProjectTests(TestCase):
             queue.call_args.args[0]()
             state = self.client.get(reverse('saved_projects')).json()['plans'][0]
             self.assertEqual((state['cloud_status'], state['cloud_stage'], state['cloud_progress']), ('synced','done',100))
-            self.assertEqual(observed, ['pdf','excel','database'])
+            self.assertCountEqual(observed[:2], ['pdf', 'excel'])
+            self.assertEqual(observed[2:], ['database'])
             project = PdfPlan.objects.get(pk=plan['id'])
             self.assertEqual(project.cloud_base_state['drive_pair'], [project.cloud_key, 'pdf1', '3', 'xlsx1', '9'])
 

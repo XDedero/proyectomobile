@@ -166,6 +166,9 @@ STORAGES = {
 
 MEDIA_ROOT = APP_DATA_DIR / 'media'
 MEDIA_URL = '/media/'
+# Private Drive originals are immutable; this disposable cache avoids repeatedly
+# downloading the same XLSX/PDF without keeping large files in Python globals.
+PLANOS_FILE_CACHE_BYTES = int(os.environ.get('PLANOS_FILE_CACHE_BYTES', 128 * 1024 * 1024))
 
 # Nombre de bloque buscado, sin distinguir mayúsculas y minúsculas.
 DXF_MOTOR_KEYWORD = 'MOTOR'

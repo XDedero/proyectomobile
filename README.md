@@ -55,6 +55,13 @@ Los mensajes del visor distinguen un PDF inaccesible, una sesión sin acceso, un
 
 ## Guardar y abrir
 
+Los Excel y los proyectos guardados se almacenan como archivos privados; la base
+de datos conserva sus referencias. En modo nube se utiliza Drive y en modo local
+se utiliza `media/`. Las instalaciones existentes necesitan aplicar las
+migraciones `0033`–`0035` con las escrituras detenidas. Consulte el
+[análisis de rendimiento y procedimiento de migración](docs/rendimiento-archivos.md)
+para respaldos, compatibilidad y límites de las optimizaciones.
+
 **Añadir botón** reúne la categoría, el nombre opcional, las descripciones, el color y el origen de la ficha Excel en un único modal sobre el plano. Permite usar un formato vacío, importar Excel/CSV, vincular una hoja del plano o elegir una pieza guardada. Después de confirmar, se toca la ubicación del botón.
 
 **Opacidad** es el único control de visualización junto al plano: la barra y su porcentaje permiten atenuar los botones y sectores, hasta ocultarlos por completo al 0 %. Está disponible también para lectores. Su valor solo afecta al visor abierto; se reinicia al 100 % al volver a abrirlo y no se guarda en el plano, los proyectos exportados ni la nube. Las preferencias de visualización de versiones anteriores se descartan mediante la migración `0026`.
