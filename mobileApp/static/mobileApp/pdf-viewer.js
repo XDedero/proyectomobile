@@ -7,6 +7,7 @@ class PdfPlanViewer {
         this.pendingMarker = null;
         this.buttons = new Map();
         this.pointers = new Map();
+        this.interactionNeedsRender = false;
         this.version = 0;
         this.pageVersion = 0;
         this.renderVersion = 0;
@@ -570,6 +571,7 @@ class PdfPlanViewer {
     pointerDown(event) {
         if (!this.page || event.button !== 0) return;
         event.preventDefault();
+        if (!this.pointers.size) this.interactionNeedsRender = false;
         const button = event.target.closest('[data-pdf-marker-id]');
         if (button) button.focus({ preventScroll: true });
         else this.container.focus({ preventScroll: true });
@@ -592,6 +594,7 @@ class PdfPlanViewer {
         }
         this.container.classList.add('dragging-pdf');
         if (!this.overviewPromise && this.renderTask) {
+            this.interactionNeedsRender = true;
             this.renderVersion += 1;
             this.cancelRender();
         }
@@ -619,6 +622,7 @@ class PdfPlanViewer {
         });
         const before = center(previous);
         const after = center(current);
+        this.interactionNeedsRender = true;
         this.container.scrollLeft -= after.x - before.x;
         this.container.scrollTop -= after.y - before.y;
         if (current.length === 2) {
@@ -650,7 +654,8 @@ class PdfPlanViewer {
         if (!this.pointers.size) {
             this.gesture = false;
             this.container.classList.remove('dragging-pdf');
-            this.scheduleRender();
+            if (this.interactionNeedsRender) this.scheduleRender();
+            this.interactionNeedsRender = false;
         }
     }
 
