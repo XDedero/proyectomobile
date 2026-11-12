@@ -111,7 +111,6 @@ class Plan(models.Model):
 
     class Meta:
         ordering = ['-imported_at']
-        constraints = [models.UniqueConstraint(fields=['draft_of', 'draft_user'], name='unique_cad_private_draft')]
 
 
 class ButtonCategory(models.Model):
@@ -225,7 +224,6 @@ class PdfPlan(models.Model):
 
     class Meta:
         ordering = ['-imported_at']
-        constraints = [models.UniqueConstraint(fields=['draft_of', 'draft_user'], name='unique_pdf_private_draft')]
 
 
 class WorkbookDocument(models.Model):

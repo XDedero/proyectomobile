@@ -61,7 +61,47 @@
             tx.objectStore('reads').delete(key);tx.objectStore('readinfo').delete(key);
         });
     }
-    const ready=get('meta','session').then(row=>{account=row?.user||null;}).catch(()=>{});
+    async function purgeTransientCaches(owner) {
+        if(!owner) return;
+        const paths=new Set(), obsolete=[];
+        function include(plan) {
+            for(const url of [plan.detail_url,plan.source_url,plan.svg_url,plan.sectors_url,plan.version_url,
+                ...[plan.workbook,...(plan.markers||plan.motors||[]).map(row=>row.workbook||row.excel)]
+                    .filter(Boolean).flatMap(book=>[book.metadata_url,book.cells_url,book.download_url])]) {
+                if(url) paths.add(new URL(url,location.href).pathname);
+            }
+        }
+        for(const copy of await all('downloads')) if(copy.user===owner) {
+            const file=await downloadedFile(owner,copy.detail_url);
+            const data=file?await file.body.text().then(JSON.parse).catch(()=>null):null;
+            if(data?.is_draft) {include(data);obsolete.push(copy);}
+        }
+        const reads=(await all('readinfo')).filter(row=>row.key.startsWith(owner+'|'));
+        for(const row of reads) {
+            const path=new URL(row.key.slice(String(owner).length+1)).pathname;
+            if(!/^\/api\/(?:pdf\/)?plans\/\d+\/$/.test(path)) continue;
+            const cached=await get('reads',row.key);
+            const data=cached?await Promise.resolve().then(()=>JSON.parse(new TextDecoder().decode(cached.body))).catch(()=>null):null;
+            if(data?.is_draft) include(data);
+        }
+        if(!paths.size&&!obsolete.length) return;
+        await updateStores(['reads','readinfo','downloads','downloadFiles'],tx=>{
+            for(const row of reads) {
+                const path=new URL(row.key.slice(String(owner).length+1)).pathname;
+                if([...paths].some(prefix=>path===prefix||(prefix.endsWith('/')&&path.startsWith(prefix)))) {
+                    tx.objectStore('reads').delete(row.key);tx.objectStore('readinfo').delete(row.key);
+                }
+            }
+            for(const copy of obsolete) {
+                tx.objectStore('downloads').delete(copy.key);
+                for(const url of copy.urls) tx.objectStore('downloadFiles').delete(copy.key+'|'+url);
+            }
+        });
+    }
+    const ready=get('meta','session').then(async row=>{
+        account=row?.user||null;
+        await purgeTransientCaches(account?.id);
+    }).catch(()=>{});
     channel?.addEventListener('message',event=>{
         if(event.data==='downloads') window.dispatchEvent(new Event('pwa-downloads-changed'));
         else get('meta','session').then(row=>{account=row?.user||null;emit();}).catch(()=>{});
@@ -77,7 +117,15 @@
         const owner=account?.id;
         if(!owner) return [];
         const rows=await storage('downloads','readonly',store=>store.index('user').getAll(owner));
-        return account?.id===owner?rows:[];
+        // Older releases downloaded private editing copies. They must not be
+        // presented as saved drawings or revive buttons that were never saved.
+        const published=[];
+        for(const row of rows) {
+            const detail=await downloadedFile(owner,row.detail_url);
+            const data=detail?await detail.body.text().then(JSON.parse).catch(()=>null):null;
+            if(data && !data.is_draft && !data.has_pending_changes) published.push(row);
+        }
+        return account?.id===owner?published:[];
     }
     async function writeDownload(plan,files) {
         await updateStores(['meta','downloads','downloadFiles'],(tx,abort)=>{
@@ -165,7 +213,8 @@
         emit();
     }
     async function remember(url,response,owner) {
-        if(!account||account.id!==owner||!response.ok||response.status===206) return;
+        if(!account||account.id!==owner||!response.ok||response.status===206||response.headers.get('X-Reloncavi-Transient')==='1') return;
+        if(/^\/api\/(?:pdf\/)?plans\/\d+\/$/.test(new URL(url).pathname) && (await response.clone().json()).is_draft) return;
         const body=await response.clone().arrayBuffer();
         if(body.byteLength>maxFile) return;
         // Inspect only lightweight metadata; never load every PDF to cache one cell tile.
@@ -191,15 +240,15 @@
         const workbookMetadata=/^\/api\/pdf\/workbooks\/\d+\/metadata\/$/.test(url.pathname);
         if(planDetail || workbookMetadata) {
             const data=await response.clone().json();
-            // Older offline copies can still be read, but need an online refresh before editing.
-            if(planDetail && data.permissions && !('can_copy_button' in data.permissions)) {
-                for(const key of Object.keys(data.permissions)) {
-                    if(!['can_view','can_import','can_create','can_administer','can_create_category','can_history'].includes(key)) data.permissions[key]=false;
+            if(data.is_draft) return null;
+            if(planDetail) {
+                // Offline copies are confirmed snapshots, never editing sessions.
+                data.permissions={...data.permissions};
+                for(const key of new Set([...Object.keys(data.permissions),'can_assign','can_change_excel','can_save_plan','can_save_pdf_plan','can_copy_button'])) {
+                    if(key.startsWith('can_') && !['can_view','can_export'].includes(key)) data.permissions[key]=false;
                 }
                 response=offlineResponse(data);
-            } else if(workbookMetadata && !('can_export' in data)) {
-                response=offlineResponse({...data,can_edit:false,can_export:false});
-            }
+            } else response=offlineResponse({...data,can_edit:false,can_export:data.can_export===true});
         }
         return overlay(url,response);
     }
@@ -287,6 +336,12 @@
     function transportFailure(error) {return error instanceof TypeError||error.name==='NetworkError'||!navigator.onLine||(disconnected&&!error.status);}
     const enqueue=(...args)=>navigator.locks?navigator.locks.request('reloncavi-outbox',()=>queue(...args)):queue(...args);
     async function sectorRequest(context,body,send) {
+        if(context.plan.is_draft) {
+            try {return await send();} catch(error) {
+                if(!transportFailure(error)) throw error;
+                throw new Error('Se requiere conexión para editar el plano. No se guardó ninguna copia local de estos cambios.');
+            }
+        }
         const rows=await pending();
         const alreadyQueued=rows.some(row=>row.url===context.plan.sectors_url && row.kind==='sector');
         if(!alreadyQueued) {
@@ -300,6 +355,12 @@
         return {sectors,offline_pending:true};
     }
     async function workbookRequest(metadata,body,send) {
+        if(metadata.is_draft) {
+            try {return await send();} catch(error) {
+                if(!transportFailure(error)) throw error;
+                throw new Error('Se requiere conexión para editar este Excel. Sus cambios siguen abiertos; el plano se confirma con Guardar plano.');
+            }
+        }
         const url=metadata.save_url||`/api/pdf/workbooks/${metadata.id}/save/`;
         const rows=await pending();
         if(!rows.some(row=>row.url===url)) {
@@ -455,7 +516,7 @@
     }
 
     async function keepPlan(plan,sourceBody) {
-        if(!savedPlan(plan)||!navigator.onLine||disconnected) return;
+        if(plan.is_draft||plan.has_pending_changes||plan._projectDirty||!savedPlan(plan)||!navigator.onLine||disconnected) return;
         const owner=appState.user?.id;
         const detail=JSON.parse(JSON.stringify(plan));
         await ready;

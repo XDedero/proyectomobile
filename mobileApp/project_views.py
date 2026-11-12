@@ -47,6 +47,7 @@ def project_plan_data(kind, plan):
         'has_pending_changes': plan.draft_dirty,
         'draft_stale': bool(plan.draft_of_id and plan.draft_version != (saved.saved_at.isoformat() if saved else '')),
         'original_plan_id': original.pk,
+        'published_detail_url': reverse('detail_pdf' if kind == 'pdf' else 'plan_detail', args=[original.pk]),
         'draft_url': reverse('edit_plan_draft', args=[kind, original.pk]),
         'permissions_url': reverse('plan_edit_permissions', args=[kind, original.pk]),
         'delete_url': reverse('delete_pdf_plan' if kind == 'pdf' else 'delete_plan', args=[original.pk]),
@@ -382,6 +383,10 @@ def save_project(request, kind, plan_id):
         from .views import plan_data
         shown = working or plan
         result['plan'] = pdf_data(shown) if kind == 'pdf' else plan_data(shown, detail=True)
+    # Offline storage receives the actual published object, never the working
+    # copy that will immediately accept new (unsaved) buttons and workbook edits.
+    if working:
+        result['published_plan'] = pdf_data(plan) if kind == 'pdf' else plan_data(plan, detail=True)
     response = JsonResponse(result)
     response['Server-Timing'] = f'save-prepare;dur={(perf_counter() - started) * 1000:.1f}'
     return response

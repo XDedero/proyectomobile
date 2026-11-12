@@ -198,7 +198,7 @@
             updatePlanCardUI();
             throw error;
         }
-        remember(plan.id);
+        remember(plan.original_plan_id || plan.id);
         setMode('explore');
         activateProject();
         status.textContent = plan.motors.length ? 'Pulse un motor para seleccionarlo y vuelva a pulsarlo para abrir su ficha.' : 'Plano listo. Puede desplazarse y ampliar el dibujo.';

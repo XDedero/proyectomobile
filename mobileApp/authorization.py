@@ -210,6 +210,8 @@ def api_permissions(*permissions):
             if permissions and plan is None and not request.user.has_perms(permissions):
                 return JsonResponse({'error': 'No tiene permisos para realizar esta acción.'}, status=403)
             response = view(request, *args, **kwargs)
+            if (plan is not None and plan.draft_of_id) or any(p.draft_of_id for p in plans) or view.__name__ == 'edit_plan_draft':
+                response['X-Reloncavi-Transient'] = '1'
             if mutation and response.status_code < 300 and view.__name__ not in ('save_project', 'edit_plan_draft', 'plan_edit_permissions', 'refresh_project'):
                 for changed_plan in ([plan] if plan is not None else plans):
                     if changed_plan.draft_of_id:

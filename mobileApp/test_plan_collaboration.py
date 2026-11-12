@@ -99,6 +99,52 @@ class PlanCollaborationTests(TestCase):
         self.assertEqual(self.client.get(reverse('saved_projects')).json()['plans'], [])
         self.assertEqual(self.client.get(reverse('list_pdf_plans')).json()['plans'][0]['id'], original['id'])
 
+    def test_worker_reopening_never_resumes_buttons_without_explicit_save(self):
+        for kind, related in [('pdf', 'markers'), ('dxf', 'motors')]:
+            with self.subTest(kind=kind):
+                original = self.original(kind)
+                self.assertFalse(self.other.get(original['detail_url']).json()['permissions']['can_save_plan'])
+                self.grant(original, [self.worker.pk])
+                first = self.draft(original, self.other)
+                baseline = len(first[related])
+                value = {'page': 1, 'x': .25, 'y': .35, 'label': 'Never saved'} if kind == 'pdf' else {'svg_x': 30, 'svg_y': 30, 'name': 'Never saved'}
+                self.assertEqual(self.post(first['markers_url'], value, self.other).status_code, 201)
+                # A new opening, even with the old private URL, must not resume it.
+                second = self.draft(original, self.other)
+                stale_url = reverse('edit_plan_draft', args=[kind, first['id']])
+                third = self.post(stale_url, client=self.other).json()['plan']
+                self.assertEqual(len(second[related]), baseline)
+                self.assertEqual(len(third[related]), baseline)
+                self.assertNotEqual(first['id'], second['id'])
+                # A second tab must not delete the first tab's still-open session.
+                self.assertEqual(len(self.other.get(first['detail_url']).json()[related]), baseline + 1)
+                value['label' if kind == 'pdf' else 'name'] = 'Explicitly saved'
+                self.assertEqual(self.post(second['markers_url'], value, self.other).status_code, 201)
+                result = self.post(second['save_project_url'], client=self.other)
+                self.assertEqual(result.status_code, 200, result.content[:500])
+                published = result.json()['published_plan']
+                self.assertFalse(published['is_draft'])
+                self.assertEqual(published['id'], original['id'])
+                latest = self.draft(original, self.other)
+                names = [row.get('label', row.get('name')) for row in latest[related]]
+                self.assertIn('Explicitly saved', names)
+                self.assertNotIn('Never saved', names)
+                self.assertEqual(self.post(first['save_project_url'], client=self.other).status_code, 409)
+                self.grant(original, [])
+                self.assertFalse(self.other.get(original['detail_url']).json()['permissions']['can_save_plan'])
+                self.assertEqual(self.post(latest['save_project_url'], client=self.other).status_code, 403)
+
+    def test_private_plan_and_workbook_responses_are_marked_as_transient(self):
+        original = self.original('pdf')
+        self.assertNotIn('X-Reloncavi-Transient', self.client.get(original['detail_url']))
+        draft = self.draft(original)
+        for url in (draft['detail_url'], draft['source_url'], draft['workbook']['metadata_url']):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['X-Reloncavi-Transient'], '1')
+            response.close()
+        self.assertTrue(self.client.get(draft['workbook']['metadata_url']).json()['is_draft'])
+
     def test_draft_exports_do_not_publish_and_recover_a_missing_original(self):
         original = self.original('pdf')
         snapshot = SavedProject.objects.get(pdf_plan_id=original['id'])

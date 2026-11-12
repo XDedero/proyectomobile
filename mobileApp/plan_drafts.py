@@ -70,12 +70,10 @@ def copy_markers(source, destination, documents, previous=None):
 @transaction.atomic
 def working_copy(original, user):
     if original.draft_of_id:
-        return original
-    # Lock the parent to serialize first-open requests for the same user/plan.
+        original = original.draft_of
+    # Every opening gets a fresh editing session from the published drawing.
+    # Never resume a previous session's unsaved buttons, even for the same user.
     original = type(original).objects.select_for_update().get(pk=original.pk)
-    existing = original.drafts.filter(draft_user=user).first()
-    if existing:
-        return existing
     excluded = {'id', 'cloud_key', 'cloud_snapshot', 'imported_at', 'workbook', 'listing',
                 'draft_of', 'draft_user', 'draft_version', 'draft_markers', 'draft_dirty'}
     values = {f.attname: deepcopy(getattr(original, f.attname)) for f in original._meta.concrete_fields

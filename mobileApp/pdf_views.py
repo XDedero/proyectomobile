@@ -46,6 +46,7 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
     snapshot = bool(user is not None and SavedMotor.objects.filter(workbook_id=document.pk).exists())
     result = {
         'id': document.pk, 'name': document.name, 'revision': document.revision,
+        'is_draft': any(plan.draft_of_id for plan in plans),
         'metadata_url': reverse('workbook_metadata', args=[document.pk]),
         'cells_url': reverse('workbook_cells', args=[document.pk]),
         'save_url': reverse('workbook_save', args=[document.pk]),

@@ -150,7 +150,10 @@
     }
     function rights(kind = active?.kind, plan = null) { return plan?.permissions || (active && active.kind === kind ? active.plan.permissions : null) || {}; }
     function canMove() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_change_pdf_plan' : 'can_change_plan']); }
-    function canSave(kind = active?.kind) { return Boolean(rights(kind)[kind === 'pdf' ? 'can_save_pdf_plan' : 'can_save_plan']); }
+    function canSave(kind = active?.kind) {
+        const permissions = rights(kind);
+        return active?.kind === kind && active.plan.is_draft === true && permissions.can_assign === true && permissions[kind === 'pdf' ? 'can_save_pdf_plan' : 'can_save_plan'] === true && !window.relOffline?.offline;
+    }
     function canDelete(kind = active?.kind, plan = null) { return Boolean(rights(kind, plan)[kind === 'pdf' ? 'can_delete_pdf_plan' : 'can_delete_plan'] || appState.user?.permissions?.can_administer); }
     function canDeleteMarker() { return Boolean(rights()[active?.kind === 'pdf' ? 'can_delete_pdf_marker' : 'can_delete_cad_marker']); }
     function isBusy() { return saving || deleting || active?.plan.cloud_status === 'pending' || Boolean(active?.isBusy?.()); }
@@ -262,7 +265,7 @@
             current.plan._projectDirty = false;
             if (window.relOffline) {
                 const user = appState.user?.id;
-                (data.plan ? Promise.resolve(data.plan) : request(current.plan.detail_url))
+                (data.published_plan ? Promise.resolve(data.published_plan) : request(current.plan.published_detail_url || current.plan.detail_url))
                     .then(plan => { if (appState.user?.id === user) keepOnDevice(plan); }).catch(() => {});
             }
             if (active === current) status(data.saved.cloud_error || cloudMessages[data.saved.cloud_status] || cloudMessages.local, data.saved.cloud_status === 'error');
@@ -454,12 +457,15 @@
     document.addEventListener('keydown', showAbsoluteBack);
 
     async function preparePlan(plan) {
-        if (!plan?.draft_url || !plan.permissions?.can_assign || window.relOffline?.offline) return plan;
-        let result = plan.is_draft ? plan : (await post(plan.draft_url)).plan;
-        if (result.draft_stale && await window.confirmAppAction('Versión más reciente',
-            'Otro usuario guardó este plano. ¿Descartar tu borrador privado y abrir la versión más reciente? Cancelar conserva tu borrador.', 'Abrir versión reciente')) {
-            result = (await post(plan.draft_url, {discard: true})).plan;
-        }
+        if (!plan) return plan;
+        // Reopening the current session to refresh an assignment keeps its edits.
+        // Every other opening (including reload/local restoration) starts from
+        // the published object. Never revive an old server-side working copy.
+        const current = plan.kind === 'pdf' ? window.pdfWorkflow?.currentPlan : window.planWorkflow?.currentPlan;
+        if (plan.is_draft && current?.id === plan.id) return plan;
+        if (plan.is_draft) plan = await request(plan.published_detail_url || `/api/${plan.kind === 'pdf' ? 'pdf/' : ''}plans/${plan.original_plan_id}/`);
+        if (!plan.draft_url || !plan.permissions?.can_assign || window.relOffline?.offline) return plan;
+        const result = (await post(plan.draft_url)).plan;
         result._projectDirty = Boolean(result.has_pending_changes);
         return result;
     }
@@ -555,7 +561,7 @@
         if (ownHistory) parameters.set('mine', '1');
         if (statusOnly) parameters.set('status', '1');
         for (const [kind, workflow] of [['pdf', window.pdfWorkflow], ['dxf', window.planWorkflow]]) {
-            if (workflow?.currentPlan) parameters.set(kind, workflow.currentPlan.id);
+            if (workflow?.currentPlan) parameters.set(kind, workflow.currentPlan.original_plan_id || workflow.currentPlan.id);
         }
         const container = byId('savedPlansContainer');
         if (!quiet) {
@@ -570,7 +576,7 @@
             for (const [kind, state] of Object.entries(data.availability || {})) {
                 if (state.exists !== false || isBusy()) continue;
                 const workflow = kind === 'pdf' ? window.pdfWorkflow : window.planWorkflow;
-                if (workflow?.currentPlan?.id !== state.id) continue;
+                if ((workflow?.currentPlan?.original_plan_id || workflow?.currentPlan?.id) !== state.id) continue;
                 workflow.removeDeleted(state.id);
                 window.planExcel?.reset();
                 status('Este plano fue eliminado de la aplicación.', false, kind);
@@ -578,10 +584,22 @@
             if (!statusOnly) byId('savedCountBadge').textContent = data.plans.length;
             const currentSaved = data.plans.find(saved => saved.kind === active?.kind && saved.plan_id === (active?.plan.original_plan_id || active?.plan.id));
             if (currentSaved && !saving && (!active.plan.saved_at || Date.parse(currentSaved.date) >= Date.parse(active.plan.saved_at))) {
+                const current = active;
+                const granted = !current.plan.permissions?.can_assign && currentSaved.permissions?.can_assign;
+                if (currentSaved.permissions) {
+                    current.plan.permissions = {...currentSaved.permissions};
+                    if (granted && !current.plan.is_draft) {
+                        for (const key of ['can_assign', 'can_save_plan', 'can_save_pdf_plan', 'can_change_plan', 'can_change_pdf_plan']) current.plan.permissions[key] = false;
+                    }
+                }
                 if (!active.plan.saved_at || Date.parse(currentSaved.date) > Date.parse(active.plan.saved_at)) active.plan._saveRequestError = '';
                 applyCloudState(active.plan, currentSaved);
                 if (!active.plan._projectDirty && !active.plan._saveRequestError) status(currentSaved.cloud_error || cloudMessages[currentSaved.cloud_status] || cloudMessages.local, currentSaved.cloud_status === 'error');
                 update();
+                if (granted && !current.plan.is_draft && !isBusy() && !window.workbookEditor?.visible) {
+                    const published = await request(current.plan.published_detail_url || current.plan.detail_url);
+                    if (active === current) await openPlan(current.kind, published);
+                }
             }
             if (statusOnly || (quiet && !byId('modalSavedPlans').classList.contains('show'))) return;
             localRows = [...data.plans, ...(data.cached || [])];
@@ -700,6 +718,7 @@
         }
     }
     function keepOnDevice(plan, source) {
+        if (plan.is_draft || plan.has_pending_changes || plan._projectDirty) return;
         window.relOffline?.keepPlan(plan, source).catch(error => {
             if (active?.plan.kind === plan.kind && active.plan.id === plan.id && !active.plan._projectDirty) {
                 status(`No se pudo conservar una copia en este dispositivo. ${error.message}`, true, plan.kind);
