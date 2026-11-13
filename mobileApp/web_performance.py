@@ -1,7 +1,7 @@
 """Reduce transfer size without buffering downloads or caching private APIs."""
-from django.http import JsonResponse
+from django.http import HttpResponse
 from django.middleware.gzip import GZipMiddleware
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_http_methods
 
 
 class CompressTextMiddleware(GZipMiddleware):
@@ -15,6 +15,6 @@ class CompressTextMiddleware(GZipMiddleware):
         return super().process_response(request, response)
 
 
-@require_GET
+@require_http_methods(['GET', 'HEAD'])
 def health(request):
-    return JsonResponse({'status': 'ok'})
+    return HttpResponse(status=204)
