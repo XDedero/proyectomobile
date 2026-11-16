@@ -173,13 +173,11 @@
         }
         const editable = Boolean(rights().can_assign);
         byId('fullscreenAddMarker').hidden = !editable;
-        if (byId('fullscreenManageWorkbook')) byId('fullscreenManageWorkbook').hidden = !editable;
         fullMenu.querySelector('[data-project-action="export"]').hidden = rights().can_export === false;
         for (const action of ['add', 'saved-motors', 'assign-listing']) fullMenu.querySelector(`[data-project-action="${action}"]`).hidden = !editable;
         for (const prefix of ['Pdf', 'Cad']) {
             const kind = prefix === 'Pdf' ? 'pdf' : 'dxf';
             byId(`btn${prefix}AssignListing`).hidden = !rights(kind).can_assign;
-            if (byId(`btn${prefix}Workbook`)) byId(`btn${prefix}Workbook`).hidden = !rights(kind).can_assign;
             byId(`btn${prefix}ExportProject`).hidden = rights(kind).can_export === false;
         }
         byId('fullscreenSavePlan').hidden = byId('fullscreenSaveMenu').hidden = !active || !canSave();

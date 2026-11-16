@@ -401,6 +401,113 @@ class SharedPlanWorkbookTests(TestCase):
         self.assertEqual([sheet['name'] for sheet in response.json()['sheets']], ['Listado', 'Listado motores 2'])
         self.assertEqual(self.post(plan['assign_listing_url'], {'workbook_id': result['workbook']['id']}).status_code, 400)
 
+    def test_renamed_listings_survive_save_and_project_roundtrip_in_both_formats(self):
+        for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
+            with self.subTest(kind=kind):
+                plan = self.plan(kind)
+                self.imported(plan, as_listing=True)
+                state = self.post(plan['assign_listing_url'], {'action': 'add'}).json()
+                names = ['Tableros eléctricos', "Equipos d'Ochoa"]
+                records = state['listings']
+                document = model.objects.get(pk=plan['id']).workbook
+                revision = document.revision
+                for record, name in zip(records, names):
+                    response = self.post(plan['assign_listing_url'], {
+                        'action': 'rename', 'listing_id': record['id'], 'name': name,
+                    })
+                    self.assertEqual(response.status_code, 200, response.content[:500])
+                state = response.json()
+                self.assertEqual([row['name'] for row in state['listings']], names)
+                self.assertEqual([row['id'] for row in state['listings']], [row['id'] for row in records])
+                self.assertEqual([row['is_primary'] for row in state['listings']], [True, False])
+                metadata = self.client.get(state['listing']['metadata_url']).json()
+                self.assertEqual([sheet['name'] for sheet in metadata['sheets']], names)
+                document.refresh_from_db()
+                self.assertEqual(document.revision, revision + 2)
+                self.assertEqual(self.post(plan['save_project_url']).status_code, 200)
+                saved = self.client.get(plan['detail_url']).json()
+                self.assertEqual([row['name'] for row in saved['listings']], names)
+                exported = self.client.get(plan['export_project_url'])
+                archive_bytes = b''.join(exported.streaming_content)
+                exported.close()
+                restored = self.client.post(reverse('upload_project'), {
+                    'file': SimpleUploadedFile('Nombres.planproj', archive_bytes),
+                })
+                self.assertEqual(restored.status_code, 201, restored.content[:500])
+                self.assertEqual([row['name'] for row in restored.json()['plan']['listings']], names)
+                document.refresh_from_db()
+                book = load_workbook(BytesIO(bytes(document.content)))
+                try:
+                    self.assertEqual(book[names[0]]['B2'].value, 'Compresor')
+                    self.assertEqual(len(book[names[1]]._images), 1)
+                finally:
+                    book.close()
+
+    def test_listing_rename_preserves_formulas_formatting_and_print_area(self):
+        book = load_workbook(BytesIO(source_workbook()))
+        book['Inventario'].print_area = 'A1:C2'
+        book['Motor A']['E1'] = '=Inventario!B2'
+        output = BytesIO()
+        book.save(output)
+        book.close()
+        plan = self.plan()
+        uploaded = self.client.post(plan['workbook_url'], {
+            'file': SimpleUploadedFile('Referencias.xlsx', output.getvalue()), 'first_as_listing': 'true',
+        }).json()
+        original = uploaded['listings'][0]
+        response = self.post(plan['assign_listing_url'], {
+            'action': 'rename', 'listing_id': original['id'], 'name': "Sala d'Ochoa",
+        })
+        self.assertEqual(response.status_code, 200, response.content[:500])
+        document = PdfPlan.objects.get(pk=plan['id']).workbook
+        book = load_workbook(BytesIO(bytes(document.content)))
+        try:
+            self.assertEqual(book['Motor A']['E1'].value, "='Sala d''Ochoa'!B2")
+            self.assertEqual(book['Motor A']['A2'].fill.fgColor.rgb, '00DDEEFF')
+            self.assertIn('$A$1:$C$2', book["Sala d'Ochoa"].print_area)
+            self.assertEqual(book["Sala d'Ochoa"]['B2'].value, 'Compresor')
+        finally:
+            book.close()
+
+    def test_listing_rename_rejects_invalid_names_and_unrelated_sheets_without_changes(self):
+        plan = self.plan()
+        state, _ = self.imported(plan, as_listing=True)
+        record = state['listings'][0]
+        document = PdfPlan.objects.get(pk=plan['id']).workbook
+        before = bytes(document.content)
+        revision = document.revision
+        for name in [None, 12, '', '   ', 'a' * 32, 'motor a', 'Zona/1', 'Zona\\1', 'Zona*1',
+                     'Zona?1', 'Zona:1', 'Zona[1]', "'Zona", "Zona'", 'Zona\x00']:
+            with self.subTest(name=name):
+                response = self.post(plan['assign_listing_url'], {
+                    'action': 'rename', 'listing_id': record['id'], 'name': name,
+                })
+                self.assertEqual(response.status_code, 400, response.content[:500])
+        other_plan = self.plan()
+        other = self.post(other_plan['assign_listing_url'], {'action': 'add'}).json()['listings'][0]
+        motor = document.plan_sheets.get(name='Motor A')
+        for listing_id in [motor.pk, other['id'], 999999]:
+            response = self.post(plan['assign_listing_url'], {
+                'action': 'rename', 'listing_id': listing_id, 'name': 'Nuevo nombre',
+            })
+            self.assertEqual(response.status_code, 400, response.content[:500])
+        document.refresh_from_db()
+        self.assertEqual(document.revision, revision)
+        self.assertEqual(bytes(document.content), before)
+        self.assertEqual(document.plan_sheets.get(pk=record['id']).name, 'Inventario')
+
+    def test_only_users_allowed_to_edit_the_plan_can_rename_its_listings(self):
+        self.client.force_login(self.author)
+        plan = self.plan()
+        record = self.post(plan['assign_listing_url'], {'action': 'add'}).json()['listings'][0]
+        values = {'action': 'rename', 'listing_id': record['id'], 'name': 'Válvulas'}
+        self.client.force_login(self.other)
+        self.assertEqual(self.post(plan['assign_listing_url'], values).status_code, 403)
+        self.client.force_login(self.author)
+        response = self.post(plan['assign_listing_url'], values)
+        self.assertEqual(response.status_code, 200, response.content[:500])
+        self.assertEqual(response.json()['listings'][0]['name'], 'Válvulas')
+
     def test_primary_listing_can_change_to_another_unassigned_imported_sheet(self):
         plan = self.plan()
         self.imported(plan)

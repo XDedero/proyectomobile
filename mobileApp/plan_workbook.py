@@ -767,6 +767,30 @@ def add_existing_listing(plan, name, user):
 
 
 @transaction.atomic
+def rename_listing(plan, record_id, name, user):
+    document = ensure_workbook(plan, user)
+    record = document.plan_sheets.filter(pk=record_id, is_listing=True).first()
+    if not record:
+        raise ValidationError('El listado ya no existe en este plano.')
+    if not isinstance(name, str) or not name.strip():
+        raise ValidationError('Escriba un nombre para el listado.')
+    name = name.strip()
+    if len(name) > 31:
+        raise ValidationError('El nombre del listado admite hasta 31 caracteres.')
+    if any(char in '\\/*?:[]' or ord(char) < 32 for char in name) or name.startswith("'") or name.endswith("'"):
+        raise ValidationError('El nombre no puede contener \\ / * ? : [ ] ni comenzar o terminar con una comilla simple.')
+    if any(other.casefold() == name.casefold() for other in sheet_names(document.content) if other != record.name):
+        raise ValidationError('Ya existe una hoja con ese nombre. Elija otro nombre para el listado.')
+    if record.name == name:
+        return record
+    content, title = rename_sheet(document.content, record.name, name)
+    store(document, content, user)
+    record.name = title
+    record.save(update_fields=['name'])
+    return record
+
+
+@transaction.atomic
 def delete_listing(plan, record_id, user):
     document = ensure_workbook(plan, user)
     record = document.plan_sheets.filter(pk=record_id, is_listing=True).first()

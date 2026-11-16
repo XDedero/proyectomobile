@@ -467,7 +467,7 @@ def listing_template(count):
 @api_permissions()
 def assign_plan_listing(request, kind, plan_id):
     plan = get_plan(kind, plan_id)
-    from .plan_workbook import add_listing, add_existing_listing, change_primary_listing, delete_listing, workspace_data, WorkbookConflict
+    from .plan_workbook import add_listing, add_existing_listing, change_primary_listing, rename_listing, delete_listing, workspace_data, WorkbookConflict
     try:
         upload = request.FILES.get('file')
         if upload is not None:
@@ -479,6 +479,8 @@ def assign_plan_listing(request, kind, plan_id):
             data = json_body(request)
             if data.get('action') == 'delete':
                 delete_listing(plan, positive_integer(data.get('listing_id'), 'Listado'), request.user)
+            elif data.get('action') == 'rename':
+                rename_listing(plan, positive_integer(data.get('listing_id'), 'Listado'), data.get('name'), request.user)
             elif data.get('action') == 'set_primary':
                 change_primary_listing(plan, data.get('sheet'), request.user)
             elif data.get('action') == 'add_sheet':

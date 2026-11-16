@@ -67,8 +67,17 @@
         </div>
         <p id="sharedMotorSheetHint" class="small text-muted mt-2"></p>
         `);
-    const listingsModal = modal('excelListingManager', 'Listados de motores', `
+    const listingsModal = modal('excelListingManager', 'Listados del plano', `
         <div id="planListingsRows" class="excel-listing-rows mb-3"></div>
+        <form id="planListingRename" class="border rounded p-3 mb-3" hidden>
+          <label class="form-label" for="planListingName">Nombre del listado</label>
+          <input id="planListingName" class="form-control mb-2" maxlength="31" required aria-describedby="planListingNameHelp">
+          <p id="planListingNameHelp" class="small text-muted">Hasta 31 caracteres. El nombre también se usará en la hoja de Excel.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-success">Guardar nombre</button>
+            <button type="button" id="btnCancelListingRename" class="btn btn-outline-secondary">Cancelar</button>
+          </div>
+        </form>
         <button type="button" id="btnAddPlanListing" class="btn btn-success mb-3">Añadir listado</button>
         <div id="planListingOptions" class="mb-3" hidden>
           <p class="small fw-semibold mb-2">Origen del listado</p>
@@ -124,6 +133,7 @@
         <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
         <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
     newButtonModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
+    listingsModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     let newButton = null;
 
     function message(dialog, text, error = false) {
@@ -378,6 +388,19 @@
             open.textContent = listing.name + (listing.is_primary ? ' · Original' : listing.is_protected ? ' · Protegido' : '');
             open.onclick = async () => { await hide(listingsModal); await openListings(listing.name); };
             row.append(open);
+            if (context.plan.permissions?.can_assign) {
+                const rename = document.createElement('button'); rename.type = 'button'; rename.className = 'btn btn-outline-secondary';
+                rename.textContent = 'Cambiar nombre'; rename.setAttribute('aria-label', `Cambiar nombre de ${listing.name}`);
+                rename.onclick = () => {
+                    if (context !== listingTarget || !valid(context)) return;
+                    byId('planListingRename').dataset.listingId = listing.id;
+                    byId('planListingRename').hidden = false;
+                    byId('planListingName').value = listing.name;
+                    message(listingsModal, '');
+                    byId('planListingName').focus(); byId('planListingName').select();
+                };
+                row.append(rename);
+            }
             if (listing.can_delete) {
                 const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-outline-danger';
                 remove.setAttribute('aria-label', `Eliminar ${listing.name}`); remove.title = 'Eliminar listado'; remove.dataset.listingId = listing.id;
@@ -406,6 +429,8 @@
         if (!(await window.workbookEditor.requestClose())) return;
         listingTarget = target(); if (!listingTarget) return;
         const context = listingTarget;
+        byId('planListingRename').hidden = true;
+        delete byId('planListingRename').dataset.listingId;
         byId('planListingImport').hidden = true;
         byId('planListingOptions').hidden = Boolean(context.plan.listings?.length);
         byId('btnAddPlanListing').hidden = !byId('planListingOptions').hidden;
@@ -436,7 +461,11 @@
             const data = await request(context.plan.assign_listing_url, values, file);
             if (!apply(context, data)) return;
             window.projectWorkspace.dirty(); renderListings(context, data);
-            message(listingsModal, 'Listados actualizados.');
+            if (values?.action === 'rename') {
+                byId('planListingRename').hidden = true;
+                delete byId('planListingRename').dataset.listingId;
+            }
+            message(listingsModal, values?.action === 'rename' ? 'Nombre actualizado. Pulsa «Guardar plano» para conservarlo.' : 'Listados actualizados.');
             if (values?.action === 'add' || file) {
                 await hide(listingsModal);
                 await openListings(data.listings.at(-1)?.name);
@@ -583,26 +612,29 @@
     };
     byId('btnChangePrimaryListing').onclick = () => { const sheet = byId('planPrimaryListingSheet').value; if (sheet) changeListing({ action: 'set_primary', sheet }); };
     byId('btnAddExistingListing').onclick = () => { const sheet = byId('planAdditionalListingSheet').value; if (sheet) changeListing({ action: 'add_sheet', sheet }); };
+    byId('planListingRename').onsubmit = event => {
+        event.preventDefault();
+        const listingId = byId('planListingRename').dataset.listingId;
+        if (listingId) changeListing({ action: 'rename', listing_id: Number(listingId), name: byId('planListingName').value.trim() });
+    };
+    byId('btnCancelListingRename').onclick = () => {
+        byId('planListingRename').hidden = true;
+        delete byId('planListingRename').dataset.listingId;
+        message(listingsModal, '');
+    };
     for (const prefix of ['Cad', 'Pdf']) {
-        const button = document.createElement('button'); button.type = 'button'; button.id = `btn${prefix}Workbook`;
-        button.className = 'btn btn-outline-success btn-sm'; button.innerHTML = '<i class="bi bi-file-earmark-excel" aria-hidden="true"></i> Excel del plano';
-        byId(`btn${prefix}ExportProject`).before(button);
-        button.onclick = () => manage();
         const view = document.createElement('button');
         view.type = 'button'; view.className = 'btn btn-outline-success btn-sm';
         view.id = `btn${prefix}WorkbookSheets`;
         view.textContent = 'Ver hojas de Excel'; view.onclick = openWorkbook;
-        button.before(view);
+        byId(`btn${prefix}ExportProject`).before(view);
         byId(`btn${prefix}AssignListing`).textContent = 'Añadir listado';
         byId(`btn${prefix}OpenListing`).textContent = 'Ver listados';
     }
-    const fullButton = document.createElement('button'); fullButton.type = 'button'; fullButton.textContent = 'Excel del plano'; fullButton.id = 'fullscreenManageWorkbook';
-    fullButton.onclick = () => { byId('btnPlanFullscreenMenu').click(); manage(); };
-    byId('fullscreenPlanMenu').prepend(fullButton);
     const fullSheets = document.createElement('button');
     fullSheets.type = 'button'; fullSheets.textContent = 'Ver hojas de Excel';
     fullSheets.onclick = () => { byId('btnPlanFullscreenMenu').click(); openWorkbook(); };
-    fullButton.before(fullSheets);
+    byId('fullscreenPlanMenu').prepend(fullSheets);
     window.planExcel = { manage, assign, listings, openListings, newButtonOptions, sourceSelected, copySelectedButton,
         createButton(url, position, { file, ...options }) {
             const values = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));

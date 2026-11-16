@@ -98,10 +98,7 @@ Si un plano vuelve a aparecer **después de recargar**, hay que comprobar que am
 
 Cada plano tiene **un único libro Excel**. Los botones guardan el nombre de la hoja que utilizan. Dos botones vinculados a la misma hoja ven los mismos datos y cambios; fichas de motores diferentes pueden seguir en hojas distintas del mismo libro.
 
-**Excel del plano** ofrece dos opciones:
-
-- **Formato vacío:** utiliza las plantillas actuales, con logo, estilos, bordes, campos y gráficos, sin datos de ejemplo. Cada motor nuevo obtiene una hoja vacía independiente.
-- **Importar Excel:** conserva las hojas, los datos y el formato del archivo. La primera hoja se asigna automáticamente al listado original. Los botones permiten elegir una hoja de motor del libro, crear una ficha vacía o incorporar un motor guardado.
+El libro del plano se prepara automáticamente. **Añadir botón** permite crear una ficha vacía, importar una hoja de Excel/CSV, vincular una hoja del libro o incorporar una pieza guardada. **Añadir listado** permite usar una plantilla vacía o importar un listado. **Ver hojas de Excel** abre el libro completo. El botón **Excel del plano** se retiró de la vista normal y del menú de pantalla completa.
 
 Al importar otro libro se conservan en el libro resultante las fichas anteriores que contienen datos, incluidas las que aún no tienen botón, y los listados anteriores con información. Las fichas vacías iniciales se pueden reemplazar sin generar archivos separados. Si hay una variante anterior editada de un motor ya identificado, se conserva como otra hoja con el sufijo «anterior». Un botón de un libro importado permanece sin hoja hasta que el usuario elige una.
 
@@ -111,9 +108,11 @@ Al importar otro libro se conservan en el libro resultante las fichas anteriores
 
 **Exportar .xlsx** descarga el libro completo del plano. **Exportar .csv** descarga únicamente la hoja seleccionada en UTF-8 con BOM. Las fichas que usan el formato estándar conservan Vista ficha, ajuste de ancho/página, zoom, logos y gráficos. Las fórmulas muestran el último resultado calculado por Excel; la aplicación no incluye un motor completo de recálculo.
 
-## Listados de motores
+## Listados del plano
 
 **Gestionar listados** permite agregar un listado vacío, importar otro listado o convertir una hoja libre del mismo libro en un listado adicional. Se nombran **Listado motores 2**, **Listado motores 3**, etc. Una hoja asignada a un botón no puede convertirse en listado ni eliminarse como tal. También puede cambiar la hoja del listado original por otra hoja libre.
+
+Cada listado, incluido el original, tiene una opción **Cambiar nombre**. El nombre elegido se muestra en el administrador, el selector del editor y la hoja de Excel; se conserva al pulsar **Guardar plano** y al exportar o importar proyectos. Se admiten nombres de hasta 31 caracteres, según las reglas de Excel, sin repetir el nombre de otra hoja del mismo libro. Cambiar el nombre conserva los datos, formatos y referencias de las fórmulas. La opción requiere permiso de edición del plano.
 
 **Ver listados** abre los listados en el editor; su selector de hojas contiene todos los listados del plano. El botón **Listados** del editor permite administrarlos. **+ Fila** y **+ Columna** conservan la estructura y los estilos de las plantillas. Se eliminó la opción Reutilizar un Excel asignado: los listados pertenecen al propio libro del plano.
 
