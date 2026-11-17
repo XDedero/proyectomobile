@@ -89,6 +89,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'mobileApp.tenant_runtime.CompanyWorkspaceMiddleware',
     'mobileApp.shared_accounts.SharedAccountMiddleware',
     'mobileApp.pwa.OfflineIdentityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',

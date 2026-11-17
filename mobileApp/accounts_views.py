@@ -120,6 +120,20 @@ def manage_registration(request):
         role = data.get('role', UserProfile.Role.VIEWER)
         if role not in UserProfile.Role.values:
             raise ValidationError('Seleccione un rol válido para la cuenta.')
+        company_account = getattr(request, 'company_account', None)
+        if company_account is not None:
+            from django.conf import settings
+            from .company_access import company_administrator, review_company_request
+            from .tenant_runtime import using_schema
+            if not company_administrator(company_account):
+                return error_response('No puede revisar las solicitudes de esta empresa.', 403)
+            data['id'] = record_id(data)
+            data['role'] = role
+            with using_schema(settings.PLANOS_DATABASE_SCHEMA):
+                error = review_company_request(company_account, data)
+            if error:
+                return error_response(error)
+            return JsonResponse({'deleted': True, 'message': 'Solicitud resuelta.'})
         from . import shared_accounts
         requests = RegistrationRequest.objects.filter(company_id=RELONCAVI_COMPANY_ID)
         if shared_accounts.enabled():
@@ -163,6 +177,9 @@ def ensure_other_administrator(user):
 @require_POST
 @administrators_only
 def manage_user(request):
+    from .tenant_runtime import workspace
+    if workspace.get() is not None:
+        return error_response('Las credenciales de esta empresa se administran desde el registro de acceso.', 403)
     try:
         data = json_body(request)
         action = data.get('action', 'update')

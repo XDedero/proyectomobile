@@ -1,4 +1,6 @@
 """Shared piece catalog: immutable local sheets and one workbook at Drive root."""
+from collections import defaultdict
+from dataclasses import dataclass, field
 from io import BytesIO
 import json
 import hashlib
@@ -16,13 +18,25 @@ from django.utils import timezone
 from .models import ButtonCategory, SavedPiece, PieceDeletion, WorkbookDocument, Motor, PdfMarker
 from .motor_service import single_sheet, stamp_origin, inspect_motor
 from .xlsx_package import append_sheet, rename_sheet, remove_sheet, sheet_names, unique_name
+from .tenant_runtime import workspace
 
-_LOCK = threading.Lock()
-_QUEUE_LOCK = threading.Lock()
-_QUEUED = False
-_RETRY_AFTER = 0
-_READ_AT = 0
-_READ_LOCK = threading.Lock()
+
+@dataclass
+class CatalogState:
+    write_lock: object = field(default_factory=threading.Lock)
+    queue_lock: object = field(default_factory=threading.Lock)
+    read_lock: object = field(default_factory=threading.Lock)
+    queued: bool = False
+    retry_after: float = 0
+    read_at: float = 0
+
+
+_catalog_states = defaultdict(CatalogState)
+
+
+def catalog_state():
+    company = workspace.get()
+    return _catalog_states[company.company_id if company else None]
 
 
 def piece_category(value):
@@ -103,19 +117,20 @@ def import_catalog(index, content, deleted=()):
 
 
 def refresh_catalog():
-    global _READ_AT
-    with _READ_LOCK:
-        if time.monotonic() - _READ_AT < 15:
+    state = catalog_state()
+    with state.read_lock:
+        if time.monotonic() - state.read_at < 15:
             return
         _, index, content = read_catalog()
         import_catalog(index, content, remote_deletions())
-        _READ_AT = time.monotonic()
+        state.read_at = time.monotonic()
 
 
 def sync_catalog():
     """A database lease serializes catalog merges across computers, including first creation."""
     from .cloud_projects import CloudUnavailable, drive_command, supabase_query
-    if not _LOCK.acquire(blocking=False):
+    lock = catalog_state().write_lock
+    if not lock.acquire(blocking=False):
         return
     lease = str(uuid4())
     acquired = False
@@ -205,30 +220,29 @@ def sync_catalog():
             if acquired:
                 supabase_query(f"UPDATE public.piece_library_registry SET lease=NULL,lease_until=NULL WHERE lease='{lease}';", read_only=False)
         finally:
-            _LOCK.release()
+            lock.release()
 
 
 def queue_catalog_sync():
     from .terminal_monitor import enqueue_sync_task, is_monitor_enabled
     if not is_monitor_enabled():
         return
+    state = catalog_state()
     def enqueue():
-        global _QUEUED
-        with _QUEUE_LOCK:
-            if _QUEUED or time.monotonic() < _RETRY_AFTER:
+        with state.queue_lock:
+            if state.queued or time.monotonic() < state.retry_after:
                 return
-            _QUEUED = True
+            state.queued = True
         def task():
-            global _QUEUED, _RETRY_AFTER, _READ_AT
             try:
                 sync_catalog()
-                _READ_AT = 0
+                state.read_at = 0
             except Exception:
-                _RETRY_AFTER = time.monotonic()+45
+                state.retry_after = time.monotonic()+45
                 raise
             finally:
-                with _QUEUE_LOCK:
-                    _QUEUED = False
+                with state.queue_lock:
+                    state.queued = False
             if SavedPiece.objects.exclude(cloud_status='synced').exists() or PieceDeletion.objects.filter(synced=False).exists():
                 queue_catalog_sync()
         enqueue_sync_task(task)

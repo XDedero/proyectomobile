@@ -6,4 +6,5 @@ set -o errexit -o nounset -o pipefail
 python scripts/prepare_runtime.py
 python manage.py migrate --noinput
 python init_admin.py
+python manage.py prepare_company_workspaces
 exec gunicorn proyectomobile.wsgi:application --config gunicorn.conf.py --bind "0.0.0.0:${PORT:-10000}"

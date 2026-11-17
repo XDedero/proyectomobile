@@ -17,7 +17,8 @@ from .models import RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
 
 
 def enabled():
-    return settings.APP_SHARED_ACCOUNTS
+    from .tenant_runtime import workspace
+    return settings.APP_SHARED_ACCOUNTS and workspace.get() is None
 
 
 def literal(value):

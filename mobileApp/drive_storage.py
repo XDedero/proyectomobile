@@ -15,7 +15,10 @@ from django.utils.deconstruct import deconstructible
 @deconstructible
 class GoogleDriveStorage(Storage):
     def _cache_path(self, name):
-        return Path(settings.MEDIA_ROOT) / '.drive-cache' / sha256(name.encode()).hexdigest()
+        from .tenant_runtime import workspace
+        company = workspace.get()
+        key = f'{company.company_id}/{name}' if company else name
+        return Path(settings.MEDIA_ROOT) / '.drive-cache' / sha256(key.encode()).hexdigest()
 
     def _cache(self, name, source):
         """Disposable, bounded disk cache. A cache failure never loses a save."""
@@ -50,9 +53,10 @@ class GoogleDriveStorage(Storage):
 
     def command(self, *args):
         from .cloud_projects import command_json
+        from .tenant_runtime import drive_environment
         result = command_json(
             ['node', str(settings.BASE_DIR / 'scripts/drive-storage.js'), *args],
-            'No se pudo acceder al archivo privado en Google Drive.', timeout=120,
+            'No se pudo acceder al archivo privado en Google Drive.', timeout=120, env=drive_environment(),
         )
         if not result.get('ok'):
             if result.get('missing'):

@@ -36,8 +36,10 @@ def asset_version():
 @never_cache
 def manifest(request):
     from .company_brand import brand_context
+    from .company_access import current_account
 
-    brand = brand_context()
+    account = current_account(request)
+    brand = brand_context(account.company if account else None)
     name = brand.get('company_name', 'Reloncaví')
     branding = brand.get('company_palette') or {}
     revision = brand.get('company_logo_revision')
@@ -72,12 +74,14 @@ class OfflineIdentityMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        from .tenant_runtime import offline_user_id
+        identity = offline_user_id(request)
         expected = request.headers.get('X-Reloncavi-Expected-User')
-        if expected and (not request.user.is_authenticated or expected != str(request.user.pk)):
+        if expected and (identity is None or expected != str(identity)):
             response = JsonResponse({'error': 'La sesión cambió. Inicia sesión con la cuenta del borrador.'}, status=409)
         else:
             response = self.get_response(request)
         if request.path.startswith('/api/'):
-            response['X-Reloncavi-User'] = str(request.user.pk) if request.user.is_authenticated else ''
+            response['X-Reloncavi-User'] = str(identity) if identity is not None else ''
             response['Cache-Control'] = 'private, no-store'
         return response

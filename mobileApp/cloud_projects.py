@@ -62,12 +62,14 @@ def command_json(command, message, *, timeout, env=None):
 
 
 def drive_command(*args):
-    if not (settings.BASE_DIR / 'gdrive-token.json').is_file():
+    from .tenant_runtime import drive_environment
+    env = drive_environment()
+    if env is None and not (settings.BASE_DIR / 'gdrive-token.json').is_file():
         raise CloudUnavailable('Esta instalación necesita autorización para consultar los archivos de la nube.')
     result = command_json(
         ['node', str(settings.BASE_DIR / 'gdrive-sync-cli.js'), *args],
         'No se pudo consultar el almacenamiento en la nube. Revisa la conexión y los permisos.',
-        timeout=65,
+        timeout=65, env=env,
     )
     if not result.get('ok'):
         raise CloudUnavailable('No se pudo leer el proyecto en la nube.')
@@ -187,9 +189,31 @@ def postgres_query(database_url, sql, *, read_only):
         ) from exc
 
 
+def cloud_schema():
+    from .tenant_runtime import workspace
+    company = workspace.get()
+    return company.schema if company else 'public'
+
+
+def company_sql(sql, schema):
+    from sqlparse import tokens
+    from sqlparse.lexer import tokenize
+
+    parts = list(tokenize(sql))
+    return ''.join(
+        schema if value == 'public' and kind in tokens.Name and parts[index + 1:index + 2] == [(tokens.Punctuation, '.')]
+        else value for index, (kind, value) in enumerate(parts)
+    )
+
+
 def supabase_query(sql, *, read_only):
     message = 'No se pudo consultar la base de datos. Revisa la conexión y los permisos.'
     database_url = supabase_database_url()
+    schema = cloud_schema()
+    if schema != 'public':
+        if not database_url:
+            raise CloudUnavailable(message, code='database_configuration')
+        sql = company_sql(sql, schema)
     if database_url:
         return postgres_query(database_url, sql, read_only=read_only)
     command = supabase_command()

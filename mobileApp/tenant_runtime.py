@@ -1,0 +1,174 @@
+"""Bind a verified company account to its private drawing workspace."""
+from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
+from dataclasses import dataclass, field
+import json
+import os
+import re
+
+from django.conf import settings
+from django.db import connection, transaction
+
+
+workspace = ContextVar('company_workspace', default=None)
+schema_override = ContextVar('company_schema_override', default=None)
+
+
+@dataclass(frozen=True)
+class Workspace:
+    schema: str
+    company_id: str
+    brand: dict
+    drive: dict = field(repr=False)
+
+
+def schema_name(company_id):
+    return 'tenant_' + company_id.hex
+
+
+def drive_environment():
+    company = workspace.get()
+    if company is None:
+        return None
+    return {**os.environ, 'PLANOS_COMPANY_DRIVE': json.dumps(company.drive)}
+
+
+def capture_workspace(callback):
+    context = copy_context()
+    return lambda *args, **kwargs: context.run(callback, *args, **kwargs)
+
+
+def load_drive(company_id, connection_info):
+    from cryptography.fernet import Fernet, InvalidToken
+
+    key = os.environ.get('PANEL_DRIVE_ENCRYPTION_KEY', '').strip()
+    if not key or connection_info is None:
+        return None
+    try:
+        payload = json.loads(Fernet(key.encode()).decrypt(bytes(connection_info.encrypted_credentials)))
+        folders = {role: connection_info.folder_ids[role] for role in ('pdf', 'excel', 'originals')}
+        folders['root'] = connection_info.root_id
+        if payload.get('company_id') != str(company_id):
+            return None
+        if len(set(folders.values())) != len(folders) or not all(
+            re.fullmatch(r'[A-Za-z0-9_-]{8,128}', value) for value in folders.values()
+        ):
+            return None
+        credentials = {name: payload[name] for name in ('client_id', 'client_secret', 'refresh_token')}
+        if not all(isinstance(value, str) and value.strip() for value in credentials.values()):
+            return None
+        return {'credentials': credentials, 'folders': folders}
+    except (InvalidToken, KeyError, ValueError, TypeError, AttributeError):
+        return None
+
+
+@contextmanager
+def using_schema(schema):
+    from psycopg import sql
+
+    previous = schema_override.get() or settings.PLANOS_DATABASE_SCHEMA
+    token = schema_override.set(schema)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(schema)))
+        yield
+    finally:
+        schema_override.reset(token)
+        if connection.connection is not None:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(previous)))
+            except Exception:
+                connection.close()
+                raise
+
+
+def workspace_for(account, include_brand=False):
+    from .company_brand import brand_context
+    from .models import CompanyDriveConnection
+
+    if not settings.PLANOS_CLOUD_MODE:
+        return None
+    schema = schema_name(account.company_id)
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT to_regclass(%s)', [schema + '.workspace_ready'])
+        if cursor.fetchone()[0] is None:
+            return None
+    drive = load_drive(account.company_id, CompanyDriveConnection.objects.filter(company_id=account.company_id).first())
+    if drive is None:
+        return None
+    brand = brand_context(account.company) if include_brand else {}
+    return Workspace(schema, str(account.company_id), brand, drive)
+
+
+@transaction.atomic
+def workspace_user(account):
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Permission
+    from .models import CompanyAdminSetup, UserProfile
+
+    owner = isinstance(account, CompanyAdminSetup)
+    role = UserProfile.Role.ADMINISTRATOR if owner else account.role
+    username = 'company_owner' if owner else f'company_member_{account.pk}'
+    user, created = get_user_model().objects.select_for_update().get_or_create(username=username)
+    values = {'first_name': account.first_name, 'last_name': account.last_name, 'is_staff': role == UserProfile.Role.ADMINISTRATOR}
+    if created or any(getattr(user, name) != value for name, value in values.items()):
+        for name, value in values.items():
+            setattr(user, name, value)
+        user.set_unusable_password()
+        user.save()
+    profile, profile_created = UserProfile.objects.select_for_update().get_or_create(
+        user=user, defaults={'rut': account.rut, 'role': role, 'is_primary_administrator': owner})
+    role_changed = profile.role != role
+    if profile.rut != account.rut or role_changed:
+        profile.rut, profile.role = account.rut, role
+        profile.save(update_fields=['rut', 'role'])
+    profile.user = user
+    if profile_created or role_changed:
+        permission = Permission.objects.get(content_type__app_label='mobileApp', codename='administer_application')
+        if role == UserProfile.Role.ADMINISTRATOR:
+            user.user_permissions.add(permission)
+        elif role_changed:
+            user.user_permissions.remove(permission)
+    return user
+
+
+def offline_user_id(request):
+    if not request.user.is_authenticated:
+        return None
+    company = workspace.get()
+    return f'{company.company_id}:{request.user.pk}' if company else request.user.pk
+
+
+class CompanyWorkspaceMiddleware:
+    """Resolve the central login before any company drawing query can run."""
+
+    central_paths = frozenset({
+        '/api/auth/login/', '/api/auth/logout/', '/empresa/', '/empresa/salir/',
+        '/api/auth/register/', '/api/auth/register/companies/', '/marca/logo.png', '/manifest.webmanifest',
+        '/service-worker.js', '/healthz/',
+    })
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from .company_access import SESSION_KEY, current_account
+
+        if (request.path in self.central_paths or request.path.startswith(('/marca/icono/', '/admin/'))
+                or SESSION_KEY not in request.session):
+            return self.get_response(request)
+        account = current_account(request)
+        if account is None:
+            return self.get_response(request)
+        company = workspace_for(account, include_brand=request.path in ('/', '/administracion/'))
+        if company is None:
+            return self.get_response(request)
+        token = workspace.set(company)
+        try:
+            with using_schema(company.schema):
+                request.company_account = account
+                request.user = workspace_user(account)
+                return self.get_response(request)
+        finally:
+            workspace.reset(token)

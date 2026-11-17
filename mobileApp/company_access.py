@@ -1,6 +1,7 @@
 """Company onboarding sessions are independent of the legacy drawing permissions."""
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.middleware.csrf import rotate_token
@@ -18,6 +19,10 @@ from .models import (Company, CompanyAccount, CompanyAdminSetup, CompanyAudit, C
 
 
 SESSION_KEY = 'company_access'
+
+
+def company_administrator(account):
+    return isinstance(account, CompanyAdminSetup) or account.role == UserProfile.Role.ADMINISTRATOR
 
 
 def registration_companies():
@@ -62,7 +67,7 @@ def current_account(request):
     return None
 
 
-def _review(account, data):
+def review_company_request(account, data):
     action = data.get('action')
     if action not in ('approve', 'reject'):
         return 'Seleccione una acción válida.'
@@ -74,12 +79,12 @@ def _review(account, data):
             return 'La solicitud ya fue atendida o no está disponible.'
         if action == 'approve':
             role = data.get('role')
-            if role not in (UserProfile.Role.VIEWER, UserProfile.Role.WORKER):
+            if role not in UserProfile.Role.values:
                 return 'Seleccione un rol válido.'
             if rut_in_use(item.rut):
                 return 'Ya existe una cuenta con ese RUT.'
             from . import shared_accounts
-            if shared_accounts.enabled() and shared_accounts.query(
+            if settings.APP_SHARED_ACCOUNTS and shared_accounts.query(
                 'SELECT 1 FROM app_identity.accounts WHERE rut=' + shared_accounts.literal(item.rut) + ';'
             ):
                 return 'Ya existe una cuenta con ese RUT.'
@@ -100,7 +105,11 @@ def company_home(request):
     account = current_account(request)
     if account is None:
         return redirect('index')
-    administrator = isinstance(account, CompanyAdminSetup)
+    administrator = company_administrator(account)
+    from .tenant_runtime import workspace_for
+    ready = workspace_for(account) is not None
+    if ready and request.method == 'GET':
+        return redirect('index')
     error = None
     if request.method == 'POST':
         if not administrator:
@@ -109,7 +118,7 @@ def company_home(request):
             })
         try:
             request_id = int(request.POST.get('id', ''))
-            error = _review(account, {**request.POST.dict(), 'id': request_id}) if 0 < request_id < 2**63 else 'Solicitud inválida.'
+            error = review_company_request(account, {**request.POST.dict(), 'id': request_id}) if 0 < request_id < 2**63 else 'Solicitud inválida.'
         except (ValueError, IntegrityError, CloudUnavailable):
             error = 'No se pudo resolver la solicitud. Actualice la página e intente nuevamente.'
         if error is None:
@@ -117,7 +126,7 @@ def company_home(request):
     pending = (account.company.registration_requests.filter(status=RegistrationRequest.Status.PENDING)
                if administrator else [])
     return render(request, 'mobileApp/company_home.html', {
-        'account': account, 'administrator': administrator, 'pending': pending, 'error': error,
+        'account': account, 'administrator': administrator, 'pending': pending, 'error': error, 'workspace_ready': ready,
         **brand_context(account.company),
     }, status=400 if error else 200)
 

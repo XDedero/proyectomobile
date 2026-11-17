@@ -68,6 +68,19 @@ persistente una carpeta. Render monta los discos durante la ejecución, no duran
 builds o comandos de pre-deploy. El disco se configura en el panel del servicio;
 estos archivos no crean servicios ni contratan recursos.
 
+## Empresas con almacenamiento propio
+
+En **Environment**, configura `PANEL_DRIVE_ENCRYPTION_KEY` con la clave que usa el
+panel local. El abridor `CopiarClaveRender.bat` del panel copia la clave vigente al
+portapapeles de Windows. Pégala en el valor secreto de Render y elige **Save and deploy**.
+El arranque ejecuta `prepare_company_workspaces` y prepara el esquema privado de
+cada empresa que tiene administrador y almacenamiento verificados. Una empresa
+que se conecta después del despliegue obtiene su esquema al volver a desplegar.
+
+El inicio de sesión por RUT abre la interfaz de planos con la marca de la empresa.
+Cada sesión dirige los datos PostgreSQL y las operaciones de archivos a los recursos
+de su empresa, incluidas las publicaciones en segundo plano y las copias del navegador.
+
 ## Validación y recomendaciones de capacidad
 
 ```text

@@ -22,6 +22,9 @@
  * ============================================================================
  */
 
+const companyDrive = typeof window === 'undefined' && typeof process !== 'undefined' && process.env.PLANOS_COMPANY_DRIVE
+    ? JSON.parse(process.env.PLANOS_COMPANY_DRIVE) : null;
+
 const GOOGLE_DRIVE_CONFIG = {
     CLIENT_ID: (typeof process !== 'undefined' && process.env && process.env.GOOGLE_DRIVE_CLIENT_ID) || '',
     CLIENT_SECRET: (typeof process !== 'undefined' && process.env && process.env.GOOGLE_DRIVE_CLIENT_SECRET) || '',
@@ -44,12 +47,25 @@ const GOOGLE_DRIVE_CONFIG = {
     ].join(' ')
 };
 
+if (companyDrive) {
+    const { credentials, folders } = companyDrive;
+    if (!credentials.client_id || !credentials.client_secret || !credentials.refresh_token ||
+        !['pdf', 'excel', 'originals', 'root'].every(role => /^[A-Za-z0-9_-]{8,128}$/.test(folders[role] || ''))) {
+        throw new Error('Autorización de almacenamiento de empresa incompleta.');
+    }
+    GOOGLE_DRIVE_CONFIG.CLIENT_ID = credentials.client_id;
+    GOOGLE_DRIVE_CONFIG.CLIENT_SECRET = credentials.client_secret;
+    GOOGLE_DRIVE_CONFIG.REFRESH_TOKEN = credentials.refresh_token;
+    GOOGLE_DRIVE_CONFIG.FOLDERS = {PDF: folders.pdf, EXCEL_CSV: folders.excel, ORIGINALS: folders.originals, ROOT: folders.root};
+}
+
 
 // ============================================================================
 // 1. AUTENTICACIÓN Y RENOVACIÓN AUTOMÁTICA DE TOKEN
 // ============================================================================
 const GoogleDriveAuth = {
     _loadNodeTokenFile: function () {
+        if (companyDrive) return;
         if (typeof window === 'undefined' && typeof require === 'function') {
             try {
                 const fs = require('fs');
@@ -68,6 +84,7 @@ const GoogleDriveAuth = {
     },
 
     _saveNodeTokenFile: function (tokenData) {
+        if (companyDrive) return;
         if (typeof window === 'undefined' && typeof require === 'function') {
             try {
                 const fs = require('fs');

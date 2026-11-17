@@ -5,7 +5,7 @@ const HOME = '/';
 self.addEventListener('install', event => {
     event.waitUntil((async () => {
         const cache = await caches.open(CACHE);
-        const response = await fetch(HOME, {cache: 'reload'});
+        const response = await fetch(HOME, {cache: 'reload', credentials: 'omit'});
         if (!response.ok) throw new Error('No se pudo preparar la app sin conexión.');
         const html = await response.clone().text();
         // Do not activate with a half-downloaded interface.

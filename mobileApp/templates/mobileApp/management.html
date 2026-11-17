@@ -8,11 +8,11 @@
   <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap-icons.css' %}">
   <link rel="stylesheet" href="{% static 'mobileApp/management.css' %}?v={{ asset_version }}">
 </head>
-<body>
+<body{% if company_palette %} style="background:{{ company_palette.background }}"{% endif %}>
 <main class="container management-shell py-4 py-lg-5">
   <header class="mb-4">
     <a class="back-link" href="/">← Volver a los planos</a>
-    <h1 class="mt-3 mb-1">Administración</h1>
+    <h1 class="mt-3 mb-1">Administración{% if company_name %} · {{ company_name }}{% endif %}</h1>
     <p class="text-secondary mb-0">Solicitudes, usuarios y categorías en un solo lugar.</p>
     {% if can_edit_company %}<a href="{% url 'company_profile' %}" class="btn btn-outline-primary btn-sm mt-3">Configuración de la empresa</a>{% endif %}
   </header>

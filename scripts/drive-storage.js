@@ -32,7 +32,7 @@ async function save(drive, config, filename, name) {
     const checksum = hash.digest('hex');
     const extension = path.extname(name).toLowerCase();
     const contentType = ({'.pdf':'application/pdf','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.dxf':'application/dxf'})[extension] || 'application/octet-stream';
-    const folder = extension === '.xlsx' ? config.FOLDERS.EXCEL_CSV : config.FOLDERS.PDF;
+    const folder = config.FOLDERS.ORIGINALS || (extension === '.xlsx' ? config.FOLDERS.EXCEL_CSV : config.FOLDERS.PDF);
     const begin = await drive._fetchWithAuth('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,size,md5Checksum,appProperties', {
         method:'POST', headers:{'Content-Type':'application/json','X-Upload-Content-Type':contentType,'X-Upload-Content-Length':String(size)},
         body:JSON.stringify({name:path.basename(name),parents:[folder],appProperties:{storageRole:ROLE}}),

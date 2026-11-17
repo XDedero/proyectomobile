@@ -31,13 +31,15 @@ def administrators_only(view):
 @require_GET
 @administrators_only
 def management_panel(request):
+    from .tenant_runtime import workspace
+    company = workspace.get()
     directory = Path(__file__).resolve().parent
     files = [directory / 'templates/mobileApp/management.html',
              directory / 'static/mobileApp/management.js', directory / 'static/mobileApp/management.css']
     version = max(path.stat().st_mtime_ns for path in files)
     from .cloud_projects import CloudUnavailable
     try:
-        pending = pending_registration_data()
+        pending = pending_registration_data(request)
         error = ''
     except (CloudUnavailable, ValidationError) as exc:
         pending = local_registration_data()
@@ -46,6 +48,7 @@ def management_panel(request):
         'asset_version': str(version),
         'pending_requests': pending, 'registration_error': error,
         'can_edit_company': is_primary_administrator(request.user),
+        **(company.brand if company else {}),
     })
 
 
@@ -54,7 +57,17 @@ def management_panel(request):
 def edit_company_profile(request):
     if not is_primary_administrator(request.user):
         return error_response('Solo el administrador general puede editar la empresa.', 403)
-    company = get_object_or_404(Company, pk=RELONCAVI_COMPANY_ID)
+    company_account = getattr(request, 'company_account', None)
+    if company_account is not None:
+        from django.conf import settings
+        from .tenant_runtime import using_schema
+        with using_schema(settings.PLANOS_DATABASE_SCHEMA):
+            return _edit_company_brand(request, company_account.company_id, company_account.rut)
+    return _edit_company_brand(request, RELONCAVI_COMPANY_ID, request.user.get_username())
+
+
+def _edit_company_brand(request, company_id, actor):
+    company = get_object_or_404(Company, pk=company_id)
     current = CompanyBrand.objects.filter(company=company).defer('logo_png').first()
     values = {'name': company.name, 'tax_id': company.tax_id or '',
               'color': current.base_color if current else ''}
@@ -84,7 +97,7 @@ def edit_company_profile(request):
                 brand.revision += 1
                 brand.save(update_fields=fields)
                 CompanyAudit.objects.create(company=company, company_code=company.pk,
-                                            actor=request.user.get_username(), action='marca_editada')
+                                            actor=actor, action='marca_editada')
             return redirect('management_panel')
         except (ValidationError, IntegrityError) as exc:
             error = exc.messages[0] if isinstance(exc, ValidationError) else 'Ese RUT de empresa ya está en uso.'
@@ -94,7 +107,17 @@ def edit_company_profile(request):
     }, status=400 if error else 200)
 
 
-def pending_registration_data():
+def pending_registration_data(request=None):
+    company_account = getattr(request, 'company_account', None)
+    if company_account is not None:
+        from django.conf import settings
+        from .company_access import company_administrator
+        from .tenant_runtime import using_schema
+        if not company_administrator(company_account):
+            return []
+        with using_schema(settings.PLANOS_DATABASE_SCHEMA):
+            return [registration_data(item) for item in RegistrationRequest.objects.filter(
+                company_id=company_account.company_id, status='pending').select_related('company', 'reviewed_by')]
     from . import shared_accounts
     if shared_accounts.enabled():
         shared_accounts.sync_requests()
@@ -116,7 +139,7 @@ def local_registration_data():
 def pending_registrations(request):
     from .cloud_projects import CloudUnavailable
     try:
-        return JsonResponse({'requests': pending_registration_data()})
+        return JsonResponse({'requests': pending_registration_data(request)})
     except (CloudUnavailable, ValidationError) as exc:
         return error_response(exc, 503)
 
@@ -130,16 +153,18 @@ def category_data(category):
 def management_data(request):
     from . import shared_accounts
     from .cloud_projects import CloudUnavailable
+    from .tenant_runtime import workspace
+    company = workspace.get()
     try:
         if shared_accounts.enabled():
             shared_accounts.sync_accounts()
-        requests = pending_registration_data()
+        requests = pending_registration_data(request)
     except (CloudUnavailable, ValidationError) as exc:
         return error_response(exc, 503)
     return JsonResponse({
         'can_manage_administrators': is_administrator(request.user),
-        'users': [{**user_data(u), 'can_edit': can_edit_user(request.user, u),
-                   'can_delete': u.pk != request.user.pk and can_edit_user(request.user, u)}
+        'users': [{**user_data(u), 'can_edit': company is None and can_edit_user(request.user, u),
+                   'can_delete': company is None and u.pk != request.user.pk and can_edit_user(request.user, u)}
                   for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
         'requests': requests,
         'roles': [{'id': r.pk, 'name': r.name, 'description': r.description,

@@ -193,8 +193,12 @@
         if (window.relOffline && !(await window.relOffline.canLogout())) return;
         const revision = ++authRevision;
         try {
+            const company = appState.user?.company_id;
             await authRequest('/api/auth/logout/', {});
-            if (revision === authRevision) applyUser(null);
+            if (revision === authRevision) {
+                if (company) window.location.replace('/');
+                else applyUser(null);
+            }
         } catch (error) {
             document.getElementById('appAuthError').textContent = `No se pudo cerrar la sesión: ${error.message}`;
         }

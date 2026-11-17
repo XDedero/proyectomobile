@@ -32,18 +32,24 @@ def index(request):
     # controls differ from those expected by the current drawing workflows.
     from .pwa import asset_version
     from .company_brand import brand_context
-    return render(request, 'mobileApp/index.html', {'asset_version': asset_version(), **brand_context()})
+    from .tenant_runtime import workspace
+    company = workspace.get()
+    brand = company.brand if company else brand_context()
+    return render(request, 'mobileApp/index.html', {'asset_version': asset_version(), **brand})
 
 
 def session_data(request):
     user = request.user
     from .accounts import application_role
     from .company_access import current_account
+    from .tenant_runtime import offline_user_id, workspace
+    company = workspace.get()
     profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
     return {
         'user': {
-            'id': user.pk, 'username': user.get_username(),
+            'id': offline_user_id(request), 'username': user.get_username(),
             'display_name': user.get_full_name() or user.get_username(),
+            'company_id': company.company_id if company else None,
             'role': application_role(user),
             'primary_administrator': bool(profile and profile.is_primary_administrator),
             'rut': profile.rut if profile else '',

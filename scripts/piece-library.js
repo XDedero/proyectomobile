@@ -1,6 +1,7 @@
 /* The catalog lives in one root workbook; its index is not a visible worksheet. */
 const JSZip = require('../mobileApp/static/mobileApp/vendor/jszip.min.js');
 const PART = 'customXml/reloncavi-pieces.xml';
+const companyRoot = process.env.PLANOS_COMPANY_DRIVE ? JSON.parse(process.env.PLANOS_COMPANY_DRIVE).folders.root : 'root';
 async function readPieceIndex(content) {
     const zip = await JSZip.loadAsync(content);
     const xml = await zip.file(PART)?.async('string');
@@ -17,7 +18,7 @@ async function attachPieceIndex(content, index) {
     return zip.generateAsync({type:'nodebuffer', compression:'DEFLATE'});
 }
 async function findLibrary(drive) {
-    const params = new URLSearchParams({q:"trashed = false and 'root' in parents and name = 'piezas.xlsx'", fields:'files(id,name,modifiedTime,appProperties)', pageSize:'100'});
+    const params = new URLSearchParams({q:`trashed = false and '${companyRoot}' in parents and name = 'piezas.xlsx'`, fields:'files(id,name,modifiedTime,appProperties)', pageSize:'100'});
     const response = await drive._fetchWithAuth(`${drive.BASE_URL}/files?${params}`);
     if (!response.ok) throw new Error('No se pudo consultar piezas.xlsx.');
     const {files} = await response.json();
@@ -28,7 +29,7 @@ async function findLibrary(drive) {
 async function writeLibrary(drive, existing, content) {
     const boundary = 'pieceLibrary'+Date.now();
     const metadata = {name:'piezas.xlsx', appProperties:{role:'reloncavi-piece-library'}};
-    if (!existing) metadata.parents = ['root'];
+    if (!existing) metadata.parents = [companyRoot];
     const body = Buffer.concat([
         Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`),
         content, Buffer.from(`\r\n--${boundary}--\r\n`),

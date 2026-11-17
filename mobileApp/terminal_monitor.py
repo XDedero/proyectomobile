@@ -73,7 +73,8 @@ _WORKER_LOCK = threading.Lock()
 def is_monitor_enabled():
     if 'test' in sys.argv:
         return False
-    return os.environ.get('APP_TERMINAL_DEBUG') == '1' or 'runserver' in sys.argv
+    from .tenant_runtime import workspace
+    return workspace.get() is not None or os.environ.get('APP_TERMINAL_DEBUG') == '1' or 'runserver' in sys.argv
 
 
 def _log_line(msg):
@@ -116,7 +117,8 @@ def enqueue_sync_task(fn):
     if not is_monitor_enabled():
         return
     _ensure_worker()
-    _SYNC_QUEUE.put(fn)
+    from .tenant_runtime import capture_workspace
+    _SYNC_QUEUE.put(capture_workspace(fn))
 
 
 def print_live_event(tag, title, lines):
@@ -153,6 +155,7 @@ def run_supabase_sql_sync(description, sql_statement, attempts=3):
 
 def run_gdrive_upload_sync(file_path, file_name, assoc_key, local_key, extra_args=()):
     """Invoca gdrive-sync-cli.js (Node.js) para subir o actualizar el archivo en Google Drive."""
+    from .tenant_runtime import drive_environment
     try:
         proc = subprocess.run(
             [
@@ -169,6 +172,7 @@ def run_gdrive_upload_sync(file_path, file_name, assoc_key, local_key, extra_arg
             encoding='utf-8',
             errors='replace',
             timeout=45,
+            env=drive_environment(),
         )
         now = datetime.now().strftime('%H:%M:%S')
         stdout = (proc.stdout or '').strip().splitlines()
@@ -359,6 +363,7 @@ def on_plan_deleted(sender, instance, **kwargs):
 
 
 def _delete_drive_copy(folder, table, local_key, project_key):
+    from .tenant_runtime import drive_environment
     args = ['node', GDRIVE_CLI, '--delete', '--folder', folder, '--project-key', project_key]
     if local_key:
         args.extend(['--local-key', local_key])
@@ -366,6 +371,7 @@ def _delete_drive_copy(folder, table, local_key, project_key):
         args,
         capture_output=True, text=True, encoding='utf-8', errors='replace',
         timeout=30,
+        env=drive_environment(),
     )
     output = (proc.stdout or '').strip().splitlines()
     data = json.loads(output[-1]) if output else {}
@@ -566,11 +572,12 @@ def on_project_saved(sender, instance, created, **kwargs):
 
 def _sync_marker_snapshot(pdf_id, manifest, sql_only=False):
     """Replace only this project's saved buttons; local numeric IDs are not global."""
+    from .cloud_projects import cloud_schema
     payload = json.dumps(manifest.get('markers', [])).replace("'", "''")
     pdf_id = pdf_id.replace("'", "''")
     sql = f"""
     LOCK TABLE public.pdf_markers IN SHARE ROW EXCLUSIVE MODE;
-    SELECT setval(pg_get_serial_sequence('public.pdf_markers', 'id'),
+    SELECT setval(pg_get_serial_sequence('{cloud_schema()}.pdf_markers', 'id'),
         GREATEST(COALESCE((SELECT max(id) FROM public.pdf_markers), 0) + 1, 1), false);
     INSERT INTO public.button_categories(id, name)
         SELECT DISTINCT (item->>'category_id')::uuid, item->>'category_name'
@@ -736,10 +743,11 @@ def queue_saved_project_sync(kind, plan, content, saved_at, *, content_reference
                 progress('pdf', 20)
                 # Only the two independent file transfers overlap. SQL, version
                 # checks, receipts and the outer publication queue stay ordered.
+                from .tenant_runtime import capture_workspace
                 with ThreadPoolExecutor(max_workers=2, thread_name_prefix='project-upload') as uploads:
-                    pdf_job = uploads.submit(_sync_pdf_plan_worker, plan_pk, plan_name, source, pages,
+                    pdf_job = uploads.submit(capture_workspace(_sync_pdf_plan_worker), plan_pk, plan_name, source, pages,
                         f'{basename}.pdf', key, register=False, **pdf_options) if kind == 'pdf' else None
-                    book_job = uploads.submit(_sync_workbook_worker, *workbook_args, workbook_content, key,
+                    book_job = uploads.submit(capture_workspace(_sync_workbook_worker), *workbook_args, workbook_content, key,
                         f'{basename}.xlsx', manifest, source, register=False, **workbook_options)
                     pdf = pdf_job.result() if pdf_job else None
                     if kind == 'pdf' and not pdf:
@@ -807,6 +815,8 @@ def retry_cloud_registrations(project_ids=None):
     """Resume acknowledged file uploads after a lost DB reply or an app restart."""
     if not is_monitor_enabled():
         return
+    from .tenant_runtime import workspace
+    company = workspace.get()
     candidates = SavedProject.objects.filter(cloud_status='uploaded')
     if project_ids is not None:
         candidates = candidates.filter(pk__in=project_ids)
@@ -815,7 +825,7 @@ def retry_cloud_registrations(project_ids=None):
         if not sql:
             continue
         with _REGISTRATION_LOCK:
-            key = (saved.pk, saved.saved_at.isoformat())
+            key = (company.company_id if company else None, saved.pk, saved.saved_at.isoformat())
             if time.monotonic() - _REGISTRATION_RETRIES.get(key, -1000) < 60:
                 continue
             _REGISTRATION_RETRIES[key] = time.monotonic()
