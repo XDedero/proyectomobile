@@ -106,9 +106,9 @@ def company_home(request):
     if account is None:
         return redirect('index')
     administrator = company_administrator(account)
-    from .tenant_runtime import workspace_for
-    ready = workspace_for(account) is not None
-    if ready and request.method == 'GET':
+    from .tenant_runtime import resolve_workspace
+    workspace, preparing = resolve_workspace(account, prepare=True)
+    if workspace is not None and request.method == 'GET':
         return redirect('index')
     error = None
     if request.method == 'POST':
@@ -126,7 +126,7 @@ def company_home(request):
     pending = (account.company.registration_requests.filter(status=RegistrationRequest.Status.PENDING)
                if administrator else [])
     return render(request, 'mobileApp/company_home.html', {
-        'account': account, 'administrator': administrator, 'pending': pending, 'error': error, 'workspace_ready': ready,
+        'account': account, 'administrator': administrator, 'pending': pending, 'error': error, 'preparing': preparing,
         **brand_context(account.company),
     }, status=400 if error else 200)
 

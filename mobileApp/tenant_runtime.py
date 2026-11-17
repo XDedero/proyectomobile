@@ -1,17 +1,24 @@
 """Bind a verified company account to its private drawing workspace."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 import re
+from threading import Lock
+from time import monotonic
 
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import close_old_connections, connection, transaction
 
 
 workspace = ContextVar('company_workspace', default=None)
 schema_override = ContextVar('company_schema_override', default=None)
+_provisioner = ThreadPoolExecutor(max_workers=1, thread_name_prefix='company-provision')
+_provision_lock = Lock()
+_provision_jobs = {}
 
 
 @dataclass(frozen=True)
@@ -83,22 +90,49 @@ def using_schema(schema):
                 raise
 
 
-def workspace_for(account, include_brand=False):
+def workspace_is_ready(schema):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT to_regclass(%s)', [schema + '.workspace_ready'])
+        return cursor.fetchone()[0] is not None
+
+
+def schedule_workspace(schema):
+    from .management.commands.prepare_company_workspaces import prepare_workspace
+
+    def provision():
+        close_old_connections()
+        try:
+            prepare_workspace(schema, only_if_missing=True)
+        except Exception as exc:
+            logging.getLogger(__name__).error('Company workspace preparation failed (%s).', type(exc).__name__)
+        finally:
+            close_old_connections()
+            with _provision_lock:
+                _provision_jobs[schema] = monotonic() + 30
+
+    with _provision_lock:
+        if monotonic() < _provision_jobs.get(schema, 0):
+            return
+        _provision_jobs[schema] = float('inf')
+        _provisioner.submit(provision)
+
+
+def resolve_workspace(account, *, include_brand=False, prepare=False):
     from .company_brand import brand_context
     from .models import CompanyDriveConnection
 
     if not settings.PLANOS_CLOUD_MODE:
-        return None
+        return None, False
     schema = schema_name(account.company_id)
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT to_regclass(%s)', [schema + '.workspace_ready'])
-        if cursor.fetchone()[0] is None:
-            return None
     drive = load_drive(account.company_id, CompanyDriveConnection.objects.filter(company_id=account.company_id).first())
     if drive is None:
-        return None
+        return None, False
+    if not workspace_is_ready(schema):
+        if prepare:
+            schedule_workspace(schema)
+        return None, True
     brand = brand_context(account.company) if include_brand else {}
-    return Workspace(schema, str(account.company_id), brand, drive)
+    return Workspace(schema, str(account.company_id), brand, drive), False
 
 
 @transaction.atomic
@@ -161,7 +195,7 @@ class CompanyWorkspaceMiddleware:
         account = current_account(request)
         if account is None:
             return self.get_response(request)
-        company = workspace_for(account, include_brand=request.path in ('/', '/administracion/'))
+        company, _ = resolve_workspace(account, include_brand=request.path in ('/', '/administracion/'))
         if company is None:
             return self.get_response(request)
         token = workspace.set(company)

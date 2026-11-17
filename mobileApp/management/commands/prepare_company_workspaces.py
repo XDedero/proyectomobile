@@ -9,7 +9,7 @@ from psycopg import sql
 
 from mobileApp.company_access import registration_companies
 from mobileApp.models import CompanyDriveConnection, RELONCAVI_COMPANY_ID
-from mobileApp.tenant_runtime import load_drive, schema_name, using_schema
+from mobileApp.tenant_runtime import load_drive, schema_name, using_schema, workspace_is_ready
 
 
 MIRROR_TABLES = (
@@ -37,11 +37,13 @@ def prepare_mirror(cursor, schema):
                 target, sql.Identifier(column), sql.Literal(f'{schema}.{sequence_name}')))
 
 
-def prepare_workspace(schema):
+def prepare_workspace(schema, *, only_if_missing=False):
     # Migrations need their own transaction boundaries on PostgreSQL.
     with connection.cursor() as cursor:
         cursor.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', [schema])
     try:
+        if only_if_missing and workspace_is_ready(schema):
+            return
         with connection.cursor() as cursor:
             cursor.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)))
             cursor.execute(sql.SQL('REVOKE ALL ON SCHEMA {} FROM PUBLIC').format(sql.Identifier(schema)))

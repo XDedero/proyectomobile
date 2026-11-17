@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ account.company.name }}</title>
+    {% if preparing %}<meta http-equiv="refresh" content="5">{% endif %}
     <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
 </head>
 <body style="background:{{ company_palette.background|default:'#edf5ff' }}">
@@ -20,7 +21,7 @@
             </div>
         </header>
         {% if error %}<p class="alert alert-danger" role="alert">{{ error }}</p>{% endif %}
-        {% if workspace_ready %}<a class="btn btn-outline-primary mb-3" href="{% url 'index' %}">Volver a los planos</a>{% endif %}
+        {% if preparing %}<p class="alert alert-info" role="status">Estamos preparando el espacio de planos de {{ account.company.name }}. La aplicación se abrirá automáticamente.</p>{% else %}
         {% if administrator %}
         <section class="card shadow-sm" aria-labelledby="requests-title">
             <div class="card-body">
@@ -38,7 +39,8 @@
             </div>
         </section>
         {% endif %}
-        {% if not workspace_ready %}<p class="mt-3 text-secondary">El acceso a planos y archivos de esta empresa está pendiente de habilitación.</p>{% endif %}
+        <p class="mt-3 text-secondary">El acceso a planos y archivos de esta empresa está pendiente de habilitación.</p>
+        {% endif %}
     </main>
 </body>
 </html>
