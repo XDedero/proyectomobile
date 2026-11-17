@@ -70,9 +70,9 @@ estos archivos no crean servicios ni contratan recursos.
 
 ## Empresas con almacenamiento propio
 
-En **Environment**, configura `PANEL_DRIVE_ENCRYPTION_KEY` con la clave que usa el
-panel local. El abridor `CopiarClaveRender.bat` del panel copia la clave vigente al
-portapapeles de Windows. Pégala en el valor secreto de Render y elige **Save and deploy**.
+El panel local verifica la cuenta de almacenamiento y guarda su autorización en
+Supabase Vault. La base de la app conserva la referencia del secreto de cada
+empresa. Render la consulta mediante la conexión privada PostgreSQL de la app.
 El arranque ejecuta `prepare_company_workspaces` y prepara el esquema privado de
 cada empresa que tiene administrador y almacenamiento verificados. Las empresas
 conectadas después del despliegue preparan su esquema al primer acceso.

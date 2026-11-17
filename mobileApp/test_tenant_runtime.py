@@ -8,11 +8,25 @@ from django.test import SimpleTestCase, override_settings
 
 from .cloud_projects import company_sql
 from .piece_service import catalog_state
-from .tenant_runtime import (Workspace, capture_workspace, drive_environment, offline_user_id, resolve_workspace,
+from .tenant_runtime import (Workspace, capture_workspace, drive_environment, load_drive, offline_user_id, resolve_workspace,
                              schema_name, workspace)
 
 
 class TenantIsolationTests(SimpleTestCase):
+    def test_drive_vault_uses_only_the_company_secret_without_a_render_key(self):
+        company, secret = uuid4(), uuid4()
+        creds = {'client_id': 'company-client', 'client_secret': 'test-secret', 'refresh_token': 'test-token'}
+        folders = {'pdf': 'pdf-folder', 'excel': 'excel-folder', 'originals': 'originals-folder'}
+        info = SimpleNamespace(drive_secret_id=secret, root_id='root-folder', folder_ids=folders)
+        with patch('mobileApp.tenant_runtime.connection') as connection:
+            cursor = connection.cursor.return_value.__enter__.return_value
+            cursor.fetchone.return_value = (json.dumps({'company_id': str(company), **creds}),)
+            self.assertEqual(load_drive(company, info), {'credentials': creds, 'folders': {**folders, 'root': info.root_id}})
+            self.assertEqual(cursor.execute.call_args.args[1], [secret, f'planos_drive_{company.hex}'])
+            self.assertIsNone(load_drive(uuid4(), info))
+            cursor.fetchone.return_value = None
+            self.assertIsNone(load_drive(company, info))
+
     @override_settings(PLANOS_CLOUD_MODE=True)
     def test_first_access_schedules_provisioning_only_with_a_valid_company_connection(self):
         account = SimpleNamespace(company_id=uuid4())

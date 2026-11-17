@@ -1,6 +1,4 @@
 """Create empty, private workspaces for verified company accounts."""
-import os
-
 from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
@@ -66,13 +64,13 @@ class Command(BaseCommand):
     help = 'Prepare private drawing and cloud metadata schemas for verified companies.'
 
     def handle(self, *args, **options):
-        if not settings.PLANOS_CLOUD_MODE or not os.environ.get('PANEL_DRIVE_ENCRYPTION_KEY', '').strip():
+        if not settings.PLANOS_CLOUD_MODE:
             return
         companies = list(registration_companies().exclude(pk=RELONCAVI_COMPANY_ID))
         for company in companies:
             drive = CompanyDriveConnection.objects.get(company=company)
             if load_drive(company.pk, drive) is None:
-                self.stderr.write(f'{company.name}: la clave del servidor no abre su conexión.')
+                self.stderr.write(f'{company.name}: la autorización de almacenamiento no está disponible.')
                 continue
             schema = schema_name(company.pk)
             try:

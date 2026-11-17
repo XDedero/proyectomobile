@@ -82,6 +82,7 @@ class CompanyDriveConnection(models.Model):
     root_id = models.CharField(max_length=128, unique=True)
     folder_ids = models.JSONField()
     encrypted_credentials = models.BinaryField(editable=False)
+    drive_secret_id = models.UUIDField(null=True, blank=True, editable=False, unique=True)
     verified_at = models.DateTimeField()
 
 

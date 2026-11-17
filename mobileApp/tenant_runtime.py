@@ -11,7 +11,7 @@ from threading import Lock
 from time import monotonic
 
 from django.conf import settings
-from django.db import close_old_connections, connection, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
 
 
 workspace = ContextVar('company_workspace', default=None)
@@ -46,13 +46,26 @@ def capture_workspace(callback):
 
 
 def load_drive(company_id, connection_info):
-    from cryptography.fernet import Fernet, InvalidToken
-
-    key = os.environ.get('PANEL_DRIVE_ENCRYPTION_KEY', '').strip()
-    if not key or connection_info is None:
+    if connection_info is None:
         return None
     try:
-        payload = json.loads(Fernet(key.encode()).decrypt(bytes(connection_info.encrypted_credentials)))
+        if connection_info.drive_secret_id:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT decrypted_secret FROM vault.decrypted_secrets WHERE id=%s AND name=%s',
+                               [connection_info.drive_secret_id, f'planos_drive_{company_id.hex}'])
+                secret = cursor.fetchone()
+            if not secret:
+                return None
+            payload = json.loads(secret[0])
+        else:
+            key = os.environ.get('PANEL_DRIVE_ENCRYPTION_KEY', '').strip()
+            if not key:
+                return None
+            from cryptography.fernet import Fernet, InvalidToken
+            try:
+                payload = json.loads(Fernet(key.encode()).decrypt(bytes(connection_info.encrypted_credentials)))
+            except InvalidToken:
+                return None
         folders = {role: connection_info.folder_ids[role] for role in ('pdf', 'excel', 'originals')}
         folders['root'] = connection_info.root_id
         if payload.get('company_id') != str(company_id):
@@ -65,7 +78,10 @@ def load_drive(company_id, connection_info):
         if not all(isinstance(value, str) and value.strip() for value in credentials.values()):
             return None
         return {'credentials': credentials, 'folders': folders}
-    except (InvalidToken, KeyError, ValueError, TypeError, AttributeError):
+    except DatabaseError as exc:
+        logging.getLogger(__name__).error('Company storage secret unavailable (%s).', type(exc).__name__)
+        return None
+    except (KeyError, ValueError, TypeError, AttributeError):
         return None
 
 
