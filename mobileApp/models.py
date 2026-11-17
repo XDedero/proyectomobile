@@ -68,9 +68,9 @@ class CompanyBrand(models.Model):
 
 
 class CompanyAdminSetup(models.Model):
-    """Credentials for a pending company, separate from active Django accounts."""
+    """The company administrator provisioned by the owner's panel."""
     company = models.OneToOneField(Company, primary_key=True, on_delete=models.CASCADE)
-    rut = models.CharField(max_length=10)
+    rut = models.CharField(max_length=10, unique=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     password_hash = models.CharField(max_length=256)
@@ -124,6 +124,15 @@ class UserProfile(models.Model):
         from .accounts import normalize_rut
         self.rut = normalize_rut(self.rut)
         return super().save(*args, **kwargs)
+
+
+class CompanyAccount(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name='accounts')
+    rut = models.CharField(max_length=10, unique=True)
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    password_hash = models.CharField(max_length=256)
+    role = models.CharField(max_length=20, choices=UserProfile.Role.choices, default=UserProfile.Role.VIEWER)
 
 
 class RegistrationRequest(models.Model):

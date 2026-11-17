@@ -1,0 +1,43 @@
+{% load static %}
+<!doctype html>
+<html lang="es-CL">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ account.company.name }}</title>
+    <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+</head>
+<body style="background:{{ company_palette.background|default:'#edf5ff' }}">
+    <main class="container py-4" style="max-width:880px">
+        <header class="card shadow-sm mb-4">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap" style="border-top:4px solid {{ company_palette.primary|default:'#2368a7' }}">
+                {% if company_logo %}<img src="{{ company_logo }}" width="64" height="64" style="object-fit:contain" alt="">{% endif %}
+                <div class="me-auto">
+                    <h1 class="h4 mb-1">{{ account.company.name }}</h1>
+                    <p class="mb-0">{{ account.first_name }} {{ account.last_name }} · {% if administrator %}Administrador general{% else %}{{ account.get_role_display }}{% endif %}</p>
+                </div>
+                <form method="post" action="{% url 'company_logout' %}">{% csrf_token %}<button class="btn btn-outline-secondary" type="submit">Cerrar sesión</button></form>
+            </div>
+        </header>
+        {% if error %}<p class="alert alert-danger" role="alert">{{ error }}</p>{% endif %}
+        {% if administrator %}
+        <section class="card shadow-sm" aria-labelledby="requests-title">
+            <div class="card-body">
+                <h2 id="requests-title" class="h5">Solicitudes de acceso</h2>
+                {% for item in pending %}
+                <form method="post" class="border-top py-3 d-flex align-items-end gap-2 flex-wrap">
+                    {% csrf_token %}
+                    <input type="hidden" name="id" value="{{ item.pk }}">
+                    <div class="me-auto"><strong>{{ item.first_name }} {{ item.last_name }}</strong><div>{{ item.rut }}</div></div>
+                    <label>Rol <select class="form-select" name="role"><option value="viewer">Espectador</option><option value="worker">Trabajador</option></select></label>
+                    <button class="btn btn-primary" type="submit" name="action" value="approve">Aprobar</button>
+                    <button class="btn btn-outline-danger" type="submit" name="action" value="reject">Rechazar</button>
+                </form>
+                {% empty %}<p class="mb-0">No hay solicitudes pendientes.</p>{% endfor %}
+            </div>
+        </section>
+        {% endif %}
+        <p class="mt-3 text-secondary">El acceso a planos y archivos de esta empresa está pendiente de habilitación.</p>
+    </main>
+</body>
+</html>

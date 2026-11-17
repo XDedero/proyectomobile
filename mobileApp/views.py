@@ -38,6 +38,7 @@ def index(request):
 def session_data(request):
     user = request.user
     from .accounts import application_role
+    from .company_access import current_account
     profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
     return {
         'user': {
@@ -49,6 +50,7 @@ def session_data(request):
             'permissions': capabilities(user),
         } if user.is_authenticated and user.is_active else None,
         'csrf_token': get_token(request),
+        'company_url': reverse('company_home') if current_account(request) else None,
     }
 
 
@@ -81,6 +83,10 @@ def auth_login(request):
     local_user = profile.user if profile else get_user_model().objects.select_related('app_profile').filter(
         username=identifier).first()
     local_profile = getattr(local_user, 'app_profile', None)
+    if local_user is None and rut:
+        from .company_access import sign_in
+        if sign_in(request, rut, data['password']):
+            return JsonResponse(session_data(request))
     # Legacy accounts, including the primary admin, have local credentials.
     # Only shared or unknown identities need a cloud refresh before authentication.
     if shared_accounts.enabled() and (local_user is None or (local_profile and local_profile.cloud_id)):
@@ -96,6 +102,8 @@ def auth_login(request):
     form = AuthenticationForm(request, data=data)
     if not form.is_valid():
         return JsonResponse({'error': 'Usuario o contraseña incorrectos, o cuenta inactiva.'}, status=401)
+    from .company_access import SESSION_KEY
+    request.session.pop(SESSION_KEY, None)
     django_login(request, form.get_user())
     return JsonResponse(session_data(request))
 

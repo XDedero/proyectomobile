@@ -51,7 +51,7 @@ def validate_name(value, label):
 
 
 def rut_in_use(rut, *, exclude_user=None):
-    from .models import UserProfile
+    from .models import CompanyAccount, CompanyAdminSetup, UserProfile
     profiles = UserProfile.objects.filter(rut=rut)
     users = get_user_model().objects.all()
     if exclude_user is not None:
@@ -59,8 +59,8 @@ def rut_in_use(rut, *, exclude_user=None):
         users = users.exclude(pk=exclude_user)
     body, verifier = rut.split('-')
     dotted = f'{int(body):,}'.replace(',', '.') + '-' + verifier
-    return profiles.exists() or any(users.filter(username__iexact=value).exists()
-                                    for value in (rut, body + verifier, dotted))
+    return (profiles.exists() or any(users.filter(username__iexact=value).exists() for value in (rut, body + verifier, dotted))
+            or CompanyAccount.objects.filter(rut=rut).exists() or CompanyAdminSetup.objects.filter(rut=rut).exists())
 
 
 def next_test_rut():

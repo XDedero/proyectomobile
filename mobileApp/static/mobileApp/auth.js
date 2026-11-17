@@ -83,7 +83,9 @@
     async function refresh() {
         const revision = ++authRevision;
         const result = await authRequest('/api/auth/session/');
-        if (revision === authRevision) applyUser(result.user);
+        if (revision !== authRevision) return;
+        if (result.company_url) window.location.replace(result.company_url);
+        else applyUser(result.user);
     }
 
     loginForm.addEventListener('submit', async (event) => {
@@ -98,7 +100,8 @@
             const result = await authRequest('/api/auth/login/', { username, password });
             if (revision === authRevision) {
                 document.getElementById('passwordInput').value = '';
-                applyUser(result.user);
+                if (result.company_url) window.location.replace(result.company_url);
+                else applyUser(result.user);
             }
         } catch (error) { showLoginError(error.message); }
         finally { loginButton.disabled = false; }

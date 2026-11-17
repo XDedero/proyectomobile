@@ -19,6 +19,7 @@ from .management_views import administrators_only
 from .models import Company, RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
 from .pdf_views import error_response, json_body
 from .cloud_projects import CloudUnavailable
+from .company_access import registration_companies
 
 
 def record_id(data):
@@ -26,10 +27,6 @@ def record_id(data):
     if type(value) is not int or value <= 0:
         raise ValidationError('Seleccione un registro válido.')
     return value
-
-
-def registration_companies():
-    return Company.objects.filter(status=Company.Status.ACTIVE, drive_ready=True)
 
 
 @require_GET
@@ -41,6 +38,8 @@ def list_registration_companies(request):
 def registration_company(data):
     if 'company_id' not in data:
         # Older installations and cached forms predate the company selector.
+        if registration_companies().exclude(pk=RELONCAVI_COMPANY_ID).exists():
+            raise ValidationError('Recargue el formulario y seleccione la empresa a la que solicita acceso.')
         company_id = RELONCAVI_COMPANY_ID
     else:
         value = data['company_id']
@@ -64,6 +63,7 @@ def request_registration(request):
     try:
         data = json_body(request)
         company = registration_company(data)
+        shared_registration = company.pk == RELONCAVI_COMPANY_ID and shared_accounts.enabled()
         first_name = validate_name(data.get('first_name'), 'nombre')
         last_name = validate_name(data.get('last_name'), 'apellido')
         rut = normalize_rut(data.get('rut'), strict=True)
@@ -75,7 +75,7 @@ def request_registration(request):
         user = get_user_model()(username=rut, first_name=first_name, last_name=last_name)
         validate_password(password, user=user)
         pending = RegistrationRequest.objects.filter(company=company, rut=rut, status='pending')
-        if shared_accounts.enabled():
+        if shared_registration:
             previous = pending.filter(cloud_synced=True).first()
             if previous:
                 shared_accounts.refresh_request(previous)
@@ -86,14 +86,14 @@ def request_registration(request):
                 raise ValidationError('Ya existe un usuario con ese RUT.')
             item = pending.first()
             if item:
-                if (not shared_accounts.enabled() or item.cloud_synced
+                if (not shared_registration or item.cloud_synced
                         or item.first_name != first_name or item.last_name != last_name
                         or not check_password(password, item.password_hash)):
                     raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
             else:
                 item = pending.create(company=company, first_name=first_name, last_name=last_name,
                                       rut=rut, password_hash=make_password(password))
-        if shared_accounts.enabled():
+        if shared_registration:
             try:
                 result = shared_accounts.publish_request(item)
             except ValidationError:

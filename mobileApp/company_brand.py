@@ -42,8 +42,9 @@ def palette(color):
     }
 
 
-def brand_context():
-    brand = (CompanyBrand.objects.filter(company_id=RELONCAVI_COMPANY_ID)
+def brand_context(company=None):
+    company_id = company.pk if company is not None else RELONCAVI_COMPANY_ID
+    brand = (CompanyBrand.objects.filter(company_id=company_id)
              .select_related('company').defer('logo_png')
              .annotate(has_logo=ExpressionWrapper(~Q(logo_png=b''), output_field=BooleanField())).first())
     if not brand:
@@ -75,7 +76,10 @@ def normalize_logo(upload):
 @require_safe
 @never_cache
 def company_logo(request, size=None):
-    data = CompanyBrand.objects.filter(company_id=RELONCAVI_COMPANY_ID).values_list('logo_png', flat=True).first()
+    from .company_access import current_account
+    account = current_account(request)
+    company_id = account.company_id if account else RELONCAVI_COMPANY_ID
+    data = CompanyBrand.objects.filter(company_id=company_id).values_list('logo_png', flat=True).first()
     if not data or not bytes(data).startswith(b'\x89PNG\r\n\x1a\n'):
         raise Http404
     if size is not None:

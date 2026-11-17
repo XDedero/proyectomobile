@@ -4,15 +4,17 @@ from types import SimpleNamespace
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .accounts import next_test_rut, normalize_rut, rut_check_digit
-from .models import Company, CompanyBrand, PdfPlan, RegistrationRequest, RELONCAVI_COMPANY_ID, UserProfile
+from .models import (Company, CompanyAccount, CompanyAdminSetup, CompanyBrand, CompanyDriveConnection, PdfPlan,
+                     RegistrationRequest, RELONCAVI_COMPANY_ID, UserProfile)
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -67,6 +69,45 @@ class RegistrationTests(TestCase):
         response = self.client.get(reverse('index'))
         self.assertContains(response, 'id="registrationCompany"')
         self.assertContains(response, 'name="company_id"')
+
+    def verified_company(self, slug, admin_rut):
+        company = Company.objects.create(name=slug, slug=slug, drive_ready=True)
+        CompanyDriveConnection.objects.create(company=company, account_id=slug, root_id=slug, folder_ids={},
+                                              encrypted_credentials=b'fixture', verified_at=timezone.now())
+        CompanyAdminSetup.objects.create(company=company, rut=admin_rut, first_name='Ana', last_name='Sur',
+                                         password_hash=make_password('Partida!Sur2026'))
+        return company
+
+    def test_company_access_through_global_login_and_company_registration(self):
+        company = self.verified_company('pitrufquen', '22222222-2')
+        foreign = self.verified_company('taller-sur', '33333333-3')
+        listed = self.client.get(reverse('registration_companies')).json()['companies']
+        self.assertEqual({row['id'] for row in listed}, {str(RELONCAVI_COMPANY_ID), str(company.pk), str(foreign.pk)})
+        item = self.submit(company_id=str(company.pk))
+        other = self.submit(company_id=str(foreign.pk), rut='44444444-4', first_name='Solicitud externa')
+        credentials = {'username': '22.222.222-2', 'password': 'Partida!Sur2026'}
+        self.assertEqual(self.post('auth_login', {**credentials, 'password': 'incorrecta'}).status_code, 401)
+        login = self.post('auth_login', credentials)
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()['company_url'], reverse('company_home'))
+        self.assertIsNone(login.json()['user'])
+        portal = self.client.get(reverse('company_home'))
+        self.assertContains(portal, item.rut)
+        self.assertNotContains(portal, other.rut)
+        self.assertEqual(self.client.get(reverse('list_pdf_plans')).status_code, 401)
+        denied = self.client.post(reverse('company_home'), {'id': other.pk, 'action': 'approve', 'role': 'worker'})
+        self.assertEqual(denied.status_code, 400)
+        approved = self.client.post(reverse('company_home'), {'id': item.pk, 'action': 'approve', 'role': 'worker'})
+        self.assertRedirects(approved, reverse('company_home'))
+        self.assertTrue(CompanyAccount.objects.filter(rut=item.rut, company=company, role='worker').exists())
+        worker = Client()
+        self.assertEqual(self.post('auth_login', {'username': item.rut, 'password': 'Cascada!Sur2026'}, worker).json()['company_url'],
+                         reverse('company_home'))
+        self.assertEqual(worker.post(reverse('company_home'), {'id': other.pk, 'action': 'reject'}).status_code, 403)
+        company.status = Company.Status.SUSPENDED
+        company.save(update_fields=['status'])
+        self.assertIsNone(self.client.get(reverse('auth_session')).json()['company_url'])
+        self.assertNotIn(str(company.pk), {row['id'] for row in self.client.get(reverse('registration_companies')).json()['companies']})
 
     def test_only_the_general_admin_can_edit_its_brand(self):
         url = reverse('company_profile')
