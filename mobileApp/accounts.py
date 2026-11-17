@@ -109,6 +109,7 @@ def user_data(user):
 def registration_data(item):
     return {'id': item.pk, 'first_name': item.first_name, 'last_name': item.last_name,
             'name': f'{item.first_name} {item.last_name}', 'rut': item.rut,
+            'company_name': item.company.name,
             'status': item.status, 'created_at': item.created_at.isoformat(),
             'reviewed_at': item.reviewed_at.isoformat() if item.reviewed_at else None,
             'reviewed_by': item.reviewed_by.get_full_name() or item.reviewed_by.username if item.reviewed_by else None,

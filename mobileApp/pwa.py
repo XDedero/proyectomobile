@@ -33,14 +33,22 @@ def asset_version():
 
 
 @require_GET
+@never_cache
 def manifest(request):
+    from .company_brand import brand_context
+
+    brand = brand_context()
+    name = brand.get('company_name', 'Reloncaví')
+    branding = brand.get('company_palette') or {}
+    revision = brand.get('company_logo_revision')
     return JsonResponse({
-        'id': reverse('index'), 'name': 'Reloncaví APP', 'short_name': 'Reloncaví',
-        'description': 'Planos, sectores y fichas de mantenimiento de Reloncaví.',
+        'id': reverse('index'), 'name': f'{name} APP', 'short_name': name,
+        'description': f'Planos, sectores y fichas de mantenimiento de {name}.',
         'lang': 'es-CL', 'start_url': reverse('index'), 'scope': reverse('index'),
-        'display': 'standalone', 'background_color': '#ffffff', 'theme_color': '#eaf4ff',
+        'display': 'standalone', 'background_color': '#ffffff', 'theme_color': branding.get('header', '#eaf4ff'),
         'icons': [
-            {'src': f'/static/mobileApp/img/pwa/icon-{size}.png', 'sizes': f'{size}x{size}',
+            {'src': f"{reverse('company_icon', args=[size])}?v={revision}" if revision else
+                    f'/static/mobileApp/img/pwa/icon-{size}.png', 'sizes': f'{size}x{size}',
              'type': 'image/png', 'purpose': purpose}
             for size, purpose in [(192, 'any'), (512, 'any'), (512, 'maskable')]
         ],

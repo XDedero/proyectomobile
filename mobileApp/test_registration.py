@@ -12,7 +12,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from .accounts import next_test_rut, normalize_rut, rut_check_digit
-from .models import PdfPlan, RegistrationRequest, UserProfile
+from .models import Company, CompanyBrand, PdfPlan, RegistrationRequest, RELONCAVI_COMPANY_ID, UserProfile
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -51,6 +51,64 @@ class RegistrationTests(TestCase):
     def decide(self, item, action):
         self.client.force_login(self.admin)
         return self.post('manage_registration', {'id': item.pk, 'action': action})
+
+    def test_company_list_only_includes_companies_available_for_registration(self):
+        Company.objects.create(name='Taller Sur', slug='taller-sur', drive_ready=True)
+        Company.objects.create(name='Taller Norte', slug='taller-norte', status=Company.Status.SUSPENDED)
+        response = self.client.get(reverse('registration_companies'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(response.json(), {'companies': [{'id': str(RELONCAVI_COMPANY_ID), 'name': 'Reloncaví'}]})
+
+        Company.objects.filter(pk=RELONCAVI_COMPANY_ID).update(drive_ready=False)
+        self.assertEqual(self.client.get(reverse('registration_companies')).json(), {'companies': []})
+
+    def test_registration_form_renders_the_company_selector(self):
+        response = self.client.get(reverse('index'))
+        self.assertContains(response, 'id="registrationCompany"')
+        self.assertContains(response, 'name="company_id"')
+
+    def test_only_the_general_admin_can_edit_its_brand(self):
+        url = reverse('company_profile')
+        data = {'name': 'Reloncaví Taller', 'tax_id': '12.345.678-5', 'color': '#fff000', 'revision': '0'}
+        self.client.force_login(self.ordinary_administrator())
+        self.assertEqual(self.client.post(url, data).status_code, 403)
+        self.client.force_login(self.primary_administrator())
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.assertEqual(CompanyBrand.objects.get(company_id=RELONCAVI_COMPANY_ID).base_color, '#fff000')
+        self.assertEqual(Company.objects.get(pk=RELONCAVI_COMPANY_ID).tax_id, '12345678-5')
+        self.assertContains(self.client.get(reverse('index')), 'Reloncaví Taller')
+        self.assertEqual(self.client.post(url, {**data, 'name': 'Edición antigua'}).status_code, 400)
+        self.assertEqual(Company.objects.get(pk=RELONCAVI_COMPANY_ID).name, 'Reloncaví Taller')
+
+    def test_submission_stores_the_selected_company_and_rechecks_availability(self):
+        pending = Company.objects.create(name='Taller Sur', slug='taller-sur')
+        for value in (str(pending.pk), '', None, 1, 'empresa-inválida'):
+            with self.subTest(value=value):
+                self.assertEqual(self.post('request_registration', self.payload(company_id=value)).status_code, 400)
+        self.assertFalse(RegistrationRequest.objects.exists())
+
+        item = self.submit(company_id=str(RELONCAVI_COMPANY_ID))
+        self.assertEqual(item.company_id, RELONCAVI_COMPANY_ID)
+
+        Company.objects.filter(pk=RELONCAVI_COMPANY_ID).update(status=Company.Status.SUSPENDED)
+        payload = self.payload(company_id=str(RELONCAVI_COMPANY_ID), rut='22222222-2')
+        self.assertEqual(self.post('request_registration', payload).status_code, 400)
+        self.assertEqual(RegistrationRequest.objects.count(), 1)
+
+    def test_legacy_admin_cannot_list_or_review_another_company_request(self):
+        other = Company.objects.create(name='Taller Sur', slug='taller-sur')
+        request = RegistrationRequest.objects.create(
+            company=other, first_name='María', last_name='Muñoz', rut='12345678-5',
+        )
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(reverse('pending_registrations')).json(), {'requests': []})
+        self.assertEqual(self.post('manage_registration', {'id': request.pk, 'action': 'approve'}).status_code, 404)
+        self.assertTrue(RegistrationRequest.objects.filter(pk=request.pk, status='pending').exists())
+
+    def test_second_company_cannot_activate_while_runtime_permissions_are_global(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Company.objects.create(name='Taller Sur', slug='taller-sur', status=Company.Status.ACTIVE, drive_ready=True)
 
     def test_rut_validation_normalizes_equivalent_formats_and_checks_verifier(self):
         for value in ('12.345.678-5', '12345678-5', '123456785'):

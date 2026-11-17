@@ -97,7 +97,8 @@
             const row = document.createElement('article'); row.className = 'management-row request-row';
             const copy = document.createElement('div'); copy.className = 'request-copy';
             const title = document.createElement('strong'); title.textContent = item.name || `${item.first_name} ${item.last_name}`;
-            const details = document.createElement('p'); details.textContent = `RUT ${item.rut} · Solicitado ${date(item.created_at)}`;
+            const details = document.createElement('p');
+            details.textContent = [item.company_name, `RUT ${item.rut}`, `Solicitado ${date(item.created_at)}`].filter(Boolean).join(' · ');
             const badge = document.createElement('span'); badge.className = 'request-state pending';
             badge.textContent = 'Pendiente';
             copy.append(title, details, badge);

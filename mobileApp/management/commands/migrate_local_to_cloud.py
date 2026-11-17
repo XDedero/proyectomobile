@@ -23,6 +23,7 @@ from django.db import connections, transaction
 from django.db.migrations.loader import MigrationLoader
 
 from mobileApp.drive_storage import GoogleDriveStorage
+from mobileApp.models import RELONCAVI_COMPANY_ID
 
 
 SEED_CATEGORIES = {
@@ -45,6 +46,12 @@ def require_empty_target():
             rows = {(str(pk), name) for pk, name in model.objects.values_list('pk', 'name')}
             if rows - SEED_CATEGORIES:
                 raise CommandError('El destino ya contiene categorias propias; no se modificara.')
+        elif model._meta.model_name == 'company':
+            companies = model.objects.all()
+            seed = companies.filter(pk=RELONCAVI_COMPANY_ID, name='Reloncaví', slug='reloncavi',
+                                    tax_id__isnull=True, status='active', drive_ready=True)
+            if companies.count() != seed.count():
+                raise CommandError('El destino ya contiene empresas o configuraciones propias; no se modificara.')
         elif model.objects.exists():
             raise CommandError('El destino ya contiene datos de la aplicacion; no se sobrescribiran. Use un esquema privado nuevo.')
 

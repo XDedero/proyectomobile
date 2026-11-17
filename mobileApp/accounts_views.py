@@ -1,5 +1,5 @@
 """Registration requests and administrator-managed accounts."""
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
@@ -10,13 +10,13 @@ from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .accounts import (application_role, can_edit_user, invalidate_user_sessions, next_test_rut,
                        normalize_rut, rut_in_use, user_data, validate_name)
 from .access import is_administrator
 from .management_views import administrators_only
-from .models import RegistrationRequest, UserProfile
+from .models import Company, RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
 from .pdf_views import error_response, json_body
 from .cloud_projects import CloudUnavailable
 
@@ -28,6 +28,34 @@ def record_id(data):
     return value
 
 
+def registration_companies():
+    return Company.objects.filter(status=Company.Status.ACTIVE, drive_ready=True)
+
+
+@require_GET
+@never_cache
+def list_registration_companies(request):
+    return JsonResponse({'companies': list(registration_companies().values('id', 'name'))})
+
+
+def registration_company(data):
+    if 'company_id' not in data:
+        # Older installations and cached forms predate the company selector.
+        company_id = RELONCAVI_COMPANY_ID
+    else:
+        value = data['company_id']
+        if not isinstance(value, str) or len(value) != 36:
+            raise ValidationError('Seleccione una empresa válida.')
+        try:
+            company_id = UUID(value)
+        except ValueError as exc:
+            raise ValidationError('Seleccione una empresa válida.') from exc
+    company = registration_companies().filter(pk=company_id).first()
+    if company is None:
+        raise ValidationError('Esta empresa no está disponible para recibir solicitudes.')
+    return company
+
+
 @require_POST
 @never_cache
 def request_registration(request):
@@ -35,6 +63,7 @@ def request_registration(request):
 
     try:
         data = json_body(request)
+        company = registration_company(data)
         first_name = validate_name(data.get('first_name'), 'nombre')
         last_name = validate_name(data.get('last_name'), 'apellido')
         rut = normalize_rut(data.get('rut'), strict=True)
@@ -45,22 +74,25 @@ def request_registration(request):
             raise ValidationError('Las contraseñas no coinciden.')
         user = get_user_model()(username=rut, first_name=first_name, last_name=last_name)
         validate_password(password, user=user)
+        pending = RegistrationRequest.objects.filter(company=company, rut=rut, status='pending')
         if shared_accounts.enabled():
-            previous = RegistrationRequest.objects.filter(rut=rut, status='pending', cloud_synced=True).first()
+            previous = pending.filter(cloud_synced=True).first()
             if previous:
                 shared_accounts.refresh_request(previous)
         with transaction.atomic():
+            if not registration_companies().select_for_update().filter(pk=company.pk).exists():
+                raise ValidationError('Esta empresa no está disponible para recibir solicitudes.')
             if rut_in_use(rut):
                 raise ValidationError('Ya existe un usuario con ese RUT.')
-            item = RegistrationRequest.objects.filter(rut=rut, status='pending').first()
+            item = pending.first()
             if item:
                 if (not shared_accounts.enabled() or item.cloud_synced
                         or item.first_name != first_name or item.last_name != last_name
                         or not check_password(password, item.password_hash)):
                     raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
             else:
-                item = RegistrationRequest.objects.create(first_name=first_name, last_name=last_name,
-                                                          rut=rut, password_hash=make_password(password))
+                item = pending.create(company=company, first_name=first_name, last_name=last_name,
+                                      rut=rut, password_hash=make_password(password))
         if shared_accounts.enabled():
             try:
                 result = shared_accounts.publish_request(item)
@@ -89,13 +121,14 @@ def manage_registration(request):
         if role not in UserProfile.Role.values:
             raise ValidationError('Seleccione un rol válido para la cuenta.')
         from . import shared_accounts
+        requests = RegistrationRequest.objects.filter(company_id=RELONCAVI_COMPANY_ID)
         if shared_accounts.enabled():
-            item = get_object_or_404(RegistrationRequest, pk=record_id(data))
+            item = get_object_or_404(requests, pk=record_id(data))
             shared_accounts.review_request(item, action, role, request.user)
             message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
             return JsonResponse({'deleted': True, 'message': message})
         with transaction.atomic():
-            item = get_object_or_404(RegistrationRequest.objects.select_for_update(), pk=record_id(data))
+            item = get_object_or_404(requests.select_for_update(), pk=record_id(data))
             if item.status != 'pending':
                 return error_response('La solicitud ya fue resuelta. Recargue la lista.', 409)
             if action == 'approve':

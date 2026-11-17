@@ -9,12 +9,15 @@ from . import button_views
 from . import management_views
 from . import sector_views
 from . import accounts_views
+from . import company_brand
 from . import pwa
 
 urlpatterns = [
     path('api/projects/<str:kind>/<int:plan_id>/draft/', plan_permission_views.edit_plan_draft, name='edit_plan_draft'),
     path('api/projects/<str:kind>/<int:plan_id>/permissions/', plan_permission_views.plan_edit_permissions, name='plan_edit_permissions'),
     path('manifest.webmanifest', pwa.manifest, name='pwa_manifest'),
+    path('marca/logo.png', company_brand.company_logo, name='company_logo'),
+    path('marca/icono/<int:size>.png', company_brand.company_logo, name='company_icon'),
     path('service-worker.js', pwa.service_worker, name='pwa_service_worker'),
     path('api/projects/<str:kind>/<int:plan_id>/sectors/', sector_views.plan_sectors, name='plan_sectors'),
     path('api/piece-library/', piece_views.saved_pieces, name='saved_pieces'),
@@ -26,6 +29,7 @@ urlpatterns = [
     path('api/piece-library/import/', piece_views.import_piece_document, name='import_piece_document'),
     path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
+    path('administracion/empresa/', management_views.edit_company_profile, name='company_profile'),
     path('api/administration/', management_views.management_data, name='management_data'),
     path('api/administration/requests/pending/', management_views.pending_registrations, name='pending_registrations'),
     path('api/administration/requests/', accounts_views.manage_registration, name='manage_registration'),
@@ -36,6 +40,7 @@ urlpatterns = [
     path('', views.index, name='index'),
     path('api/auth/session/', views.auth_session, name='auth_session'),
     path('api/auth/login/', views.auth_login, name='auth_login'),
+    path('api/auth/register/companies/', accounts_views.list_registration_companies, name='registration_companies'),
     path('api/auth/register/', accounts_views.request_registration, name='request_registration'),
     path('api/auth/logout/', views.auth_logout, name='auth_logout'),
     path('api/buttons/<str:kind>/<int:button_id>/details/', button_views.button_details, name='button_details'),

@@ -13,7 +13,7 @@ from django.http import JsonResponse
 from django.utils.dateparse import parse_datetime
 
 from .cloud_projects import CloudUnavailable, supabase_query
-from .models import RegistrationRequest, UserProfile
+from .models import RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
 
 
 def enabled():
@@ -53,6 +53,8 @@ def query(sql, *, write=False):
 
 
 def publish_request(item):
+    if item.company_id != RELONCAVI_COMPANY_ID:
+        raise ValidationError('El registro compartido anterior solo admite solicitudes de Reloncaví.')
     rows = query(
         'SELECT app_identity.submit_registration(' +
         ','.join(literal(value) for value in (
@@ -75,8 +77,9 @@ def refresh_request(item):
 
 
 def sync_requests():
-    """Publish retained submissions, then reconcile using global UUIDs, never local IDs."""
-    for item in RegistrationRequest.objects.filter(status='pending', cloud_synced=False):
+    """Reconcile the legacy Reloncaví registry using its shared UUIDs."""
+    requests = RegistrationRequest.objects.filter(company_id=RELONCAVI_COMPANY_ID)
+    for item in requests.filter(status='pending', cloud_synced=False):
         try:
             publish_request(item)
         except ValidationError:
@@ -86,27 +89,27 @@ def sync_requests():
         FROM app_identity.registration_requests
         WHERE status='pending' OR id IN (
             """ + (','.join(literal(identifier) + '::uuid' for identifier in
-                           RegistrationRequest.objects.values_list('cloud_id', flat=True)) or 'NULL') + ');')
+                           requests.values_list('cloud_id', flat=True)) or 'NULL') + ');')
     with transaction.atomic():
         for row in rows:
             if row['status'] != 'pending':
-                RegistrationRequest.objects.filter(cloud_id=row['id']).delete()
+                requests.filter(cloud_id=row['id']).delete()
                 continue
-            item = RegistrationRequest.objects.filter(cloud_id=row['id']).first()
+            item = requests.filter(cloud_id=row['id']).first()
             if item is None:
                 # A pre-migration local duplicate can use the canonical request UUID.
-                item = RegistrationRequest.objects.filter(rut=row['rut'], status='pending').first()
+                item = requests.filter(rut=row['rut'], status='pending').first()
             values = {key: row[key] for key in ('rut', 'first_name', 'last_name')}
             values.update(cloud_id=row['id'], cloud_synced=True)
             if item:
-                RegistrationRequest.objects.filter(pk=item.pk).update(**values)
+                requests.filter(pk=item.pk).update(**values)
             else:
-                item = RegistrationRequest.objects.create(**values)
+                item = requests.create(company_id=RELONCAVI_COMPANY_ID, **values)
             # psycopg returns timestamptz as datetime; the legacy CLI returns ISO text.
             created_at = row['created_at']
             if not isinstance(created_at, datetime):
                 created_at = parse_datetime(created_at)
-            RegistrationRequest.objects.filter(pk=item.pk).update(created_at=created_at)
+            requests.filter(pk=item.pk).update(created_at=created_at)
 
 
 def apply_account(data):

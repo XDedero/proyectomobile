@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.db import models
@@ -21,6 +21,76 @@ def pdf_upload_path(instance, filename):
 
 def new_cloud_key():
     return f'project_{uuid4().hex}'
+
+
+# Existing installations and the legacy shared registry represent this company.
+RELONCAVI_COMPANY_ID = UUID('25c4e566-ed01-47dd-8107-a715fcd125d2')
+
+
+class Company(models.Model):
+    class Status(models.TextChoices):
+        PENDING_STORAGE = 'pending_storage', 'Pendiente de almacenamiento'
+        ACTIVE = 'active', 'Activa'
+        SUSPENDED = 'suspended', 'Suspendida'
+        ARCHIVED = 'archived', 'Archivada'
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=100, unique=True)
+    tax_id = models.CharField(max_length=10, unique=True, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_STORAGE)
+    drive_ready = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['name', 'id']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(status__in=['pending_storage', 'active', 'suspended', 'archived']),
+                                   name='company_valid_status'),
+            # Lift this restriction when tenant permissions and Drive routing are both in place.
+            models.CheckConstraint(condition=~models.Q(status='active') | models.Q(id=RELONCAVI_COMPANY_ID),
+                                   name='company_only_legacy_active'),
+        ]
+
+    def clean(self):
+        from .accounts import normalize_rut
+        super().clean()
+        self.tax_id = normalize_rut(self.tax_id) if self.tax_id else None
+
+    def __str__(self):
+        return self.name
+
+
+class CompanyBrand(models.Model):
+    company = models.OneToOneField(Company, primary_key=True, on_delete=models.CASCADE)
+    base_color = models.CharField(max_length=7, blank=True)
+    logo_png = models.BinaryField(blank=True, default=bytes)
+    revision = models.PositiveIntegerField(default=1)
+
+
+class CompanyAdminSetup(models.Model):
+    """Credentials for a pending company, separate from active Django accounts."""
+    company = models.OneToOneField(Company, primary_key=True, on_delete=models.CASCADE)
+    rut = models.CharField(max_length=10)
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    password_hash = models.CharField(max_length=256)
+
+
+class CompanyDriveConnection(models.Model):
+    company = models.OneToOneField(Company, primary_key=True, on_delete=models.CASCADE)
+    account_id = models.CharField(max_length=128, unique=True)
+    root_id = models.CharField(max_length=128, unique=True)
+    folder_ids = models.JSONField()
+    encrypted_credentials = models.BinaryField(editable=False)
+    verified_at = models.DateTimeField()
+
+
+class CompanyAudit(models.Model):
+    company = models.ForeignKey(Company, null=True, on_delete=models.SET_NULL)
+    company_code = models.UUIDField()
+    actor = models.CharField(max_length=200)
+    action = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class UserProfile(models.Model):
@@ -64,6 +134,8 @@ class RegistrationRequest(models.Model):
         APPROVED = 'approved', 'Aceptada'
         REJECTED = 'rejected', 'Eliminada'
 
+    company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name='registration_requests',
+                                default=RELONCAVI_COMPANY_ID, db_default=RELONCAVI_COMPANY_ID)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     rut = models.CharField(max_length=10)

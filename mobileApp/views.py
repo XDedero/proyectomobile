@@ -31,7 +31,8 @@ def index(request):
     # A fresh page must not load cached scripts from an older interface whose
     # controls differ from those expected by the current drawing workflows.
     from .pwa import asset_version
-    return render(request, 'mobileApp/index.html', {'asset_version': asset_version()})
+    from .company_brand import brand_context
+    return render(request, 'mobileApp/index.html', {'asset_version': asset_version(), **brand_context()})
 
 
 def session_data(request):

@@ -1,0 +1,31 @@
+{% load static %}
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuración de la empresa</title>
+  <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+</head>
+<body class="bg-light">
+  <main class="container py-4" style="max-width: 38rem">
+    <a href="{% url 'management_panel' %}">← Administración</a>
+    <h1 class="h3 my-3">Configuración de la empresa</h1>
+    <form method="post" enctype="multipart/form-data" class="card card-body gap-2">
+      {% csrf_token %}
+      <input type="hidden" name="revision" value="{{ revision }}">
+      {% if error %}<p role="alert" class="alert alert-danger">{{ error }}</p>{% endif %}
+      <label for="companyName">Nombre</label>
+      <input class="form-control" id="companyName" name="name" required maxlength="200" value="{{ values.name }}">
+      <label for="companyRut">RUT de la empresa</label>
+      <input class="form-control" id="companyRut" name="tax_id" maxlength="16" value="{{ values.tax_id }}">
+      <label for="companyColor">Color base</label>
+      <input class="form-control" id="companyColor" name="color" maxlength="7" placeholder="#2368A7" value="{{ values.color }}">
+      <label for="companyLogo">Logo</label>
+      <input class="form-control" id="companyLogo" name="logo" type="file" accept="image/png,image/jpeg,image/webp">
+      <p class="text-secondary small mb-0">PNG, JPEG o WebP, hasta 5 MB. Deje el archivo vacío para conservar el logo actual.</p>
+      <button class="btn btn-primary align-self-start mt-2" type="submit">Guardar cambios</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -65,6 +65,9 @@ def check_browser(url, directory):
         page.wait_for_function('appState.authReady')
         page.locator('#btnRequestRegistration').click()
         expect(page.locator('#registrationPanel')).to_be_visible()
+        company = page.locator('#registrationCompany')
+        expect(company.locator('option:checked')).to_have_text('Reloncaví')
+        expect(company.locator('option[value]:not([value=""])')).to_have_count(1)
         for identifier, value in [('FirstName', first), ('LastName', last), ('Rut', rut),
                                   ('Password', PASSWORD), ('ConfirmPassword', PASSWORD)]:
             page.locator('#registration' + identifier).fill(value)

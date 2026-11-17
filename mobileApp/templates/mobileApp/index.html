@@ -4,17 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#eaf4ff">
+    <meta name="theme-color" content="{{ company_palette.header|default:'#eaf4ff' }}">
     <meta name="color-scheme" content="light">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="Reloncaví">
+    <meta name="apple-mobile-web-app-title" content="{{ company_name|default:'Reloncaví' }}">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="manifest" href="{% url 'pwa_manifest' %}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'mobileApp/img/pwa/apple-touch-icon.png' %}?v={{ asset_version }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% if company_logo_revision %}{% url 'company_icon' 180 %}?v={{ company_logo_revision }}{% else %}{% static 'mobileApp/img/pwa/apple-touch-icon.png' %}?v={{ asset_version }}{% endif %}">
     <link rel="icon" type="image/png" sizes="192x192" href="{% static 'mobileApp/img/pwa/icon-192.png' %}">
     <link rel="stylesheet" href="{% static 'mobileApp/pwa.css' %}?v={{ asset_version }}">
-    <title>Reloncaví APP · Reloncaví Valdivia</title>
+    <title>{{ company_name|default:'Reloncaví' }} APP · {{ company_name|default:'Reloncaví Valdivia' }}</title>
     <!-- Bootstrap 5.3 CSS -->
     <link href="{% static 'mobileApp/vendor/bootstrap.min.css' %}?v={{ asset_version }}" rel="stylesheet">
     <!-- Bootstrap Icons -->
@@ -30,6 +30,27 @@
     <link rel="stylesheet" href="{% static 'mobileApp/project-workflow.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/motor-library.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/mobile-layout.css' %}?v={{ asset_version }}">
+    {% if company_palette %}
+    <style>
+        :root {
+            --app-bg: {{ company_palette.hover }};
+            --primary-accent: {{ company_palette.primary }};
+            --primary-hover: {{ company_palette.hover }};
+            --app-body-bg: {{ company_palette.background }};
+            --bs-primary: {{ company_palette.primary }};
+            --bs-primary-rgb: {{ company_palette.primary_rgb }};
+            --bs-link-color: {{ company_palette.primary }};
+            --bs-link-hover-color: {{ company_palette.hover }};
+        }
+        .app-header { background: linear-gradient(110deg, {{ company_palette.header }}, var(--app-body-bg)); }
+        .welcome-card, .btn-modern-primary { background: linear-gradient(135deg, var(--primary-hover), var(--primary-accent)); }
+        .btn-modern-primary:hover, .btn-modern-primary:active { background: var(--primary-hover); }
+        .welcome-copy p, .welcome-session { color: #fff; }
+    </style>
+    {% endif %}
+    {% if company_logo %}
+    <style>.company-logo-window > img { inset: 0; width: 100%; height: 100%; transform: none; }</style>
+    {% endif %}
 </head>
 <body>
 
@@ -43,10 +64,10 @@
             <div class="app-view active" id="viewLogin">
                 <div class="login-hero">
                     <div class="brand-badge company-brand-badge">
-                        <span class="company-logo-window company-logo-login"><img src="{% static 'mobileApp/img/reloncavi-logo.png' %}" alt=""></span>
+                        <span class="company-logo-window company-logo-login"><img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt=""></span>
                     </div>
-                    <h4 class="fw-bold text-dark mb-1">Reloncaví APP</h4>
-                    <p class="text-muted small mb-0">Reloncaví Valdivia</p>
+                    <h4 class="fw-bold text-dark mb-1">{{ company_name|default:'Reloncaví' }} APP</h4>
+                    <p class="text-muted small mb-0">{{ company_name|default:'Reloncaví Valdivia' }}</p>
                 </div>
 
                 <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
@@ -74,8 +95,14 @@
                     <section id="registrationPanel" hidden aria-labelledby="registrationTitle">
                         <button type="button" id="btnBackToLogin" class="btn btn-link p-0 mb-3 small">← Volver al inicio de sesión</button>
                         <h5 id="registrationTitle" class="fw-bold">Solicitar registro</h5>
-                        <p class="small text-muted">Complete sus datos. Un administrador revisará su solicitud antes de habilitar el acceso.</p>
+                        <p class="small text-muted">Elija su empresa y complete sus datos. Un administrador de esa empresa revisará su solicitud.</p>
                         <form id="registrationForm" method="post">
+                            <div class="mb-3">
+                                <label for="registrationCompany" class="form-label small fw-semibold">Empresa</label>
+                                <select id="registrationCompany" name="company_id" class="form-select" required disabled>
+                                    <option value="">Cargando empresas…</option>
+                                </select>
+                            </div>
                             <div class="registration-name-fields">
                                 <div class="mb-3"><label for="registrationFirstName" class="form-label small fw-semibold">Nombre</label><input id="registrationFirstName" name="first_name" class="form-control" required maxlength="150" autocomplete="given-name"></div>
                                 <div class="mb-3"><label for="registrationLastName" class="form-label small fw-semibold">Apellido</label><input id="registrationLastName" name="last_name" class="form-control" required maxlength="150" autocomplete="family-name"></div>
@@ -84,7 +111,7 @@
                             <div class="mb-3"><label for="registrationPassword" class="form-label small fw-semibold">Contraseña</label><input id="registrationPassword" name="password" type="password" class="form-control" required minlength="8" autocomplete="new-password" aria-describedby="registrationPasswordHelp"><p id="registrationPasswordHelp" class="small text-muted mt-1 mb-0">Al menos 8 caracteres. Evite contraseñas comunes, solo números o similares a su nombre, apellido o RUT.</p></div>
                             <div class="mb-3"><label for="registrationConfirmPassword" class="form-label small fw-semibold">Confirmar contraseña</label><input id="registrationConfirmPassword" name="confirm_password" type="password" class="form-control" required minlength="8" autocomplete="new-password"></div>
                             <p id="registrationStatus" class="small" role="status" aria-live="polite" hidden></p>
-                            <button type="submit" id="btnSubmitRegistration" class="btn btn-modern-primary w-100">Solicitar</button>
+                            <button type="submit" id="btnSubmitRegistration" class="btn btn-modern-primary w-100" disabled>Solicitar</button>
                         </form>
                     </section>
                 </div>
@@ -105,11 +132,11 @@
                 <div class="app-header">
                     <div class="d-flex align-items-center gap-2">
                         <div class="company-logo-window company-logo-header">
-                            <img src="{% static 'mobileApp/img/reloncavi-logo.png' %}" alt="">
+                            <img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt="">
                         </div>
                         <div>
-                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;">Reloncaví APP</h6>
-                            <small class="text-muted" style="font-size: 0.72rem;">Reloncaví Valdivia</small>
+                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;">{{ company_name|default:'Reloncaví' }} APP</h6>
+                            <small class="text-muted" style="font-size: 0.72rem;">{{ company_name|default:'Reloncaví Valdivia' }}</small>
                         </div>
                     </div>
 
@@ -164,7 +191,7 @@
                             <h5 id="welcomeUserText">Bienvenido</h5>
                             <p id="permissionSummary"></p>
                         </div>
-                        <div class="company-logo-window company-logo-welcome"><img src="{% static 'mobileApp/img/reloncavi-logo.png' %}" alt=""></div>
+                        <div class="company-logo-window company-logo-welcome"><img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt=""></div>
                     </div>
 
                     <p id="appAuthError" class="small text-danger" role="alert"></p>

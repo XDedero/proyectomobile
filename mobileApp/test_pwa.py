@@ -1,10 +1,13 @@
+from io import BytesIO
 from pathlib import Path
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 from PIL import Image
 
+from .models import CompanyBrand, RELONCAVI_COMPANY_ID
 
-class PwaResourcesTests(SimpleTestCase):
+
+class PwaResourcesTests(TestCase):
     def test_manifest_and_iphone_icon(self):
         response = self.client.get('/manifest.webmanifest')
         self.assertEqual(response.status_code, 200)
@@ -27,6 +30,17 @@ class PwaResourcesTests(SimpleTestCase):
         self.assertIn('application/javascript', response['Content-Type'])
         self.assertNotIn(b'{{', response.content)
         self.assertContains(response, "url.pathname.startsWith('/static/mobileApp/')")
+
+    def test_custom_brand_supplies_sized_installation_icons(self):
+        logo = BytesIO()
+        Image.new('RGBA', (40, 20), 'red').save(logo, format='PNG')
+        CompanyBrand.objects.create(company_id=RELONCAVI_COMPANY_ID, base_color='#fedc00', logo_png=logo.getvalue())
+        item = self.client.get('/manifest.webmanifest').json()
+        response = self.client.get(item['icons'][0]['src'])
+        self.assertEqual(response.status_code, 200)
+        with Image.open(BytesIO(response.content)) as icon:
+            self.assertEqual(icon.size, (192, 192))
+        self.assertContains(self.client.get('/'), '/marca/icono/180.png?v=1')
 
     def test_shell_declares_installation_resources(self):
         response = self.client.get('/')

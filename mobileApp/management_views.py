@@ -1,17 +1,20 @@
 """Administration of plan roles, user groups and button categories."""
 from functools import wraps
 from pathlib import Path
+from re import fullmatch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
-from django.views.decorators.http import require_GET, require_POST
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .access import api_permissions, is_administrator
-from .accounts import can_edit_user, registration_data, user_data
-from .models import ButtonCategory, PlanRole, PlanRoleGroup, Plan, PdfPlan, RegistrationRequest
+from .accounts import can_edit_user, is_primary_administrator, normalize_rut, registration_data, user_data
+from .company_brand import normalize_logo
+from .models import (ButtonCategory, Company, CompanyAudit, CompanyBrand, PlanRole, PlanRoleGroup, Plan, PdfPlan,
+                     RegistrationRequest, RELONCAVI_COMPANY_ID)
 from .pdf_views import error_response, json_body
 
 
@@ -42,7 +45,53 @@ def management_panel(request):
     return render(request, 'mobileApp/management.html', {
         'asset_version': str(version),
         'pending_requests': pending, 'registration_error': error,
+        'can_edit_company': is_primary_administrator(request.user),
     })
+
+
+@require_http_methods(['GET', 'POST'])
+@administrators_only
+def edit_company_profile(request):
+    if not is_primary_administrator(request.user):
+        return error_response('Solo el administrador general puede editar la empresa.', 403)
+    company = get_object_or_404(Company, pk=RELONCAVI_COMPANY_ID)
+    current = CompanyBrand.objects.filter(company=company).defer('logo_png').first()
+    values = {'name': company.name, 'tax_id': company.tax_id or '',
+              'color': current.base_color if current else ''}
+    error = ''
+    if request.method == 'POST':
+        values = {key: request.POST.get(key, '').strip() for key in values}
+        try:
+            if not values['name'] or len(values['name']) > 200:
+                raise ValidationError('Ingrese un nombre de hasta 200 caracteres.')
+            if values['color'] and not fullmatch(r'#[0-9a-fA-F]{6}', values['color']):
+                raise ValidationError('Ingrese un color con formato #RRGGBB.')
+            tax_id = normalize_rut(values['tax_id']) if values['tax_id'] else None
+            logo = normalize_logo(request.FILES['logo']) if 'logo' in request.FILES else None
+            with transaction.atomic():
+                company = Company.objects.select_for_update().get(pk=company.pk)
+                brand, created = CompanyBrand.objects.get_or_create(company=company)
+                if request.POST.get('revision') != str(0 if created else brand.revision):
+                    raise ValidationError('La marca cambió en otra sesión. Recargue el formulario.')
+                company.name = values['name']
+                company.tax_id = tax_id
+                company.save(update_fields=['name', 'tax_id'])
+                brand.base_color = values['color'].lower()
+                fields = ['base_color', 'revision']
+                if logo is not None:
+                    brand.logo_png = logo
+                    fields.append('logo_png')
+                brand.revision += 1
+                brand.save(update_fields=fields)
+                CompanyAudit.objects.create(company=company, company_code=company.pk,
+                                            actor=request.user.get_username(), action='marca_editada')
+            return redirect('management_panel')
+        except (ValidationError, IntegrityError) as exc:
+            error = exc.messages[0] if isinstance(exc, ValidationError) else 'Ese RUT de empresa ya está en uso.'
+    return render(request, 'mobileApp/company_profile.html', {
+        'values': values, 'error': error, 'revision': request.POST.get('revision', '') if error else
+        current.revision if current else 0,
+    }, status=400 if error else 200)
 
 
 def pending_registration_data():
@@ -53,9 +102,12 @@ def pending_registration_data():
 
 
 def local_registration_data():
+    requests = RegistrationRequest.objects.filter(
+        company_id=RELONCAVI_COMPANY_ID, status='pending',
+    ).select_related('company', 'reviewed_by')
     return [
         registration_data(item)
-        for item in RegistrationRequest.objects.filter(status='pending').select_related('reviewed_by')
+        for item in requests
     ]
 
 

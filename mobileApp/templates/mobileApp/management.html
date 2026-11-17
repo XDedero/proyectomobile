@@ -14,6 +14,7 @@
     <a class="back-link" href="/">← Volver a los planos</a>
     <h1 class="mt-3 mb-1">Administración</h1>
     <p class="text-secondary mb-0">Solicitudes, usuarios y categorías en un solo lugar.</p>
+    {% if can_edit_company %}<a href="{% url 'company_profile' %}" class="btn btn-outline-primary btn-sm mt-3">Configuración de la empresa</a>{% endif %}
   </header>
   <div class="management-summary mb-4" id="managementSummary"></div>
   <nav class="management-tabs mb-3" aria-label="Secciones de administración">
