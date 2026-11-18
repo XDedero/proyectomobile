@@ -14,7 +14,7 @@
     cursor: grab;
     scrollbar-width: thin;
 }
-.pdf-plan-viewport:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.pdf-plan-viewport:focus-visible { outline: 3px solid var(--company-primary, #2563eb); outline-offset: 2px; }
 .pdf-plan-viewport.dragging-pdf { cursor: grabbing; }
 .pdf-plan-viewport.placing-marker { cursor: crosshair; }
 .pdf-plan-content {
@@ -61,8 +61,8 @@
     z-index: 2;
 }
 .pdf-plan-marker.has-workbook { background: #4ade80; }
-.pdf-plan-marker.selected { background: #60a5fa; outline: 3px solid #1d4ed8; z-index: 3; }
-.pdf-plan-marker:focus-visible { outline: 4px solid #1d4ed8; z-index: 4; }
+.pdf-plan-marker.selected { background: var(--company-border, #60a5fa); outline: 3px solid var(--company-hover, #1d4ed8); z-index: 3; }
+.pdf-plan-marker:focus-visible { outline: 4px solid var(--company-hover, #1d4ed8); z-index: 4; }
 .moving-markers .pdf-plan-marker { cursor: move; border-style: dashed; }
 .pdf-marker-coverage-area {
     position: absolute;
@@ -70,15 +70,15 @@
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 1;
-    border: 2px dashed rgba(37, 99, 235, 0.7);
-    background: rgba(59, 130, 246, 0.22);
+    border: 2px dashed rgba(var(--company-primary-rgb, 37, 99, 235), 0.7);
+    background: rgba(var(--company-primary-rgb, 59, 130, 246), 0.22);
     box-sizing: border-box;
     transition: width 0.05s ease, height 0.05s ease, border-color 0.2s ease;
 }
 .pdf-marker-coverage-area.selected {
-    border: 2.5px solid #2563eb;
-    background: rgba(37, 99, 235, 0.32);
-    box-shadow: 0 0 12px rgba(37, 99, 235, 0.4);
+    border: 2.5px solid var(--company-primary, #2563eb);
+    background: rgba(var(--company-primary-rgb, 37, 99, 235), 0.32);
+    box-shadow: 0 0 12px rgba(var(--company-primary-rgb, 37, 99, 235), 0.4);
 }
 .pdf-plan-message {
     position: absolute;

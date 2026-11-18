@@ -125,7 +125,7 @@
                 group.append(svgNode('rect',{x:x-handleSize,y:y-handleSize,width:handleSize*2,height:handleSize*2,'class':'sector-handle','data-sector-handle':id}));
             }
             const rotateY=-height/2-32*pixel;
-            group.append(svgNode('line',{x1:0,y1:-height/2,x2:0,y2:rotateY,stroke:'#1d4ed8','vector-effect':'non-scaling-stroke'}));
+            group.append(svgNode('line',{x1:0,y1:-height/2,x2:0,y2:rotateY,class:'sector-rotation-guide','vector-effect':'non-scaling-stroke'}));
             group.append(svgNode('circle',{cx:0,cy:rotateY,r:handleSize,'class':'sector-handle sector-rotation','data-sector-handle':'rotate'}));
         }
         layer.append(group);

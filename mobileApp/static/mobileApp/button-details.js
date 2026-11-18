@@ -27,7 +27,7 @@
               <div id="buttonDetailsColorSection"><div class="d-flex align-items-center gap-2 flex-wrap">
                 <input type="checkbox" class="form-check-input mt-0" id="buttonDetailsCustomColor">
                 <label for="buttonDetailsCustomColor">Color personalizado</label>
-                <input type="color" class="form-control form-control-color" id="buttonDetailsColor" aria-label="Color del botón" value="#2563eb">
+                <input type="color" class="form-control form-control-color" id="buttonDetailsColor" aria-label="Color del botón" value="${defaultPlanButtonColor}">
               </div></div>
             </div>
             <div id="buttonDetailsRows"></div>
@@ -172,7 +172,7 @@
         byId('Name').maxLength = current.options.kind === 'dxf' ? 255 : 120;
         byId('CustomColor').checked = Boolean(current.data.color);
         byId('Enabled').checked = current.data.show_description;
-        byId('Color').value = current.data.color || '#2563eb';
+        byId('Color').value = current.data.color || defaultPlanButtonColor;
         render(current);
         status('');
         byId(current.mode === 'name' ? 'Name' : current.mode === 'appearance' ? 'CustomColor' : 'Enabled').focus();

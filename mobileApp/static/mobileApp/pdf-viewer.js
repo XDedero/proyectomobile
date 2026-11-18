@@ -423,8 +423,8 @@ class PdfPlanViewer {
                 area.style.top = `${Math.max(0, Math.min(1, Number(marker.y))) * 100}%`;
                 area.style.width = `${rx * 200}%`;
                 area.style.height = `${ry * 200}%`;
-                area.style.backgroundColor = marker.button_color || '#2563eb';
-                area.style.borderColor = marker.button_color || '#2563eb';
+                area.style.backgroundColor = marker.button_color || defaultPlanButtonColor;
+                area.style.borderColor = marker.button_color || defaultPlanButtonColor;
                 area.style.borderRadius = marker.area_shape === 'rectangle' ? '0' : '50%';
                 area.style.boxShadow = 'none';
                 this.layer.append(area);
@@ -436,7 +436,7 @@ class PdfPlanViewer {
             button.dataset.pdfMarkerId = marker.id;
             button.textContent = String(index + 1);
             button.style.setProperty('--button-scale', marker.button_scale ?? 1);
-            this.colorMarker(button, marker.button_color || '#2563eb');
+            this.colorMarker(button, marker.button_color || defaultPlanButtonColor);
             const label = marker.label || `Botón ${index + 1}`;
             button.dataset.hoverName = label;
             button.title = `${label} · ${marker.workbook ? marker.workbook.name : 'Sin Excel asignado'}`;
@@ -536,8 +536,8 @@ class PdfPlanViewer {
         }
         area.style.width = `${(rx || 0.05) * 200}%`;
         area.style.height = `${(ry || 0.05) * 200}%`;
-        area.style.backgroundColor = marker?.button_color || '#2563eb';
-        area.style.borderColor = marker?.button_color || '#2563eb';
+        area.style.backgroundColor = marker?.button_color || defaultPlanButtonColor;
+        area.style.borderColor = marker?.button_color || defaultPlanButtonColor;
         area.style.borderRadius = marker?.area_shape === 'rectangle' ? '0' : '50%';
         area.style.boxShadow = 'none';
         area.classList.toggle('selected', Number(markerId) === this.selectedId);

@@ -298,7 +298,7 @@
         clearError();
         setMode('explore');
         viewer.setPendingMarker({ ...position, number: target.markers.length + 1,
-            color: source?.button_color || options?.button_color || '#2563eb', scale: source?.button_scale ?? 1 });
+            color: source?.button_color || options?.button_color || defaultPlanButtonColor, scale: source?.button_scale ?? 1 });
         status('Confirmando el botón…');
         if (window.projectWorkspace?.full) window.projectWorkspace.reportStatus('Confirmando el botón…');
         try {

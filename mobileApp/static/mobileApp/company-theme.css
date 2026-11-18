@@ -1,0 +1,57 @@
+/* This sheet is loaded only for companies with their own interface palette. */
+:root {
+    --bs-primary: var(--company-primary);
+    --bs-primary-rgb: var(--company-primary-rgb);
+    --bs-primary-text-emphasis: var(--company-ink);
+    --bs-primary-bg-subtle: var(--company-soft);
+    --bs-primary-border-subtle: var(--company-border);
+    --bs-link-color: var(--company-primary);
+    --bs-link-color-rgb: var(--company-primary-rgb);
+    --bs-link-hover-color: var(--company-hover);
+    --bs-link-hover-color-rgb: var(--company-hover-rgb);
+    --bs-focus-ring-color: rgba(var(--company-primary-rgb), .25);
+    accent-color: var(--company-primary);
+}
+
+.btn-primary {
+    --bs-btn-bg: var(--company-primary);
+    --bs-btn-border-color: var(--company-primary);
+    --bs-btn-hover-bg: var(--company-hover);
+    --bs-btn-hover-border-color: var(--company-hover);
+    --bs-btn-active-bg: var(--company-pressed);
+    --bs-btn-active-border-color: var(--company-pressed);
+    --bs-btn-disabled-bg: var(--company-primary);
+    --bs-btn-disabled-border-color: var(--company-primary);
+    --bs-btn-focus-shadow-rgb: var(--company-primary-rgb);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--company-primary);
+    --bs-btn-border-color: var(--company-border);
+    --bs-btn-hover-bg: var(--company-primary);
+    --bs-btn-hover-border-color: var(--company-primary);
+    --bs-btn-active-bg: var(--company-pressed);
+    --bs-btn-active-border-color: var(--company-pressed);
+    --bs-btn-disabled-color: var(--company-primary);
+    --bs-btn-disabled-border-color: var(--company-border);
+    --bs-btn-focus-shadow-rgb: var(--company-primary-rgb);
+}
+
+.btn-link { --bs-btn-focus-shadow-rgb: var(--company-primary-rgb); }
+.form-control:focus, .form-select:focus, .form-check-input:focus {
+    border-color: var(--company-primary);
+    box-shadow: 0 0 0 .2rem var(--bs-focus-ring-color);
+}
+.form-check-input:checked, .form-check-input[type="checkbox"]:indeterminate,
+.dropdown-item.active, .dropdown-item:active {
+    background-color: var(--company-primary);
+    border-color: var(--company-primary);
+}
+.list-group { --bs-list-group-active-bg: var(--company-primary); --bs-list-group-active-border-color: var(--company-primary); }
+.progress { --bs-progress-bar-bg: var(--company-primary); }
+.form-range::-webkit-slider-thumb { background-color: var(--company-primary); }
+.form-range::-moz-range-thumb { background-color: var(--company-primary); }
+.form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
+.form-range:focus::-moz-range-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
+.form-range:disabled::-webkit-slider-thumb { background-color: var(--bs-secondary-color); }
+.form-range:disabled::-moz-range-thumb { background-color: var(--bs-secondary-color); }

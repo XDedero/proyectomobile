@@ -102,7 +102,7 @@
         <label class="form-label" for="newButtonName">Nombre <small class="text-muted">(opcional)</small></label>
         <input id="newButtonName" class="form-control mb-3" maxlength="120" placeholder="Se usará el número del botón">
         <label class="form-label" for="newButtonColor">Color del botón</label>
-        <input type="color" id="newButtonColor" class="form-control form-control-color mb-3" value="#2563eb">
+        <input type="color" id="newButtonColor" class="form-control form-control-color mb-3" value="${defaultPlanButtonColor}">
         <div class="form-check form-switch mb-2">
           <input type="checkbox" class="form-check-input" id="newButtonDescriptionEnabled">
           <label class="form-check-label" for="newButtonDescriptionEnabled">Añadir descripción al botón</label>
@@ -198,7 +198,7 @@
         const selection = new Promise(resolve => { newButton = { context, resolve, result: null }; });
         byId('newButtonName').value = '';
         byId('newButtonName').maxLength = context.kind === 'dxf' ? 255 : 120;
-        byId('newButtonColor').value = '#2563eb';
+        byId('newButtonColor').value = defaultPlanButtonColor;
         byId('newButtonDescriptionEnabled').checked = false;
         byId('newButtonDescriptionOptions').hidden = true;
         byId('newButtonDescriptions').replaceChildren();

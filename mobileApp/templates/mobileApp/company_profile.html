@@ -6,8 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Configuración de la empresa</title>
   <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+  {% include 'mobileApp/company_theme.html' %}
 </head>
-<body class="bg-light">
+<body{% if company_theme %} style="background:{{ company_theme.background }}"{% else %} class="bg-light"{% endif %}>
   <main class="container py-4" style="max-width: 38rem">
     <a href="{% url 'management_panel' %}">← Administración</a>
     <h1 class="h3 my-3">Configuración de la empresa</h1>

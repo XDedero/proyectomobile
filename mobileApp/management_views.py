@@ -1,6 +1,5 @@
 """Administration of plan roles, user groups and button categories."""
 from functools import wraps
-from pathlib import Path
 from re import fullmatch
 
 from django.contrib.auth import get_user_model
@@ -12,10 +11,11 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 
 from .access import api_permissions, is_administrator
 from .accounts import can_edit_user, is_primary_administrator, normalize_rut, registration_data, user_data
-from .company_brand import normalize_logo
+from .company_brand import brand_context, normalize_logo
 from .models import (ButtonCategory, Company, CompanyAudit, CompanyBrand, PlanRole, PlanRoleGroup, Plan, PdfPlan,
                      RegistrationRequest, RELONCAVI_COMPANY_ID)
 from .pdf_views import error_response, json_body
+from .pwa import asset_version
 
 
 def administrators_only(view):
@@ -33,10 +33,6 @@ def administrators_only(view):
 def management_panel(request):
     from .tenant_runtime import workspace
     company = workspace.get()
-    directory = Path(__file__).resolve().parent
-    files = [directory / 'templates/mobileApp/management.html',
-             directory / 'static/mobileApp/management.js', directory / 'static/mobileApp/management.css']
-    version = max(path.stat().st_mtime_ns for path in files)
     from .cloud_projects import CloudUnavailable
     try:
         pending = pending_registration_data(request)
@@ -45,7 +41,7 @@ def management_panel(request):
         pending = local_registration_data()
         error = str(exc)
     return render(request, 'mobileApp/management.html', {
-        'asset_version': str(version),
+        'asset_version': asset_version(),
         'pending_requests': pending, 'registration_error': error,
         'can_edit_company': is_primary_administrator(request.user),
         **(company.brand if company else {}),
@@ -102,6 +98,8 @@ def _edit_company_brand(request, company_id, actor):
         except (ValidationError, IntegrityError) as exc:
             error = exc.messages[0] if isinstance(exc, ValidationError) else 'Ese RUT de empresa ya está en uso.'
     return render(request, 'mobileApp/company_profile.html', {
+        'asset_version': asset_version(),
+        **(brand_context(company) if company_id != RELONCAVI_COMPANY_ID else {}),
         'values': values, 'error': error, 'revision': request.POST.get('revision', '') if error else
         current.revision if current else 0,
     }, status=400 if error else 200)

@@ -1,16 +1,16 @@
 :root {
-    --app-bg: #153e70;
-    --primary-accent: #2368a7;
-    --primary-hover: #174e83;
-    --autocad-red: #2368a7;
+    --app-bg: var(--company-pressed, #153e70);
+    --primary-accent: var(--company-primary, #2368a7);
+    --primary-hover: var(--company-hover, #174e83);
+    --autocad-red: var(--company-primary, #2368a7);
     --excel-green: #107c41;
-    --app-body-bg: #edf5ff;
-    --text-dark: #173451;
+    --app-body-bg: var(--company-soft, #edf5ff);
+    --text-dark: var(--company-ink, #173451);
     --text-muted: #58718a;
-    --bs-primary: #2368a7;
+    --bs-primary: var(--company-primary, #2368a7);
     --bs-primary-rgb: 35, 104, 167;
-    --bs-link-color: #1d5f9c;
-    --bs-link-hover-color: #174e83;
+    --bs-link-color: var(--company-primary, #1d5f9c);
+    --bs-link-hover-color: var(--company-hover, #174e83);
 }
 
 * {
@@ -25,7 +25,7 @@ html, body {
     margin: 0;
     overflow: hidden;
     background: var(--app-body-bg);
-    color: #18344f;
+    color: var(--company-ink, #18344f);
 }
 
 /* Real application viewport, shared by browser and embedded WebView. */
@@ -81,13 +81,13 @@ html, body {
     width: 60px;
     height: 60px;
     border-radius: 18px;
-    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    background: linear-gradient(135deg, var(--company-hover, #1e40af), var(--company-primary, #3b82f6));
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: #fff;
     font-size: 26px;
-    box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+    box-shadow: 0 10px 20px rgba(var(--company-primary-rgb, 37, 99, 235), 0.3);
     margin-bottom: 10px;
 }
 .company-brand-badge { overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
@@ -108,26 +108,26 @@ html, body {
     padding: 10px 14px;
 }
 .form-control:focus {
-    border-color: #3d80bb;
-    box-shadow: 0 0 0 4px rgba(35, 104, 167, 0.13);
+    border-color: var(--company-primary, #3d80bb);
+    box-shadow: 0 0 0 4px rgba(var(--company-primary-rgb, 35, 104, 167), 0.13);
 }
 
 
 /* Botones personalizados */
 .btn-modern-primary {
-    background: linear-gradient(135deg, #174e83, #2878b7);
+    background: linear-gradient(135deg, var(--company-hover, #174e83), var(--company-primary, #2878b7));
     color: white;
     font-weight: 600;
     padding: 12px;
     border-radius: 14px;
     border: none;
-    box-shadow: 0 6px 18px rgba(35, 104, 167, 0.25);
+    box-shadow: 0 6px 18px rgba(var(--company-primary-rgb, 35, 104, 167), 0.25);
     transition: all 0.2s;
 }
 .btn-modern-primary:hover, .btn-modern-primary:active {
-    background: linear-gradient(135deg, #123e6b, #1c619d);
+    background: linear-gradient(135deg, var(--company-pressed, #123e6b), var(--company-hover, #1c619d));
     transform: translateY(-1px);
-    box-shadow: 0 8px 22px rgba(23, 78, 131, 0.3);
+    box-shadow: 0 8px 22px rgba(var(--company-primary-rgb, 23, 78, 131), 0.3);
     color: white;
 }
 
@@ -137,8 +137,8 @@ html, body {
     align-items: center;
     justify-content: space-between;
     padding: 12px 18px;
-    background: linear-gradient(110deg, #dbeafe 0%, #edf5ff 68%, #e4f0fd 100%);
-    border-bottom: 1px solid #c9ddf3;
+    background: linear-gradient(110deg, var(--company-header, #dbeafe) 0%, var(--company-soft, #edf5ff) 68%, var(--company-header, #e4f0fd) 100%);
+    border-bottom: 1px solid var(--company-border, #c9ddf3);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -171,28 +171,28 @@ html, body {
     transition: all 0.25s ease;
 }
 .cad-card:hover {
-    border-color: #3b82f6;
+    border-color: var(--company-primary, #3b82f6);
     background: #f8fafc;
 }
 
 .btn-cad {
-    background: linear-gradient(135deg, #174e83, #2878b7);
+    background: linear-gradient(135deg, var(--company-hover, #174e83), var(--company-primary, #2878b7));
     color: white;
     border: none;
     font-weight: 600;
     border-radius: 14px;
     padding: 13px 20px;
-    box-shadow: 0 6px 16px rgba(35, 104, 167, 0.23);
+    box-shadow: 0 6px 16px rgba(var(--company-primary-rgb, 35, 104, 167), 0.23);
     transition: all 0.2s;
 }
 .btn-cad:hover {
-    background: linear-gradient(135deg, #123e6b, #1c619d);
+    background: linear-gradient(135deg, var(--company-pressed, #123e6b), var(--company-hover, #1c619d));
     color: white;
     transform: scale(1.02);
 }
 
 .btn-excel {
-    background: linear-gradient(135deg, #174e83, #2878b7);
+    background: linear-gradient(135deg, var(--company-hover, #174e83), var(--company-primary, #2878b7));
     color: white;
     border: none;
     font-weight: 600;
@@ -202,11 +202,11 @@ html, body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    box-shadow: 0 4px 12px rgba(35, 104, 167, 0.23);
+    box-shadow: 0 4px 12px rgba(var(--company-primary-rgb, 35, 104, 167), 0.23);
     transition: all 0.2s;
 }
 .btn-excel:hover {
-    background: linear-gradient(135deg, #123e6b, #1c619d);
+    background: linear-gradient(135deg, var(--company-pressed, #123e6b), var(--company-hover, #1c619d));
     color: white;
 }
 
@@ -250,35 +250,35 @@ html, body {
 /* Reloncabi blue interface palette. */
 .btn-primary, .btn-success {
     --bs-btn-color: #fff;
-    --bs-btn-bg: #2368a7;
-    --bs-btn-border-color: #2368a7;
+    --bs-btn-bg: var(--company-primary, #2368a7);
+    --bs-btn-border-color: var(--company-primary, #2368a7);
     --bs-btn-hover-color: #fff;
-    --bs-btn-hover-bg: #174e83;
-    --bs-btn-hover-border-color: #174e83;
+    --bs-btn-hover-bg: var(--company-hover, #174e83);
+    --bs-btn-hover-border-color: var(--company-hover, #174e83);
     --bs-btn-active-color: #fff;
-    --bs-btn-active-bg: #123e6b;
-    --bs-btn-active-border-color: #123e6b;
-    --bs-btn-disabled-bg: #7ea5c9;
-    --bs-btn-disabled-border-color: #7ea5c9;
-    background-color: #2368a7;
-    border-color: #2368a7;
+    --bs-btn-active-bg: var(--company-pressed, #123e6b);
+    --bs-btn-active-border-color: var(--company-pressed, #123e6b);
+    --bs-btn-disabled-bg: var(--company-border, #7ea5c9);
+    --bs-btn-disabled-border-color: var(--company-border, #7ea5c9);
+    background-color: var(--company-primary, #2368a7);
+    border-color: var(--company-primary, #2368a7);
 }
-.btn-primary:hover, .btn-success:hover { background-color: #174e83; border-color: #174e83; }
+.btn-primary:hover, .btn-success:hover { background-color: var(--company-hover, #174e83); border-color: var(--company-hover, #174e83); }
 .btn-outline-primary, .btn-outline-success {
-    --bs-btn-color: #205f99;
-    --bs-btn-border-color: #5790c2;
+    --bs-btn-color: var(--company-primary, #205f99);
+    --bs-btn-border-color: var(--company-border, #5790c2);
     --bs-btn-hover-color: #fff;
-    --bs-btn-hover-bg: #2368a7;
-    --bs-btn-hover-border-color: #2368a7;
+    --bs-btn-hover-bg: var(--company-primary, #2368a7);
+    --bs-btn-hover-border-color: var(--company-primary, #2368a7);
     --bs-btn-active-color: #fff;
-    --bs-btn-active-bg: #174e83;
-    --bs-btn-active-border-color: #174e83;
-    color: #205f99;
-    border-color: #5790c2;
+    --bs-btn-active-bg: var(--company-hover, #174e83);
+    --bs-btn-active-border-color: var(--company-hover, #174e83);
+    color: var(--company-primary, #205f99);
+    border-color: var(--company-border, #5790c2);
 }
-.btn-outline-primary:hover, .btn-outline-success:hover { color: #fff; background: #2368a7; border-color: #2368a7; }
+.btn-outline-primary:hover, .btn-outline-success:hover { color: #fff; background: var(--company-primary, #2368a7); border-color: var(--company-primary, #2368a7); }
 
-.main-module-heading { display: inline-flex; align-items: center; justify-content: center; gap: 11px; color: #173c62; font-size: 1.05rem; font-weight: 750; letter-spacing: .005em; }
+.main-module-heading { display: inline-flex; align-items: center; justify-content: center; gap: 11px; color: var(--company-ink, #173c62); font-size: 1.05rem; font-weight: 750; letter-spacing: .005em; }
 .main-module-logo { display: inline-grid; width: 48px; height: 48px; flex: none; place-items: center; overflow: visible; border: 0; border-radius: 0; background: transparent; }
 .main-module-logo img { width: 40px; height: 40px; object-fit: contain; }
 
@@ -293,8 +293,8 @@ html, body {
     padding: 19px 21px;
     border: 1px solid rgba(255, 255, 255, .28);
     border-radius: 21px;
-    background: linear-gradient(113deg, #183f79 0%, #225ca0 58%, #2879b8 100%);
-    box-shadow: 0 9px 22px rgba(27, 76, 130, .17);
+    background: linear-gradient(113deg, var(--company-hover, #183f79) 0%, var(--company-primary, #225ca0) 58%, var(--company-primary, #2879b8) 100%);
+    box-shadow: 0 9px 22px rgba(var(--company-primary-rgb, 27, 76, 130), .17);
     color: #fff;
     isolation: isolate;
 }
@@ -312,9 +312,9 @@ html, body {
 .welcome-card::before { background: rgba(173, 216, 255, .14); transform: rotate(-8deg); }
 .welcome-card::after { right: 16px; bottom: -137px; width: 530px; height: 176px; border: 1px solid rgba(231, 243, 255, .2); transform: rotate(7deg); }
 .welcome-copy { position: relative; z-index: 1; min-width: 0; max-width: 880px; }
-.welcome-session { display: inline-flex; margin-bottom: 7px; padding: 3px 9px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(255,255,255,.13); color: #e5f2ff; font-size: .68rem; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
+.welcome-session { display: inline-flex; margin-bottom: 7px; padding: 3px 9px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(255,255,255,.13); color: var(--company-surface, #e5f2ff); font-size: .68rem; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
 .welcome-copy h5 { margin: 0 0 5px; color: #fff; font-size: clamp(1.06rem, 3.7vw, 1.4rem); font-weight: 750; line-height: 1.2; overflow-wrap: anywhere; }
-.welcome-copy p { margin: 0; color: #e1efff; font-size: .88rem; line-height: 1.45; }
+.welcome-copy p { margin: 0; color: var(--company-surface, #e1efff); font-size: .88rem; line-height: 1.45; }
 .welcome-card > .company-logo-window { position: relative; z-index: 1; }
 @media (max-width: 420px) {
     .welcome-card { min-height: 118px; padding: 16px; gap: 12px; }

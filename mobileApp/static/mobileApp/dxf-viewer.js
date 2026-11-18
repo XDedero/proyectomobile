@@ -106,9 +106,9 @@ class DxfViewer {
         if (!pin) return;
         pin.group.querySelector('title').textContent = `${motor.name} · X: ${motor.x} · Y: ${motor.y}`;
         pin.group.setAttribute('aria-label', `${motor.name}, X ${motor.x}, Y ${motor.y}`);
-        pin.circle.style.fill = motor.button_color || '#2563eb';
+        pin.circle.style.fill = motor.button_color || defaultPlanButtonColor;
         pin.hover.textContent = motor.name;
-        pin.area.style.fill = motor.button_color || '#2563eb';
+        pin.area.style.fill = motor.button_color || defaultPlanButtonColor;
         pin.area.style.pointerEvents = 'none';
         pin.area.style.display = motor.has_area ? '' : 'none';
         if (pin.area.localName !== (motor.area_shape === 'rectangle' ? 'rect' : 'ellipse')) {

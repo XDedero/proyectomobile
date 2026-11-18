@@ -7,6 +7,7 @@
     <title>{{ account.company.name }}</title>
     {% if preparing %}<meta http-equiv="refresh" content="5">{% endif %}
     <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+    {% include 'mobileApp/company_theme.html' %}
 </head>
 <body style="background:{{ company_palette.background|default:'#edf5ff' }}">
     <main class="container py-4" style="max-width:880px">

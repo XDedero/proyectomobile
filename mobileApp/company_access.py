@@ -13,6 +13,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from .accounts import rut_in_use
 from .company_brand import brand_context
+from .pwa import asset_version
 from .cloud_projects import CloudUnavailable
 from .models import (Company, CompanyAccount, CompanyAdminSetup, CompanyAudit, CompanyDriveConnection,
                      RegistrationRequest, RELONCAVI_COMPANY_ID, UserProfile)
@@ -114,7 +115,8 @@ def company_home(request):
     if request.method == 'POST':
         if not administrator:
             return render(request, 'mobileApp/company_home.html', status=403, context={
-                'account': account, 'error': 'Su cuenta no puede revisar solicitudes.', **brand_context(account.company),
+                'account': account, 'error': 'Su cuenta no puede revisar solicitudes.', 'asset_version': asset_version(),
+                **brand_context(account.company),
             })
         try:
             request_id = int(request.POST.get('id', ''))
@@ -127,6 +129,7 @@ def company_home(request):
                if administrator else [])
     return render(request, 'mobileApp/company_home.html', {
         'account': account, 'administrator': administrator, 'pending': pending, 'error': error, 'preparing': preparing,
+        'asset_version': asset_version(),
         **brand_context(account.company),
     }, status=400 if error else 200)
 

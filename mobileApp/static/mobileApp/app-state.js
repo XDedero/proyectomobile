@@ -4,6 +4,7 @@ const appState = {
     currentPlan: null,
     selectedMotorId: null,
 };
+const defaultPlanButtonColor = document.documentElement.dataset.planButtonColor || '#2563eb';
 
 const viewLogin = document.getElementById('viewLogin');
 const viewMainMenu = document.getElementById('viewMainMenu');

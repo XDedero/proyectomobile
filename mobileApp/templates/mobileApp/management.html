@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
   <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap-icons.css' %}">
   <link rel="stylesheet" href="{% static 'mobileApp/management.css' %}?v={{ asset_version }}">
+  {% include 'mobileApp/company_theme.html' %}
 </head>
 <body{% if company_palette %} style="background:{{ company_palette.background }}"{% endif %}>
 <main class="container management-shell py-4 py-lg-5">

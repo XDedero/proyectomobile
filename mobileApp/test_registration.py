@@ -122,6 +122,28 @@ class RegistrationTests(TestCase):
         self.assertEqual(self.client.post(url, {**data, 'name': 'Edición antigua'}).status_code, 400)
         self.assertEqual(Company.objects.get(pk=RELONCAVI_COMPANY_ID).name, 'Reloncaví Taller')
 
+    def test_company_interface_theme_is_scoped_to_the_selected_company(self):
+        from .company_brand import brand_context
+        from .tenant_runtime import Workspace, workspace
+
+        CompanyBrand.objects.update_or_create(company_id=RELONCAVI_COMPANY_ID, defaults={'base_color': '#2368a7'})
+        company = Company.objects.create(name='Taller Sur', slug='taller-sur')
+        CompanyBrand.objects.create(company=company, base_color='#f97316')
+        legacy = self.client.get(reverse('index'))
+        self.assertNotContains(legacy, 'company-theme.css')
+        self.assertNotContains(legacy, 'data-plan-button-color')
+
+        brand = brand_context(company)
+        token = workspace.set(Workspace('', str(company.pk), brand, {}))
+        try:
+            response = self.client.get(reverse('index'))
+        finally:
+            workspace.reset(token)
+        primary = brand['company_theme']['primary']
+        self.assertContains(response, 'company-theme.css')
+        self.assertContains(response, f'data-plan-button-color="{primary}"')
+        self.assertContains(response, 'Taller Sur APP')
+
     def test_submission_stores_the_selected_company_and_rechecks_availability(self):
         pending = Company.objects.create(name='Taller Sur', slug='taller-sur')
         for value in (str(pending.pk), '', None, 1, 'empresa-inválida'):

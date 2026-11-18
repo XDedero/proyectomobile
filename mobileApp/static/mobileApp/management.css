@@ -1,19 +1,19 @@
 :root { color-scheme: light; }
-body { background: #f3f6fb; color: #1d2c44; }
+body { background: var(--company-soft, #f3f6fb); color: #1d2c44; }
 .management-shell { max-width: 1180px; }
 h1 { font-weight: 750; letter-spacing: -.04em; }
 h2 { font-size: 1.35rem; font-weight: 700; }
 h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 1.25rem; }
-.back-link { color: #476480; text-decoration: none; }
+.back-link { color: var(--company-ink, #476480); text-decoration: none; }
 .management-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 .summary-item { background: white; border: 1px solid #e1e8f1; border-radius: 16px; padding: 1rem 1.25rem; }
-.summary-item strong { display: block; font-size: 1.8rem; color: #2455aa; }
+.summary-item strong { display: block; font-size: 1.8rem; color: var(--company-primary, #2455aa); }
 .summary-item span { color: #64748b; font-size: .9rem; }
 .management-tabs { display: flex; gap: .5rem; flex-wrap: wrap; }
-.management-tabs button { border: 0; border-radius: 10px; padding: .85rem 1rem; color: #42536d; background: #e8eef7; font-weight: 600; }
-.management-tabs button.active { background: #2455aa; color: white; }
+.management-tabs button { border: 0; border-radius: 10px; padding: .85rem 1rem; color: #42536d; background: var(--company-soft, #e8eef7); font-weight: 600; }
+.management-tabs button.active { background: var(--company-primary, #2455aa); color: white; }
 .management-tabs i { margin-right: .4rem; }
-.tab-count { display: inline-block; margin-left: .3rem; padding: .1rem .45rem; background: #fff; color: #2455aa; border-radius: 20px; font-size: .8rem; }
+.tab-count { display: inline-block; margin-left: .3rem; padding: .1rem .45rem; background: #fff; color: var(--company-primary, #2455aa); border-radius: 20px; font-size: .8rem; }
 #managementStatus { min-height: 1.5em; }
 .section-intro { max-width: 820px; margin-bottom: 1.5rem; }
 .section-intro p { color: #64748b; }
@@ -22,7 +22,7 @@ h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 1.25rem; }
 .section-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .management-rows { display: grid; gap: .75rem; }
 .management-row { border: 1px solid #e1e8f1; border-radius: 12px; padding: 1rem; min-width: 0; }
-.management-row.selected { border-color: #2455aa; background: #f2f7ff; }
+.management-row.selected { border-color: var(--company-primary, #2455aa); background: var(--company-soft, #f2f7ff); }
 .management-row strong { overflow-wrap: anywhere; }
 .management-row p { color: #64748b; font-size: .85rem; margin: .4rem 0 .8rem; overflow-wrap: anywhere; }
 .request-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
@@ -34,12 +34,12 @@ h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 1.25rem; }
 .request-state.pending { color: #835b0a; background: #fff3d2; }
 .request-state.approved { color: #146c43; background: #e0f4e9; }
 .request-state.rejected { color: #a12e3b; background: #fbe8eb; }
-.role-badge { display: inline-block; font-size: .73rem; padding: .2rem .5rem; border-radius: 20px; color: #405b79; background: #edf2f7; margin-left: .5rem; }
+.role-badge { display: inline-block; font-size: .73rem; padding: .2rem .5rem; border-radius: 20px; color: var(--company-ink, #405b79); background: #edf2f7; margin-left: .5rem; }
 .empty-state { color: #64748b; font-size: .9rem; padding: 1rem .25rem; }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
 .field-pair > div { min-width: 0; }
-.role-help { padding: .75rem; border-radius: 10px; background: #f2f7ff; color: #405b79; }
-.btn-primary { background: #2455aa; border-color: #2455aa; }
+.role-help { padding: .75rem; border-radius: 10px; background: var(--company-soft, #f2f7ff); color: var(--company-ink, #405b79); }
+.btn-primary { background: var(--company-primary, #2455aa); border-color: var(--company-primary, #2455aa); }
 .decision-button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 1px solid transparent; border-radius: 10px; padding: .6rem .85rem; font-weight: 600; min-height: 42px; }
 .decision-button i { font-size: 1.15rem; line-height: 1; }
 .decision-accept { background: #e0f4e9; color: #12673d; border-color: #b5e1c8; }

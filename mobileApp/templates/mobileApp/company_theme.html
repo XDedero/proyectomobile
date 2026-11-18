@@ -1,0 +1,18 @@
+{% load static %}
+{% if company_theme %}
+<link rel="stylesheet" href="{% static 'mobileApp/company-theme.css' %}?v={{ asset_version }}">
+<style>
+    :root {
+        --company-primary: {{ company_theme.primary }};
+        --company-primary-rgb: {{ company_theme.primary_rgb }};
+        --company-hover: {{ company_theme.hover }};
+        --company-hover-rgb: {{ company_theme.hover_rgb }};
+        --company-pressed: {{ company_theme.pressed }};
+        --company-ink: {{ company_theme.ink }};
+        --company-soft: {{ company_theme.soft }};
+        --company-surface: {{ company_theme.surface }};
+        --company-border: {{ company_theme.border }};
+        --company-header: {{ company_theme.header }};
+    }
+</style>
+{% endif %}

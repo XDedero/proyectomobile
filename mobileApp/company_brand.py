@@ -1,4 +1,4 @@
-"""Branding for the currently supported company."""
+"""Branding and accessible interface tones for each company."""
 import io
 import re
 from functools import lru_cache
@@ -18,8 +18,8 @@ from .models import CompanyBrand, RELONCAVI_COMPANY_ID
 def palette(color):
     channels = tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
 
-    def mixed(target, amount):
-        return tuple(round(value * (1 - amount) + target * amount) for value in channels)
+    def mixed(source, target, amount):
+        return tuple(round(value * (1 - amount) + target * amount) for value in source)
 
     def hex_color(values):
         return '#' + ''.join(f'{value:02x}' for value in values)
@@ -29,16 +29,23 @@ def palette(color):
         return value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
 
     for step in range(101):
-        primary = mixed(0, step / 100)
+        primary = mixed(channels, 0, step / 100)
         luminance = sum(weight * linear(value) for weight, value in zip((.2126, .7152, .0722), primary))
         if 1.05 / (luminance + .05) >= 4.5:
             break
+    hover = mixed(primary, 0, .20)
     return {
         'primary': hex_color(primary),
         'primary_rgb': ', '.join(map(str, primary)),
-        'hover': hex_color(tuple(round(value * .8) for value in primary)),
-        'background': hex_color(mixed(255, .88)),
-        'header': hex_color(mixed(255, .79)),
+        'hover': hex_color(hover),
+        'hover_rgb': ', '.join(map(str, hover)),
+        'pressed': hex_color(mixed(primary, 0, .32)),
+        'ink': hex_color(mixed(primary, 0, .52)),
+        'soft': hex_color(mixed(channels, 255, .89)),
+        'surface': hex_color(mixed(channels, 255, .96)),
+        'border': hex_color(mixed(primary, 255, .55)),
+        'background': hex_color(mixed(channels, 255, .88)),
+        'header': hex_color(mixed(channels, 255, .79)),
     }
 
 
@@ -49,12 +56,13 @@ def brand_context(company=None):
              .annotate(has_logo=ExpressionWrapper(~Q(logo_png=b''), output_field=BooleanField())).first())
     if not brand:
         return {}
-    valid_color = re.fullmatch(r'#[0-9a-fA-F]{6}', brand.base_color)
+    tones = palette(brand.base_color) if re.fullmatch(r'#[0-9a-fA-F]{6}', brand.base_color) else None
     return {
         'company_name': brand.company.name,
         'company_logo': f"{reverse('company_logo')}?v={brand.revision}" if brand.has_logo else '',
         'company_logo_revision': brand.revision if brand.has_logo else None,
-        'company_palette': palette(brand.base_color) if valid_color else None,
+        'company_palette': tones,
+        'company_theme': tones if company_id != RELONCAVI_COMPANY_ID else None,
     }
 
 
