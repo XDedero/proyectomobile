@@ -20,13 +20,19 @@
         $('managementStatus').className = error ? 'text-danger' : 'text-success';
     }
     async function request(url, data) {
-        const options = {credentials: 'same-origin', cache: 'no-store'};
+        const identity = document.documentElement.dataset.sessionUser;
+        const options = {credentials: 'same-origin', cache: 'no-store', headers:{}};
+        if (identity) options.headers['X-Reloncavi-Expected-User'] = identity;
         if (data !== undefined) {
             options.method = 'POST';
-            options.headers = {'X-CSRFToken': token(), 'Content-Type': 'application/json'};
+            Object.assign(options.headers, {'X-CSRFToken': token(), 'Content-Type': 'application/json'});
             options.body = JSON.stringify(data);
         }
         const response = await fetch(url, options);
+        if (identity && response.headers.has('X-Reloncavi-User') && response.headers.get('X-Reloncavi-User') !== identity) {
+            location.replace('/');
+            throw new Error('La sesión cambió. Se está abriendo la empresa de la cuenta activa.');
+        }
         const result = await response.json().catch(() => null);
         if (!response.ok || !result) throw new Error(result?.error || 'No se pudo completar la operación. Recarga el panel e intenta otra vez.');
         return result;

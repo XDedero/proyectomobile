@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="es"{% if company_theme %} data-plan-button-color="{{ company_theme.primary }}"{% endif %}>
+<html lang="es" data-company-id="{{ company_identity }}" data-brand-version="{{ company_brand_version|default:'0' }}" data-company-theme-url="{% static 'mobileApp/company-theme.css' %}?v={{ asset_version }}"{% if company_theme %} data-plan-button-color="{{ company_theme.primary }}"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
@@ -31,7 +31,7 @@
     <link rel="stylesheet" href="{% static 'mobileApp/motor-library.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/mobile-layout.css' %}?v={{ asset_version }}">
     {% if company_palette %}
-    <style>
+    <style id="companyPaletteStyle">
         :root {
             --app-bg: {{ company_palette.hover }};
             --primary-accent: {{ company_palette.primary }};
@@ -49,9 +49,7 @@
     </style>
     {% endif %}
     {% include 'mobileApp/company_theme.html' %}
-    {% if company_logo %}
-    <style>.company-logo-window > img { inset: 0; width: 100%; height: 100%; transform: none; }</style>
-    {% endif %}
+    <style id="companyLogoStyle">{% if company_logo %}.company-logo-window > img { inset: 0; width: 100%; height: 100%; transform: none; }{% endif %}</style>
 </head>
 <body>
 
@@ -67,8 +65,8 @@
                     <div class="brand-badge company-brand-badge">
                         <span class="company-logo-window company-logo-login"><img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt=""></span>
                     </div>
-                    <h4 class="fw-bold text-dark mb-1">{{ company_name|default:'Reloncaví' }} APP</h4>
-                    <p class="text-muted small mb-0">{{ company_name|default:'Reloncaví Valdivia' }}</p>
+                    <h4 class="fw-bold text-dark mb-1" data-company-title>{{ company_name|default:'Reloncaví' }} APP</h4>
+                    <p class="text-muted small mb-0" data-company-name>{{ company_name|default:'Reloncaví Valdivia' }}</p>
                 </div>
 
                 <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
@@ -136,8 +134,8 @@
                             <img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt="">
                         </div>
                         <div>
-                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;">{{ company_name|default:'Reloncaví' }} APP</h6>
-                            <small class="text-muted" style="font-size: 0.72rem;">{{ company_name|default:'Reloncaví Valdivia' }}</small>
+                            <h6 class="mb-0 fw-bold text-dark" style="font-size: 0.95rem;" data-company-title>{{ company_name|default:'Reloncaví' }} APP</h6>
+                            <small class="text-muted" style="font-size: 0.72rem;" data-company-name>{{ company_name|default:'Reloncaví Valdivia' }}</small>
                         </div>
                     </div>
 
@@ -570,6 +568,7 @@
     <script src="{% static 'mobileApp/mobile-runtime.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-confirm.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/app-state.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/company-appearance.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pwa-offline.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/pwa.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/dxf-viewer.js' %}?v={{ asset_version }}"></script>

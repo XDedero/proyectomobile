@@ -43,19 +43,23 @@ def session_data(request):
     from .accounts import application_role
     from .company_access import current_account
     from .tenant_runtime import offline_user_id, workspace
+    from .company_brand import brand_context
     company = workspace.get()
+    appearance = company.brand if company else brand_context()
     profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
     return {
         'user': {
             'id': offline_user_id(request), 'username': user.get_username(),
             'display_name': user.get_full_name() or user.get_username(),
             'company_id': company.company_id if company else None,
+            'appearance': appearance,
             'role': application_role(user),
             'primary_administrator': bool(profile and profile.is_primary_administrator),
             'rut': profile.rut if profile else '',
             'permissions': capabilities(user),
         } if user.is_authenticated and user.is_active else None,
         'csrf_token': get_token(request),
+        'appearance': appearance,
         'company_url': reverse('company_home') if current_account(request) else None,
     }
 

@@ -11,6 +11,16 @@
     let authRevision = 0;
     let registrationRevision = 0;
     let registrationBusy = false;
+    let authBusy = false;
+    let refreshFlight = null;
+    let refreshTimer = null;
+    const sessionChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('planos-auth-session') : null;
+
+    function announceSessionChange() {
+        sessionChannel?.postMessage('changed');
+        try { localStorage.setItem('planos.auth.change', String(Date.now()) + Math.random()); }
+        catch (_) { /* Returning to a tab also verifies its current session. */ }
+    }
 
     async function authRequest(url, data) {
         const options = { credentials: 'same-origin', cache: 'no-store' };
@@ -80,12 +90,53 @@
         showLoginError('Su sesión expiró. Inicie sesión nuevamente.');
     }
 
-    async function refresh() {
-        const revision = ++authRevision;
-        const result = await authRequest('/api/auth/session/');
+    async function applySession(result, revision) {
         if (revision !== authRevision) return;
-        if (result.company_url) window.location.replace(result.company_url);
-        else applyUser(result.user);
+        if (result.company_url) {
+            applyUser(null);
+            window.location.replace(result.company_url);
+            return;
+        }
+        const changingUser = appState.user?.id !== result.user?.id;
+        const appearance = result.user?.appearance || result.appearance;
+        if (result.user && !appearance && result.user.company_id &&
+                result.user.company_id !== document.documentElement.dataset.companyId) {
+            applyUser(null);
+            throw new Error('Conéctese para cargar la apariencia de su empresa.');
+        }
+        document.documentElement.classList.add('app-identity-updating');
+        try {
+            if (changingUser) applyUser(null);
+            await window.companyAppearance.apply(appearance, () => revision === authRevision);
+            if (revision === authRevision) applyUser(result.user);
+        } catch (error) {
+            if (revision === authRevision) applyUser(null);
+            throw error;
+        } finally {
+            if (revision === authRevision) document.documentElement.classList.remove('app-identity-updating');
+        }
+    }
+
+    function refresh() {
+        if (authBusy) return Promise.resolve();
+        if (refreshFlight) return refreshFlight;
+        const revision = ++authRevision;
+        refreshFlight = authRequest('/api/auth/session/').then(result => applySession(result, revision))
+            .finally(() => { refreshFlight = null; });
+        return refreshFlight;
+    }
+
+    function refreshWhenVisible() {
+        if (document.hidden || authBusy) return;
+        clearTimeout(refreshTimer);
+        if (refreshFlight) {
+            authRevision += 1;
+            refreshFlight.then(refreshWhenVisible, refreshWhenVisible);
+            return;
+        }
+        refreshTimer = setTimeout(() => refresh().catch(error => {
+            if (!appState.user) showLoginError(error.message);
+        }), 50);
     }
 
     loginForm.addEventListener('submit', async (event) => {
@@ -94,17 +145,18 @@
         const password = document.getElementById('passwordInput').value;
         if (!username || !password) { showLoginError('Ingrese su nombre de usuario y contraseña.'); return; }
         loginButton.disabled = true;
+        authBusy = true;
         alert.classList.add('d-none');
         const revision = ++authRevision;
         try {
             const result = await authRequest('/api/auth/login/', { username, password });
+            announceSessionChange();
             if (revision === authRevision) {
                 document.getElementById('passwordInput').value = '';
-                if (result.company_url) window.location.replace(result.company_url);
-                else applyUser(result.user);
+                await applySession(result, revision);
             }
         } catch (error) { showLoginError(error.message); }
-        finally { loginButton.disabled = false; }
+        finally { authBusy = false; loginButton.disabled = false; }
     });
 
     function registrationMessage(message, error = false) {
@@ -192,9 +244,11 @@
         if (window.pdfWorkflow?.canLeave && !(await window.pdfWorkflow.canLeave())) return;
         if (window.relOffline && !(await window.relOffline.canLogout())) return;
         const revision = ++authRevision;
+        authBusy = true;
         try {
             const company = appState.user?.company_id;
             await authRequest('/api/auth/logout/', {});
+            announceSessionChange();
             if (revision === authRevision) {
                 if (company) window.location.replace('/');
                 else applyUser(null);
@@ -202,7 +256,16 @@
         } catch (error) {
             document.getElementById('appAuthError').textContent = `No se pudo cerrar la sesión: ${error.message}`;
         }
+        finally { authBusy = false; }
     });
+
+    sessionChannel?.addEventListener('message', refreshWhenVisible);
+    window.addEventListener('storage', event => { if (event.key === 'planos.auth.change') refreshWhenVisible(); });
+    window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('pageshow', event => { if (event.persisted) refreshWhenVisible(); });
+    window.addEventListener('online', refreshWhenVisible);
+    window.addEventListener('app-session-changed', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
 
     window.appAuth = { refresh, expire };
     loginButton.disabled = true;

@@ -12,6 +12,7 @@
     --bs-link-color: var(--company-primary, #1d5f9c);
     --bs-link-hover-color: var(--company-hover, #174e83);
 }
+.app-identity-updating #appScreen { visibility: hidden; pointer-events: none; }
 
 * {
     box-sizing: border-box;

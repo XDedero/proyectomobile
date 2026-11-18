@@ -31,7 +31,7 @@ def administrators_only(view):
 @require_GET
 @administrators_only
 def management_panel(request):
-    from .tenant_runtime import workspace
+    from .tenant_runtime import offline_user_id, workspace
     company = workspace.get()
     from .cloud_projects import CloudUnavailable
     try:
@@ -41,6 +41,7 @@ def management_panel(request):
         pending = local_registration_data()
         error = str(exc)
     return render(request, 'mobileApp/management.html', {
+        'interface_user_id': offline_user_id(request),
         'asset_version': asset_version(),
         'pending_requests': pending, 'registration_error': error,
         'can_edit_company': is_primary_administrator(request.user),

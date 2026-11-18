@@ -274,15 +274,32 @@
         if(url.origin!==location.origin) return nativeFetch(input,options);
         const method=(options.method||(input instanceof Request?input.method:'GET')).toUpperCase();
         const auth=/^\/api\/auth\/(?:session|login|logout)\/$/.test(url.pathname);
+        const expectedUser=!auth&&url.pathname.startsWith('/api/')?appState.user?.id:null;
+        if(expectedUser!=null) {
+            const headers=new Headers(options.headers||(input instanceof Request?input.headers:undefined));
+            headers.set('X-Reloncavi-Expected-User',String(expectedUser));
+            options={...options,headers};
+        }
+        const send=async()=>{
+            const response=await nativeFetch(input,options);
+            const actual=response.headers.get('X-Reloncavi-User');
+            if(expectedUser!=null&&actual!==null&&actual!==String(expectedUser)) {
+                window.dispatchEvent(new Event('app-session-changed'));
+                const error=new Error('La sesión cambió en otra pestaña. Se está actualizando su cuenta.');
+                error.status=409;
+                throw error;
+            }
+            return response;
+        };
         const statusOnly=url.pathname==='/api/projects/'&&url.searchParams.get('status')==='1';
         if(!navigator.onLine && !auth && method!=='GET') throw new TypeError('Esta acción requiere conexión. Los sectores y las celdas de Excel pueden conservarse como borradores.');
         if(!auth && (method!=='GET'||statusOnly||!eligible(url.pathname))) {
             try {
-                const response=await nativeFetch(input,options);
+                const response=await send();
                 if(url.pathname.startsWith('/api/')) {disconnected=proxyUnavailable(response);emit();}
                 return response;
             } catch(error) {
-                if(error.name!=='AbortError' && url.pathname.startsWith('/api/')) {disconnected=true;emit();}
+                if(error.name!=='AbortError' && !error.status && url.pathname.startsWith('/api/')) {disconnected=true;emit();}
                 throw error;
             }
         }
@@ -290,11 +307,11 @@
         const owner=account?.id;
         let response;
         try {
-            response=await nativeFetch(input,options);
+            response=await send();
             if(proxyUnavailable(response)) throw new TypeError('La aplicación está temporalmente sin conexión.');
         }
         catch(error) {
-            if(error.name==='AbortError') throw error;
+            if(error.name==='AbortError'||error.status) throw error;
             disconnected=true;emit();
             if(auth && url.pathname==='/api/auth/session/' && account) return offlineResponse({user:account,csrf_token:'',offline:true});
             if(method==='GET' && owner && account?.id===owner && eligible(url.pathname)) {

@@ -130,8 +130,9 @@ class RegistrationTests(TestCase):
         company = Company.objects.create(name='Taller Sur', slug='taller-sur')
         CompanyBrand.objects.create(company=company, base_color='#f97316')
         legacy = self.client.get(reverse('index'))
-        self.assertNotContains(legacy, 'company-theme.css')
+        self.assertNotContains(legacy, 'id="companyThemeStyles"')
         self.assertNotContains(legacy, 'data-plan-button-color')
+        self.assertContains(legacy, 'data-company-id=""')
 
         brand = brand_context(company)
         token = workspace.set(Workspace('', str(company.pk), brand, {}))
@@ -143,6 +144,17 @@ class RegistrationTests(TestCase):
         self.assertContains(response, 'company-theme.css')
         self.assertContains(response, f'data-plan-button-color="{primary}"')
         self.assertContains(response, 'Taller Sur APP')
+        self.assertContains(response, f'data-company-id="{company.pk}"')
+
+        self.client.force_login(self.admin)
+        token = workspace.set(Workspace('', str(company.pk), brand, {}))
+        try:
+            data = self.client.get(reverse('auth_session')).json()
+        finally:
+            workspace.reset(token)
+        self.assertEqual(data['user']['appearance'], brand)
+        self.assertEqual(data['user']['company_id'], str(company.pk))
+        self.assertEqual(self.client.get(reverse('auth_session')).json()['user']['appearance']['company_identity'], '')
 
     def test_submission_stores_the_selected_company_and_rechecks_availability(self):
         pending = Company.objects.create(name='Taller Sur', slug='taller-sur')

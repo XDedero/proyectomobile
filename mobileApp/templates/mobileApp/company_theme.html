@@ -1,7 +1,7 @@
 {% load static %}
 {% if company_theme %}
-<link rel="stylesheet" href="{% static 'mobileApp/company-theme.css' %}?v={{ asset_version }}">
-<style>
+<link id="companyThemeStyles" rel="stylesheet" href="{% static 'mobileApp/company-theme.css' %}?v={{ asset_version }}">
+<style id="companyThemeTokens">
     :root {
         --company-primary: {{ company_theme.primary }};
         --company-primary-rgb: {{ company_theme.primary_rgb }};

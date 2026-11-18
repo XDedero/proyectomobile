@@ -55,11 +55,15 @@ def brand_context(company=None):
              .select_related('company').defer('logo_png')
              .annotate(has_logo=ExpressionWrapper(~Q(logo_png=b''), output_field=BooleanField())).first())
     if not brand:
-        return {}
+        return {'company_identity': str(company_id) if company_id != RELONCAVI_COMPANY_ID else '',
+                'company_brand_version': '0', **({'company_name': company.name} if company else {})}
     tones = palette(brand.base_color) if re.fullmatch(r'#[0-9a-fA-F]{6}', brand.base_color) else None
     return {
         'company_name': brand.company.name,
-        'company_logo': f"{reverse('company_logo')}?v={brand.revision}" if brand.has_logo else '',
+        'company_identity': str(company_id) if company_id != RELONCAVI_COMPANY_ID else '',
+        'company_brand_version': str(brand.revision),
+        'company_logo': (f"{reverse('company_logo')}?v={brand.revision}" +
+                         (f'&company={company_id}' if company_id != RELONCAVI_COMPANY_ID else '')) if brand.has_logo else '',
         'company_logo_revision': brand.revision if brand.has_logo else None,
         'company_palette': tones,
         'company_theme': tones if company_id != RELONCAVI_COMPANY_ID else None,
