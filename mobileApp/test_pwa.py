@@ -1,13 +1,18 @@
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.test import TestCase
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 
 from .models import CompanyBrand, RELONCAVI_COMPANY_ID
 
 
 class PwaResourcesTests(TestCase):
+    def assert_same_artwork(self, expected, image):
+        difference = ImageChops.difference(expected, image)
+        self.assertLess(max(ImageStat.Stat(difference).mean), 1)
+
     def test_manifest_and_iphone_icon(self):
         response = self.client.get('/manifest.webmanifest')
         self.assertEqual(response.status_code, 200)
@@ -17,10 +22,23 @@ class PwaResourcesTests(TestCase):
         self.assertEqual(manifest['scope'], '/')
         self.assertEqual(manifest['start_url'], '/')
         root = Path(__file__).parent / 'static' / 'mobileApp' / 'img' / 'pwa'
-        for name, size in [('apple-touch-icon', 180), ('icon-192', 192), ('icon-512', 512)]:
-            with Image.open(root / f'{name}.png') as icon:
-                self.assertEqual(icon.size, (size, size))
+        icons = [(Path(urlsplit(icon['src']).path).name, icon['sizes'], icon['purpose']) for icon in manifest['icons']]
+        self.assertEqual(icons, [
+            ('icon-192.png', '192x192', 'any'), ('icon-512.png', '512x512', 'any'),
+            ('icon-512-maskable.png', '512x512', 'maskable'),
+        ])
+        with Image.open(root / 'logo_app.jpeg') as source:
+            for name, size in [('apple-touch-icon', 180), ('icon-192', 192), ('icon-512', 512)]:
+                with Image.open(root / f'{name}.png') as icon:
+                    self.assertEqual(icon.size, (size, size))
+                    self.assertEqual(icon.mode, 'RGB')
+                    scaled = source.resize(icon.size, Image.Resampling.LANCZOS)
+                    self.assert_same_artwork(scaled, icon)
+            with Image.open(root / 'icon-512-maskable.png') as icon:
+                self.assertEqual(icon.size, (512, 512))
                 self.assertEqual(icon.mode, 'RGB')
+                artwork = source.resize((328, 328), Image.Resampling.LANCZOS)
+                self.assert_same_artwork(artwork, icon.crop((92, 92, 420, 420)))
 
     def test_worker_root_scope_and_cache_policy(self):
         response = self.client.get('/service-worker.js')
@@ -31,16 +49,16 @@ class PwaResourcesTests(TestCase):
         self.assertNotIn(b'{{', response.content)
         self.assertContains(response, "url.pathname.startsWith('/static/mobileApp/')")
 
-    def test_custom_brand_supplies_sized_installation_icons(self):
+    def test_installation_icons_are_independent_of_the_company_logo(self):
+        default_icons = self.client.get('/manifest.webmanifest').json()['icons']
         logo = BytesIO()
         Image.new('RGBA', (40, 20), 'red').save(logo, format='PNG')
         CompanyBrand.objects.create(company_id=RELONCAVI_COMPANY_ID, base_color='#fedc00', logo_png=logo.getvalue())
-        item = self.client.get('/manifest.webmanifest').json()
-        response = self.client.get(item['icons'][0]['src'])
-        self.assertEqual(response.status_code, 200)
-        with Image.open(BytesIO(response.content)) as icon:
-            self.assertEqual(icon.size, (192, 192))
-        self.assertContains(self.client.get('/'), '/marca/icono/180.png?v=1')
+        self.assertEqual(self.client.get('/manifest.webmanifest').json()['icons'], default_icons)
+        shell = self.client.get('/')
+        self.assertContains(shell, 'href="/static/mobileApp/img/pwa/apple-touch-icon.png?')
+        self.assertContains(shell, 'src="/marca/logo.png?v=1"')
+        self.assertEqual(self.client.get('/marca/logo.png').content, logo.getvalue())
 
     def test_shell_declares_installation_resources(self):
         response = self.client.get('/')

@@ -1,6 +1,6 @@
 {% load static %}
 <!doctype html>
-<html lang="es" data-session-user="{{ interface_user_id }}">
+<html lang="es" data-session-user="{{ interface_user_id }}"{% if company_theme %} data-company-themed{% endif %}>
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Administración · Planos</title>
@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="{% static 'mobileApp/management.css' %}?v={{ asset_version }}">
   {% include 'mobileApp/company_theme.html' %}
 </head>
-<body{% if company_palette %} style="background:{{ company_palette.background }}"{% endif %}>
+<body>
 <main class="container management-shell py-4 py-lg-5">
   <header class="mb-4">
     <a class="back-link" href="/">← Volver a los planos</a>

@@ -1,5 +1,5 @@
-/* This sheet is loaded only for companies with their own interface palette. */
-:root {
+/* Connect Bootstrap controls and surfaces to the active company palette. */
+:root[data-company-themed] {
     --bs-primary: var(--company-primary);
     --bs-primary-rgb: var(--company-primary-rgb);
     --bs-primary-text-emphasis: var(--company-ink);
@@ -10,10 +10,23 @@
     --bs-link-hover-color: var(--company-hover);
     --bs-link-hover-color-rgb: var(--company-hover-rgb);
     --bs-focus-ring-color: rgba(var(--company-primary-rgb), .25);
+    --bs-body-color: var(--company-ink);
+    --bs-body-color-rgb: var(--company-ink-rgb, var(--company-hover-rgb));
+    --bs-body-bg: var(--company-surface);
+    --bs-emphasis-color: var(--company-ink);
+    --bs-emphasis-color-rgb: var(--bs-body-color-rgb);
+    --bs-secondary: var(--company-hover);
+    --bs-secondary-rgb: var(--company-hover-rgb);
+    --bs-secondary-color: var(--company-muted, var(--company-hover));
+    --bs-secondary-bg: var(--company-soft);
+    --bs-tertiary-bg: var(--company-surface);
+    --bs-dark-rgb: var(--bs-body-color-rgb);
+    --bs-border-color: var(--company-border);
     accent-color: var(--company-primary);
 }
 
-.btn-primary {
+:where([data-company-themed]) body { background-color: var(--company-background); }
+:where([data-company-themed]) :is(.btn-primary, .btn-secondary) {
     --bs-btn-bg: var(--company-primary);
     --bs-btn-border-color: var(--company-primary);
     --bs-btn-hover-bg: var(--company-hover);
@@ -25,7 +38,7 @@
     --bs-btn-focus-shadow-rgb: var(--company-primary-rgb);
 }
 
-.btn-outline-primary {
+:where([data-company-themed]) :is(.btn-outline-primary, .btn-outline-secondary) {
     --bs-btn-color: var(--company-primary);
     --bs-btn-border-color: var(--company-border);
     --bs-btn-hover-bg: var(--company-primary);
@@ -37,21 +50,27 @@
     --bs-btn-focus-shadow-rgb: var(--company-primary-rgb);
 }
 
-.btn-link { --bs-btn-focus-shadow-rgb: var(--company-primary-rgb); }
-.form-control:focus, .form-select:focus, .form-check-input:focus {
+:where([data-company-themed]) .btn-link { --bs-btn-focus-shadow-rgb: var(--company-primary-rgb); }
+:where([data-company-themed]) :is(.form-control, .form-select, .form-check-input):focus {
     border-color: var(--company-primary);
     box-shadow: 0 0 0 .2rem var(--bs-focus-ring-color);
 }
-.form-check-input:checked, .form-check-input[type="checkbox"]:indeterminate,
-.dropdown-item.active, .dropdown-item:active {
+:where([data-company-themed]) .form-check-input:is(:checked, :indeterminate) {
     background-color: var(--company-primary);
     border-color: var(--company-primary);
 }
-.list-group { --bs-list-group-active-bg: var(--company-primary); --bs-list-group-active-border-color: var(--company-primary); }
-.progress { --bs-progress-bar-bg: var(--company-primary); }
-.form-range::-webkit-slider-thumb { background-color: var(--company-primary); }
-.form-range::-moz-range-thumb { background-color: var(--company-primary); }
-.form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
-.form-range:focus::-moz-range-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
-.form-range:disabled::-webkit-slider-thumb { background-color: var(--bs-secondary-color); }
-.form-range:disabled::-moz-range-thumb { background-color: var(--bs-secondary-color); }
+:where([data-company-themed]) .dropdown-menu {
+    --bs-dropdown-link-hover-bg: var(--company-soft);
+    --bs-dropdown-link-active-bg: var(--company-primary);
+}
+:where([data-company-themed]) .list-group {
+    --bs-list-group-active-bg: var(--company-primary);
+    --bs-list-group-active-border-color: var(--company-primary);
+}
+:where([data-company-themed]) .progress { --bs-progress-bar-bg: var(--company-primary); }
+:where([data-company-themed]) .form-range::-webkit-slider-thumb { background-color: var(--company-primary); }
+:where([data-company-themed]) .form-range::-moz-range-thumb { background-color: var(--company-primary); }
+:where([data-company-themed]) .form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
+:where([data-company-themed]) .form-range:focus::-moz-range-thumb { box-shadow: 0 0 0 1px white, 0 0 0 .2rem var(--bs-focus-ring-color); }
+:where([data-company-themed]) .form-range:disabled::-webkit-slider-thumb { background-color: var(--bs-secondary-color); }
+:where([data-company-themed]) .form-range:disabled::-moz-range-thumb { background-color: var(--bs-secondary-color); }

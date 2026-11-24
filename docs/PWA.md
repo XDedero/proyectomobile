@@ -69,19 +69,12 @@ móviles; no sustituyen una validación en Safari/iPhone físico.
 
 ## Icono
 
-El logo original permanece en `mobileApp/static/mobileApp/img/reloncavi-logo.png`.
-La figura sin letras se preparó con la herramienta integrada `image_gen` a partir de ese
-archivo, conservando el cubo negro y su cara roja sobre fondo blanco. Los resultados están
-en `mobileApp/static/mobileApp/img/pwa/`: `icon-source.png`, `apple-touch-icon.png` (180 px),
-`icon-192.png` e `icon-512.png`. Los tamaños se exportaron con remuestreo Lanczos.
-
-Prompt utilizado: «Remove ALL lettering, including Reloncaví and trademark, retain only
-the exact geometric cube/building figure at the top (dark near-black three-dimensional
-outlined hexagonal cube with a small red solid face on lower left). Preserve its exact
-geometry, proportions, line widths relative to the figure, black and red colors. Enlarge
-and center this isolated figure, occupying approximately 65 percent of the square canvas,
-with equal whitespace. Solid pure white opaque background, no rounded corners (iOS applies
-those), no text, no shadows, no gradients, no added shapes.»
+El icono de la pantalla de inicio proviene de `logo_app.jpeg`. El original y sus
+versiones PNG para iOS (180 px) y el manifiesto (192 y 512 px) están en
+`mobileApp/static/mobileApp/img/pwa/`. La variante `icon-512-maskable.png` deja
+margen para las formas que aplica Android. El logo de empresa se muestra dentro de
+la interfaz. Un acceso directo existente puede requerir volver a instalar la app
+para actualizar su icono.
 
 ## Validación
 

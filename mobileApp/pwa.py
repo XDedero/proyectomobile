@@ -6,6 +6,7 @@ from pathlib import Path
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
@@ -41,18 +42,20 @@ def manifest(request):
     account = current_account(request)
     brand = brand_context(account.company if account else None)
     name = brand.get('company_name', 'Reloncaví')
-    branding = brand.get('company_palette') or {}
-    revision = brand.get('company_logo_revision')
+    branding = brand.get('company_theme') or {}
+    version = asset_version()
     return JsonResponse({
         'id': reverse('index'), 'name': f'{name} APP', 'short_name': name,
         'description': f'Planos, sectores y fichas de mantenimiento de {name}.',
         'lang': 'es-CL', 'start_url': reverse('index'), 'scope': reverse('index'),
-        'display': 'standalone', 'background_color': '#ffffff', 'theme_color': branding.get('header', '#eaf4ff'),
+        'display': 'standalone', 'background_color': branding.get('background', '#ffffff'),
+        'theme_color': branding.get('header', '#eaf4ff'),
         'icons': [
-            {'src': f"{reverse('company_icon', args=[size])}?v={revision}" if revision else
-                    f'/static/mobileApp/img/pwa/icon-{size}.png', 'sizes': f'{size}x{size}',
+            {'src': f"{static(f'mobileApp/img/pwa/{filename}.png')}?v={version}", 'sizes': f'{size}x{size}',
              'type': 'image/png', 'purpose': purpose}
-            for size, purpose in [(192, 'any'), (512, 'any'), (512, 'maskable')]
+            for filename, size, purpose in [
+                ('icon-192', 192, 'any'), ('icon-512', 512, 'any'), ('icon-512-maskable', 512, 'maskable'),
+            ]
         ],
     }, content_type='application/manifest+json')
 

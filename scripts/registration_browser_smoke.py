@@ -47,6 +47,53 @@ def login(page, username):
     expect(page.locator('#viewMainMenu')).to_be_visible()
 
 
+def check_company_color(context, url):
+    from playwright.sync_api import expect
+
+    app = context.new_page()
+    settings = context.new_page()
+    settings.set_viewport_size({'width': 390, 'height': 844})
+    try:
+        app.goto(url)
+        expect(app.locator('#viewMainMenu')).to_be_visible()
+        settings.goto(url + 'administracion/')
+        company_link = settings.get_by_role('link', name='Configuración de la empresa')
+        company_link.click()
+
+        color = settings.locator('#companyColor')
+        toggle = settings.locator('#companyPaletteButton')
+        palette = settings.locator('#companyPalette')
+        expect(palette).to_be_hidden()
+        toggle.click()
+        expect(toggle).to_have_attribute('aria-expanded', 'true')
+        expect(palette).to_be_visible()
+        assert settings.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        settings.locator('#companyCustomColor').fill('#2c6e49')
+        expect(color).to_have_value('#2c6e49')
+        purple = palette.get_by_role('button', name='Morado')
+        purple.click()
+        expect(purple).to_have_attribute('aria-pressed', 'true')
+        expect(color).to_have_value('#7e22ce')
+        settings.get_by_role('button', name='Guardar cambios').click()
+        expect(settings).to_have_url(url + 'administracion/')
+        expect(settings.locator('.management-tabs button.active')).to_have_css('background-color', 'rgb(126, 34, 206)')
+        app.evaluate('appAuth.refresh()')
+        expect(app.locator('#appScreen')).to_have_css('background-color', 'rgb(240, 228, 249)')
+
+        company_link.click()
+        expect(color).to_have_value('#7e22ce')
+        toggle.click()
+        settings.get_by_role('button', name='Usar color predeterminado').click()
+        settings.get_by_role('button', name='Guardar cambios').click()
+        expect(settings).to_have_url(url + 'administracion/')
+        app.evaluate('appAuth.refresh()')
+        expect(app.locator('#appScreen')).to_have_css('background-color', 'rgb(237, 245, 255)')
+        print('PASS: mobile company color palette, custom color selection, saved theme and reset', flush=True)
+    finally:
+        settings.close()
+        app.close()
+
+
 def check_browser(url, directory):
     from playwright.sync_api import expect, sync_playwright
     from scripts.generate_demo import generate
@@ -119,6 +166,7 @@ def check_browser(url, directory):
             admin.route('**/api/projects/cloud/', lambda route: route.fulfill(json={'plans': []}))
             admin.goto(url)
             login(admin, 'admin')
+            check_company_color(admin_context, url)
             admin.locator('#btnAdminister').click()
             expect(admin).to_have_url(url + 'administracion/')
             admin.locator('[data-tab="users"]').click()

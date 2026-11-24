@@ -9,7 +9,7 @@
     document.querySelector('.app-shell').prepend(launch);
     const panel=document.createElement('dialog');panel.className='pwa-panel';panel.id='pwaPanel';
     panel.setAttribute('aria-labelledby','pwaTitle');
-    panel.innerHTML=`<div class="pwa-panel-heading"><img src="/static/mobileApp/img/pwa/apple-touch-icon.png" alt="" width="48" height="48"><h2 id="pwaTitle">Reloncaví en tu dispositivo</h2><button type="button" class="pwa-close" aria-label="Cerrar">×</button></div>
+    panel.innerHTML=`<div class="pwa-panel-heading"><img alt="" width="48" height="48"><h2 id="pwaTitle">Reloncaví en tu dispositivo</h2><button type="button" class="pwa-close" aria-label="Cerrar">×</button></div>
       <p id="pwaConnection" role="status"></p>
       <div id="pwaInstallHelp"><p>Instala la app para abrir tus planos desde la pantalla de inicio.</p><ol><li>Abre esta dirección en Safari.</li><li>Toca Compartir y luego <strong>Agregar a pantalla de inicio</strong>.</li><li>Activa <strong>Abrir como app</strong> si aparece y toca Agregar.</li></ol></div>
       <button type="button" id="pwaInstall" class="btn btn-primary" hidden>Instalar Reloncaví</button>
@@ -18,6 +18,7 @@
       <p id="pwaPending"></p><div class="pwa-actions"><button type="button" id="pwaSync" class="btn btn-primary">Sincronizar pendientes</button><button type="button" id="pwaExport" class="btn btn-outline-secondary">Exportar borradores</button><button type="button" id="pwaDiscard" class="btn btn-outline-danger">Descartar borradores</button></div>
       <ul id="pwaConflicts"></ul><hr><div id="pwaUpdateArea" hidden><p>Hay una nueva versión disponible.</p><button type="button" id="pwaUpdate" class="btn btn-primary">Actualizar app</button></div>
       <p id="pwaMessage" role="status"></p>`;
+    panel.querySelector('img').src=document.querySelector('link[rel="apple-touch-icon"]').href;
     document.body.append(panel);
     const $=id=>document.getElementById(id);
     const message=text=>{$('pwaMessage').textContent=text;};

@@ -28,20 +28,27 @@ def palette(color):
         value /= 255
         return value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
 
+    def luminance(values):
+        return sum(weight * linear(value) for weight, value in zip((.2126, .7152, .0722), values))
+
+    soft = mixed(channels, 255, .89)
+    soft_luminance = luminance(soft)
     for step in range(101):
         primary = mixed(channels, 0, step / 100)
-        luminance = sum(weight * linear(value) for weight, value in zip((.2126, .7152, .0722), primary))
-        if 1.05 / (luminance + .05) >= 4.5:
+        if (soft_luminance + .05) / (luminance(primary) + .05) >= 4.5:
             break
     hover = mixed(primary, 0, .20)
+    ink = mixed(primary, 0, .52)
     return {
         'primary': hex_color(primary),
         'primary_rgb': ', '.join(map(str, primary)),
         'hover': hex_color(hover),
         'hover_rgb': ', '.join(map(str, hover)),
         'pressed': hex_color(mixed(primary, 0, .32)),
-        'ink': hex_color(mixed(primary, 0, .52)),
-        'soft': hex_color(mixed(channels, 255, .89)),
+        'ink': hex_color(ink),
+        'ink_rgb': ', '.join(map(str, ink)),
+        'muted': hex_color(mixed(primary, 0, .25)),
+        'soft': hex_color(soft),
         'surface': hex_color(mixed(channels, 255, .96)),
         'border': hex_color(mixed(primary, 255, .55)),
         'background': hex_color(mixed(channels, 255, .88)),
@@ -66,7 +73,7 @@ def brand_context(company=None):
                          (f'&company={company_id}' if company_id != RELONCAVI_COMPANY_ID else '')) if brand.has_logo else '',
         'company_logo_revision': brand.revision if brand.has_logo else None,
         'company_palette': tones,
-        'company_theme': tones if company_id != RELONCAVI_COMPANY_ID else None,
+        'company_theme': tones,
     }
 
 

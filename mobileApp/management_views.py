@@ -18,6 +18,19 @@ from .pdf_views import error_response, json_body
 from .pwa import asset_version
 
 
+COMPANY_COLOR_OPTIONS = (
+    ('Azul', '#2368a7'),
+    ('Turquesa', '#0f766e'),
+    ('Verde', '#15803d'),
+    ('Ocre', '#a16207'),
+    ('Naranja', '#c2410c'),
+    ('Rojo', '#b91c1c'),
+    ('Rosa', '#be185d'),
+    ('Morado', '#7e22ce'),
+    ('Gris', '#475569'),
+)
+
+
 def administrators_only(view):
     @wraps(view)
     @api_permissions()
@@ -45,7 +58,7 @@ def management_panel(request):
         'asset_version': asset_version(),
         'pending_requests': pending, 'registration_error': error,
         'can_edit_company': is_primary_administrator(request.user),
-        **(company.brand if company else {}),
+        **(company.brand if company else brand_context()),
     })
 
 
@@ -100,7 +113,8 @@ def _edit_company_brand(request, company_id, actor):
             error = exc.messages[0] if isinstance(exc, ValidationError) else 'Ese RUT de empresa ya está en uso.'
     return render(request, 'mobileApp/company_profile.html', {
         'asset_version': asset_version(),
-        **(brand_context(company) if company_id != RELONCAVI_COMPANY_ID else {}),
+        **brand_context(company),
+        'color_options': COMPANY_COLOR_OPTIONS,
         'values': values, 'error': error, 'revision': request.POST.get('revision', '') if error else
         current.revision if current else 0,
     }, status=400 if error else 200)

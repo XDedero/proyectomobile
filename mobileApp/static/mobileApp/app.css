@@ -4,7 +4,7 @@
     --primary-hover: var(--company-hover, #174e83);
     --autocad-red: var(--company-primary, #2368a7);
     --excel-green: #107c41;
-    --app-body-bg: var(--company-soft, #edf5ff);
+    --app-body-bg: var(--company-background, #edf5ff);
     --text-dark: var(--company-ink, #173451);
     --text-muted: #58718a;
     --bs-primary: var(--company-primary, #2368a7);
@@ -103,8 +103,8 @@ html, body {
 
 .form-control {
     border-radius: 12px;
-    border: 1.5px solid #e2e8f0;
-    background: #ffffff;
+    border: 1.5px solid var(--company-border, #e2e8f0);
+    background: var(--company-surface, #ffffff);
     font-size: 0.9rem;
     padding: 10px 14px;
 }
@@ -149,31 +149,31 @@ html, body {
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
+    border: 1px solid var(--company-border, #e2e8f0);
+    background: var(--company-surface, #ffffff);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #334155;
+    color: var(--company-ink, #334155);
     transition: all 0.2s;
 }
 .icon-btn:hover, .icon-btn:focus {
-    background: #f1f5f9;
-    color: #0f172a;
+    background: var(--company-soft, #f1f5f9);
+    color: var(--company-ink, #0f172a);
 }
 
 /* Tarjeta de Importar Plano */
 .cad-card {
-    border: 2px dashed #cbd5e1;
+    border: 2px dashed var(--company-border, #cbd5e1);
     border-radius: 20px;
     padding: 24px 18px;
     text-align: center;
-    background: #ffffff;
+    background: var(--company-surface, #ffffff);
     transition: all 0.25s ease;
 }
 .cad-card:hover {
     border-color: var(--company-primary, #3b82f6);
-    background: #f8fafc;
+    background: var(--company-surface, #f8fafc);
 }
 
 .btn-cad {
@@ -231,7 +231,7 @@ html, body {
 .user-menu-dropdown .dropdown-menu {
     border-radius: 16px;
     box-shadow: 0 14px 30px rgba(0,0,0,0.15);
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--company-border, #e2e8f0);
     padding: 8px;
     min-width: 220px;
 }
@@ -245,10 +245,10 @@ html, body {
     gap: 9px;
 }
 .user-menu-dropdown .dropdown-item:hover {
-    background-color: #f1f5f9;
+    background-color: var(--company-soft, #f1f5f9);
 }
 
-/* Reloncabi blue interface palette. */
+/* Primary actions share the company palette. */
 .btn-primary, .btn-success {
     --bs-btn-color: #fff;
     --bs-btn-bg: var(--company-primary, #2368a7);
@@ -310,8 +310,8 @@ html, body {
     content: "";
     pointer-events: none;
 }
-.welcome-card::before { background: rgba(173, 216, 255, .14); transform: rotate(-8deg); }
-.welcome-card::after { right: 16px; bottom: -137px; width: 530px; height: 176px; border: 1px solid rgba(231, 243, 255, .2); transform: rotate(7deg); }
+.welcome-card::before { background: rgba(255, 255, 255, .14); transform: rotate(-8deg); }
+.welcome-card::after { right: 16px; bottom: -137px; width: 530px; height: 176px; border: 1px solid rgba(255, 255, 255, .2); transform: rotate(7deg); }
 .welcome-copy { position: relative; z-index: 1; min-width: 0; max-width: 880px; }
 .welcome-session { display: inline-flex; margin-bottom: 7px; padding: 3px 9px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(255,255,255,.13); color: var(--company-surface, #e5f2ff); font-size: .68rem; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
 .welcome-copy h5 { margin: 0 0 5px; color: #fff; font-size: clamp(1.06rem, 3.7vw, 1.4rem); font-weight: 750; line-height: 1.2; overflow-wrap: anywhere; }

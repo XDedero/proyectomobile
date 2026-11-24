@@ -107,7 +107,7 @@
         document.documentElement.classList.add('app-identity-updating');
         try {
             if (changingUser) applyUser(null);
-            await window.companyAppearance.apply(appearance, () => revision === authRevision);
+            window.companyAppearance.apply(appearance);
             if (revision === authRevision) applyUser(result.user);
         } catch (error) {
             if (revision === authRevision) applyUser(null);

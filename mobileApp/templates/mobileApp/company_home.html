@@ -1,6 +1,6 @@
 {% load static %}
 <!doctype html>
-<html lang="es-CL">
+<html lang="es-CL"{% if company_theme %} data-company-themed{% endif %}>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,10 +9,10 @@
     <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
     {% include 'mobileApp/company_theme.html' %}
 </head>
-<body style="background:{{ company_palette.background|default:'#edf5ff' }}">
+<body style="background:var(--company-background, #edf5ff)">
     <main class="container py-4" style="max-width:880px">
         <header class="card shadow-sm mb-4">
-            <div class="card-body d-flex align-items-center gap-3 flex-wrap" style="border-top:4px solid {{ company_palette.primary|default:'#2368a7' }}">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap" style="border-top:4px solid var(--company-primary, #2368a7)">
                 {% if company_logo %}<img src="{{ company_logo }}" width="64" height="64" style="object-fit:contain" alt="">{% endif %}
                 <div class="me-auto">
                     <h1 class="h4 mb-1">{{ account.company.name }}</h1>

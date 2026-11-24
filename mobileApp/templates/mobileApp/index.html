@@ -1,18 +1,18 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="es" data-company-id="{{ company_identity }}" data-brand-version="{{ company_brand_version|default:'0' }}" data-company-theme-url="{% static 'mobileApp/company-theme.css' %}?v={{ asset_version }}"{% if company_theme %} data-plan-button-color="{{ company_theme.primary }}"{% endif %}>
+<html lang="es" data-company-id="{{ company_identity }}" data-brand-version="{{ company_brand_version|default:'0' }}"{% if company_theme %} data-company-themed data-plan-button-color="{{ company_theme.primary }}"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="{{ company_palette.header|default:'#eaf4ff' }}">
+    <meta name="theme-color" content="{{ company_theme.header|default:'#eaf4ff' }}">
     <meta name="color-scheme" content="light">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="{{ company_name|default:'Reloncaví' }}">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="manifest" href="{% url 'pwa_manifest' %}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{% if company_logo_revision %}{% url 'company_icon' 180 %}?v={{ company_logo_revision }}{% else %}{% static 'mobileApp/img/pwa/apple-touch-icon.png' %}?v={{ asset_version }}{% endif %}">
-    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'mobileApp/img/pwa/icon-192.png' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'mobileApp/img/pwa/apple-touch-icon.png' %}?v={{ asset_version }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'mobileApp/img/pwa/icon-192.png' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/pwa.css' %}?v={{ asset_version }}">
     <title>{{ company_name|default:'Reloncaví' }} APP · {{ company_name|default:'Reloncaví Valdivia' }}</title>
     <!-- Bootstrap 5.3 CSS -->
@@ -30,24 +30,6 @@
     <link rel="stylesheet" href="{% static 'mobileApp/project-workflow.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/motor-library.css' %}?v={{ asset_version }}">
     <link rel="stylesheet" href="{% static 'mobileApp/mobile-layout.css' %}?v={{ asset_version }}">
-    {% if company_palette %}
-    <style id="companyPaletteStyle">
-        :root {
-            --app-bg: {{ company_palette.hover }};
-            --primary-accent: {{ company_palette.primary }};
-            --primary-hover: {{ company_palette.hover }};
-            --app-body-bg: {{ company_palette.background }};
-            --bs-primary: {{ company_palette.primary }};
-            --bs-primary-rgb: {{ company_palette.primary_rgb }};
-            --bs-link-color: {{ company_palette.primary }};
-            --bs-link-hover-color: {{ company_palette.hover }};
-        }
-        .app-header { background: linear-gradient(110deg, {{ company_palette.header }}, var(--app-body-bg)); }
-        .welcome-card, .btn-modern-primary { background: linear-gradient(135deg, var(--primary-hover), var(--primary-accent)); }
-        .btn-modern-primary:hover, .btn-modern-primary:active { background: var(--primary-hover); }
-        .welcome-copy p, .welcome-session { color: #fff; }
-    </style>
-    {% endif %}
     {% include 'mobileApp/company_theme.html' %}
     <style id="companyLogoStyle">{% if company_logo %}.company-logo-window > img { inset: 0; width: 100%; height: 100%; transform: none; }{% endif %}</style>
 </head>
@@ -69,7 +51,7 @@
                     <p class="text-muted small mb-0" data-company-name>{{ company_name|default:'Reloncaví Valdivia' }}</p>
                 </div>
 
-                <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
+                <div class="card border-0 shadow-sm rounded-4 p-3 mb-3">
                     <form id="loginForm" method="post">
                         <p class="text-muted small">Ingrese con su usuario y contraseña.</p>
                         <div class="mb-3">
@@ -197,7 +179,7 @@
                     <a id="btnAdminister" class="btn btn-outline-primary w-100 mb-3 rounded-3" href="/administracion/" hidden>
                         <i class="bi bi-gear me-1"></i> Administrar
                     </a>
-                    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white text-center">
+                    <div class="card border-0 shadow-sm rounded-4 p-4 text-center">
                         <div class="mb-3">
                             <span class="main-module-heading">
                                 <span class="main-module-logo"><img src="{% static 'mobileApp/img/motor-logo.png' %}" alt=""></span>
@@ -296,7 +278,7 @@
                     </div>
 
                     <!-- Tarjeta de Estado del Plano Importado -->
-                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3" id="loadedPlanCard" style="display: none;">
+                    <div class="card border-0 shadow-sm rounded-4 p-3 mb-3" id="loadedPlanCard" style="display: none;">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="badge bg-danger-subtle text-danger fw-semibold px-2 py-1" style="font-size: 0.72rem;">
                                 <i class="bi bi-file-code-fill me-1"></i> Plano Activo

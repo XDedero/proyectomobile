@@ -1,5 +1,5 @@
 .saved-motors-list { display: grid; gap: 10px; }
-.saved-motor-card { border: 1px solid var(--company-border, #dce6df); border-radius: 12px; padding: 13px; background: #fff; overflow-wrap: anywhere; }
+.saved-motor-card { border: 1px solid var(--company-border, #dce6df); border-radius: 12px; padding: 13px; background: var(--company-surface, #fff); overflow-wrap: anywhere; }
 .saved-motor-card strong { display: block; margin-bottom: 10px; color: var(--company-hover, #185b37); font-size: .88rem; }
 .saved-motor-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .saved-motor-actions .btn { min-height: 36px; font-size: .73rem; }

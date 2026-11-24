@@ -115,23 +115,28 @@ class RegistrationTests(TestCase):
         self.client.force_login(self.ordinary_administrator())
         self.assertEqual(self.client.post(url, data).status_code, 403)
         self.client.force_login(self.primary_administrator())
+        self.assertContains(self.client.get(url), 'aria-controls="companyPalette"')
         self.assertEqual(self.client.post(url, data).status_code, 302)
         self.assertEqual(CompanyBrand.objects.get(company_id=RELONCAVI_COMPANY_ID).base_color, '#fff000')
         self.assertEqual(Company.objects.get(pk=RELONCAVI_COMPANY_ID).tax_id, '12345678-5')
         self.assertContains(self.client.get(reverse('index')), 'Reloncaví Taller')
+        for page in (url, reverse('management_panel')):
+            self.assertContains(self.client.get(page), 'data-company-themed')
         self.assertEqual(self.client.post(url, {**data, 'name': 'Edición antigua'}).status_code, 400)
         self.assertEqual(Company.objects.get(pk=RELONCAVI_COMPANY_ID).name, 'Reloncaví Taller')
 
     def test_company_interface_theme_is_scoped_to_the_selected_company(self):
-        from .company_brand import brand_context
+        from .company_brand import brand_context, palette
         from .tenant_runtime import Workspace, workspace
 
+        default = self.client.get(reverse('index'))
+        self.assertNotContains(default, 'data-company-themed')
         CompanyBrand.objects.update_or_create(company_id=RELONCAVI_COMPANY_ID, defaults={'base_color': '#2368a7'})
         company = Company.objects.create(name='Taller Sur', slug='taller-sur')
         CompanyBrand.objects.create(company=company, base_color='#f97316')
         legacy = self.client.get(reverse('index'))
-        self.assertNotContains(legacy, 'id="companyThemeStyles"')
-        self.assertNotContains(legacy, 'data-plan-button-color')
+        self.assertContains(legacy, 'data-company-themed')
+        self.assertContains(legacy, 'data-plan-button-color="#2368a7"')
         self.assertContains(legacy, 'data-company-id=""')
 
         brand = brand_context(company)
@@ -154,7 +159,9 @@ class RegistrationTests(TestCase):
             workspace.reset(token)
         self.assertEqual(data['user']['appearance'], brand)
         self.assertEqual(data['user']['company_id'], str(company.pk))
-        self.assertEqual(self.client.get(reverse('auth_session')).json()['user']['appearance']['company_identity'], '')
+        legacy_appearance = self.client.get(reverse('auth_session')).json()['user']['appearance']
+        self.assertEqual(legacy_appearance['company_identity'], '')
+        self.assertEqual(legacy_appearance['company_theme'], palette('#2368a7'))
 
     def test_submission_stores_the_selected_company_and_rechecks_availability(self):
         pending = Company.objects.create(name='Taller Sur', slug='taller-sur')

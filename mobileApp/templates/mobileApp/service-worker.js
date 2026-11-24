@@ -11,8 +11,6 @@ self.addEventListener('install', event => {
         // Do not activate with a half-downloaded interface.
         const assets = [...html.matchAll(/(?:src|href)="(\/static\/mobileApp\/[^"<>]+)"/g)]
             .map(match => match[1].replaceAll('&amp;', '&'));
-        assets.push('/static/mobileApp/img/pwa/apple-touch-icon.png');
-        assets.push('/static/mobileApp/company-theme.css?v={{ asset_version }}');
         assets.push('/static/mobileApp/vendor/pdfjs/pdf-entry.mjs?v={{ asset_version }}',
             '/static/mobileApp/vendor/pdfjs/pdf.worker-entry.mjs?v={{ asset_version }}',
             '/static/mobileApp/vendor/pdfjs/compat.mjs?v=1',

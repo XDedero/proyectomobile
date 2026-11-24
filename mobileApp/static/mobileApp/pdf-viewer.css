@@ -5,8 +5,8 @@
     min-height: 350px;
     overflow: auto;
     border-radius: 14px;
-    border: 1px solid #cbd5e1;
-    background: #334155;
+    border: 1px solid var(--company-border, #cbd5e1);
+    background: var(--company-pressed, #334155);
     touch-action: none;
     overscroll-behavior: contain;
     user-select: none;
@@ -91,7 +91,7 @@
     text-align: center;
     font-size: 0.85rem;
     pointer-events: none;
-    background: #334155dd;
+    background: var(--company-pressed, #334155dd);
     border-radius: 12px;
     z-index: 5;
 }

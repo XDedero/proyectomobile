@@ -26,7 +26,7 @@
 .viewer-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .viewer-toolbar button { min-width: 38px; min-height: 38px; }
 .motor-list { max-height: 160px; overflow-y: auto; display: grid; gap: 6px; }
-.motor-list button { text-align: left; font-size: 0.78rem; border: 1px solid #e2e8f0; border-radius: 10px; background: white; padding: 9px; }
+.motor-list button { text-align: left; font-size: 0.78rem; border: 1px solid var(--company-border, #e2e8f0); border-radius: 10px; background: var(--company-surface, white); padding: 9px; }
 .motor-list button[aria-pressed="true"] { border-color: var(--company-primary, #2563eb); background: var(--company-soft, #eff6ff); }
 .motor-coordinates { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #selectedMotorName, #excelFileName { overflow-wrap: anywhere; }
