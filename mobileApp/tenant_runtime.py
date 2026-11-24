@@ -36,6 +36,12 @@ def schema_name(company_id):
 def drive_environment():
     company = workspace.get()
     if company is None:
+        if settings.PLANOS_CLOUD_MODE:
+            from .drive_credentials import registered_credentials
+            from .models import RELONCAVI_COMPANY_ID
+            credentials = registered_credentials(RELONCAVI_COMPANY_ID)
+            if credentials is not None:
+                return {**os.environ, 'PLANOS_COMPANY_DRIVE': json.dumps({'legacy': True, 'credentials': credentials})}
         return None
     return {**os.environ, 'PLANOS_COMPANY_DRIVE': json.dumps(company.drive)}
 
@@ -49,7 +55,11 @@ def load_drive(company_id, connection_info):
     if connection_info is None:
         return None
     try:
-        if connection_info.drive_secret_id:
+        from .drive_credentials import registered_credentials
+        registered = registered_credentials(company_id, connection_info.account_id)
+        if registered is not None:
+            payload = {**registered, 'company_id': str(company_id)}
+        elif connection_info.drive_secret_id:
             with connection.cursor() as cursor:
                 cursor.execute('SELECT decrypted_secret FROM vault.decrypted_secrets WHERE id=%s AND name=%s',
                                [connection_info.drive_secret_id, f'planos_drive_{company_id.hex}'])

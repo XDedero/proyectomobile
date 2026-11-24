@@ -1,7 +1,7 @@
 /* The catalog lives in one root workbook; its index is not a visible worksheet. */
 const JSZip = require('../mobileApp/static/mobileApp/vendor/jszip.min.js');
 const PART = 'customXml/reloncavi-pieces.xml';
-const companyRoot = process.env.PLANOS_COMPANY_DRIVE ? JSON.parse(process.env.PLANOS_COMPANY_DRIVE).folders.root : 'root';
+const companyRoot = process.env.PLANOS_COMPANY_DRIVE ? (JSON.parse(process.env.PLANOS_COMPANY_DRIVE).folders?.root || 'root') : 'root';
 async function readPieceIndex(content) {
     const zip = await JSZip.loadAsync(content);
     const xml = await zip.file(PART)?.async('string');

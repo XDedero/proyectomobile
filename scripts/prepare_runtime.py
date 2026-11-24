@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def prepare(settings, *, root=ROOT, secrets_dir=Path('/etc/secrets')):
+def prepare(settings, *, root=ROOT, secrets_dir=Path('/etc/secrets'), has_cloud_authorization=None):
     try:
         settings.APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
         settings.MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -18,6 +18,8 @@ def prepare(settings, *, root=ROOT, secrets_dir=Path('/etc/secrets')):
             'PLANOS_CLOUD_MODE=1 con Supabase y Drive; /var/data requiere un disco persistente.'
         ) from None
     if not settings.PLANOS_CLOUD_MODE:
+        return
+    if has_cloud_authorization is not None and has_cloud_authorization():
         return
     target = root / 'gdrive-token.json'
     if not target.is_file():
@@ -55,7 +57,17 @@ def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proyectomobile.settings')
     from django.conf import settings
     try:
-        prepare(settings)
+        import django
+        django.setup()
+        def has_cloud_authorization():
+            from django.db import connection
+            from mobileApp.drive_credentials import registered_credentials
+            from mobileApp.models import RELONCAVI_COMPANY_ID
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT to_regclass(%s)', [settings.PLANOS_DATABASE_SCHEMA + '."mobileApp_drivestorageaccount"'])
+                if cursor.fetchone()[0] is None:
+                    return False
+            return registered_credentials(RELONCAVI_COMPANY_ID) is not None
         if settings.PLANOS_CLOUD_MODE:
             from proyectomobile.cloud_config import prepare_schema
             try:
@@ -63,6 +75,12 @@ def main():
             except Exception:
                 print('No se pudo preparar Supabase. Revise SUPABASE_DATABASE_URL, la contrasena y el Session pooler (puerto 5432).', file=sys.stderr)
                 return 1
+        from django.db import DatabaseError
+        try:
+            prepare(settings, has_cloud_authorization=has_cloud_authorization if settings.PLANOS_CLOUD_MODE else None)
+        except DatabaseError:
+            print('No se pudo consultar la autorización privada de almacenamiento en la base de datos.', file=sys.stderr)
+            return 1
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1

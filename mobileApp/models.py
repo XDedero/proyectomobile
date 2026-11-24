@@ -76,6 +76,21 @@ class CompanyAdminSetup(models.Model):
     password_hash = models.CharField(max_length=256)
 
 
+class DriveStorageAccount(models.Model):
+    """Private account inventory; OAuth material lives only in Supabase Vault."""
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    number = models.PositiveIntegerField(unique=True)
+    account_id = models.CharField(max_length=128, unique=True)
+    email = models.EmailField(max_length=254)
+    secret_id = models.UUIDField(unique=True, editable=False)
+    company = models.OneToOneField(Company, null=True, blank=True, on_delete=models.PROTECT)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ['number']
+        constraints = [models.CheckConstraint(condition=models.Q(number__gte=1), name='drive_account_positive_number')]
+
+
 class CompanyDriveConnection(models.Model):
     company = models.OneToOneField(Company, primary_key=True, on_delete=models.CASCADE)
     account_id = models.CharField(max_length=128, unique=True)

@@ -79,6 +79,13 @@ class CloudConfigurationTests(SimpleTestCase):
             with self.assertRaisesMessage(ValueError, 'Secret File'):
                 prepare(config, root=root, secrets_dir=root/'absent')
 
+    def test_vault_authorization_does_not_materialize_a_token_file_on_render(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = SimpleNamespace(APP_DATA_DIR=root/'runtime', MEDIA_ROOT=root/'runtime/media', PLANOS_CLOUD_MODE=True)
+            prepare(config, root=root, secrets_dir=root/'absent', has_cloud_authorization=lambda: True)
+            self.assertFalse((root/'gdrive-token.json').exists())
+
     def test_local_installation_does_not_require_cloud_credentials(self):
         with TemporaryDirectory() as directory:
             root=Path(directory)

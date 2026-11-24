@@ -49,14 +49,16 @@ const GOOGLE_DRIVE_CONFIG = {
 
 if (companyDrive) {
     const { credentials, folders } = companyDrive;
-    if (!credentials.client_id || !credentials.client_secret || !credentials.refresh_token ||
-        !['pdf', 'excel', 'originals', 'root'].every(role => /^[A-Za-z0-9_-]{8,128}$/.test(folders[role] || ''))) {
+    if (!credentials?.client_id || !credentials.client_secret || !credentials.refresh_token ||
+        (!companyDrive.legacy && !['pdf', 'excel', 'originals', 'root'].every(role => /^[A-Za-z0-9_-]{8,128}$/.test(folders?.[role] || '')))) {
         throw new Error('Autorización de almacenamiento de empresa incompleta.');
     }
     GOOGLE_DRIVE_CONFIG.CLIENT_ID = credentials.client_id;
     GOOGLE_DRIVE_CONFIG.CLIENT_SECRET = credentials.client_secret;
     GOOGLE_DRIVE_CONFIG.REFRESH_TOKEN = credentials.refresh_token;
-    GOOGLE_DRIVE_CONFIG.FOLDERS = {PDF: folders.pdf, EXCEL_CSV: folders.excel, ORIGINALS: folders.originals, ROOT: folders.root};
+    if (!companyDrive.legacy) {
+        GOOGLE_DRIVE_CONFIG.FOLDERS = {PDF: folders.pdf, EXCEL_CSV: folders.excel, ORIGINALS: folders.originals, ROOT: folders.root};
+    }
 }
 
 

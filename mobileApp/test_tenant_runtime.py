@@ -17,8 +17,9 @@ class TenantIsolationTests(SimpleTestCase):
         company, secret = uuid4(), uuid4()
         creds = {'client_id': 'company-client', 'client_secret': 'test-secret', 'refresh_token': 'test-token'}
         folders = {'pdf': 'pdf-folder', 'excel': 'excel-folder', 'originals': 'originals-folder'}
-        info = SimpleNamespace(drive_secret_id=secret, root_id='root-folder', folder_ids=folders)
-        with patch('mobileApp.tenant_runtime.connection') as connection:
+        info = SimpleNamespace(drive_secret_id=secret, root_id='root-folder', folder_ids=folders, account_id='company-account')
+        with (patch('mobileApp.tenant_runtime.connection') as connection,
+              patch('mobileApp.drive_credentials.registered_credentials', return_value=None)):
             cursor = connection.cursor.return_value.__enter__.return_value
             cursor.fetchone.return_value = (json.dumps({'company_id': str(company), **creds}),)
             self.assertEqual(load_drive(company, info), {'credentials': creds, 'folders': {**folders, 'root': info.root_id}})
@@ -68,3 +69,26 @@ class TenantIsolationTests(SimpleTestCase):
         finally:
             workspace.reset(token)
         self.assertIsNone(drive_environment())
+
+    @override_settings(PLANOS_CLOUD_MODE=True)
+    def test_cloud_account_is_used_before_legacy_company_secret_and_failure_does_not_fallback(self):
+        company = uuid4()
+        creds = {'client_id': 'client', 'client_secret': 'secret', 'refresh_token': 'renewed-token'}
+        folders = {'pdf': 'pdf-folder', 'excel': 'excel-folder', 'originals': 'originals-folder'}
+        info = SimpleNamespace(account_id='account', root_id='root-folder', folder_ids=folders, drive_secret_id=uuid4())
+        with (patch('mobileApp.drive_credentials.registered_credentials', return_value=creds) as registry,
+              patch('mobileApp.tenant_runtime.connection') as connection):
+            self.assertEqual(load_drive(company, info)['credentials'], creds)
+            registry.assert_called_once_with(company, 'account')
+            connection.cursor.assert_not_called()
+            registry.side_effect = ValueError('invalid secret')
+            self.assertIsNone(load_drive(company, info))
+            connection.cursor.assert_not_called()
+
+    @override_settings(PLANOS_CLOUD_MODE=True)
+    def test_legacy_company_reads_vault_without_returning_secrets_to_browser(self):
+        creds = {'client_id': 'client', 'client_secret': 'secret', 'refresh_token': 'token'}
+        with patch('mobileApp.drive_credentials.registered_credentials', return_value=creds):
+            data = json.loads(drive_environment()['PLANOS_COMPANY_DRIVE'])
+            self.assertTrue(data['legacy'])
+            self.assertEqual(data['credentials'], creds)
