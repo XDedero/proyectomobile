@@ -38,7 +38,8 @@ def button_details(request, kind, button_id):
             enabled = data.get('show_description', button.show_description)
             if type(enabled) is not bool:
                 raise ValidationError('Indica si el botón mostrará su descripción.')
-            maintenance = update_schedule(button, data['maintenance'], request.user) if 'maintenance' in data else {}
+            maintenance = (update_schedule(button, data['maintenance'], request.user, category=button.category)
+                           if 'maintenance' in data else {})
             if 'descriptions' in data:
                 rows = clean_rows(data['descriptions'], rows)
                 button.descriptions = rows
@@ -55,6 +56,7 @@ def button_details(request, kind, button_id):
         button.save(update_fields=[name_field, 'button_color', 'descriptions', 'show_description', *maintenance])
     result = {'name': getattr(button, name_field), 'color': button.button_color, 'can_edit': can_edit,
               'show_description': button.show_description, 'maintenance': schedule_data(button),
+              'maintenance_required': button.maintenance_required,
               'descriptions': [{key: row[key] for key in ('id', 'key', 'value')} for row in (rows or [])]}
     if request.method == 'POST':
         result['button'] = marker_data(button) if kind == 'pdf' else motor_data(button)

@@ -248,20 +248,32 @@
         const label = document.createElement('label'); label.textContent = 'Nombre de la categoría'; label.className = 'form-label small mt-2';
         const input = document.createElement('input'); input.type = 'text'; input.maxLength = 80; input.className = 'form-control mb-2';
         input.id = select.id + 'NewName'; label.htmlFor = input.id;
+        const maintenance = document.createElement('select');
+        maintenance.id = select.id + 'NewMaintenance';
+        maintenance.className = 'form-select mb-2';
+        maintenance.append(new Option('Sí', 'yes'), new Option('No', 'no'));
+        const maintenanceLabel = document.createElement('label');
+        maintenanceLabel.htmlFor = maintenance.id;
+        maintenanceLabel.className = 'form-label small';
+        maintenanceLabel.textContent = 'Mantención obligatoria';
         const save = document.createElement('button'); save.type = 'button'; save.className = 'btn btn-sm btn-success'; save.textContent = 'Crear categoría';
         const feedback = document.createElement('p'); feedback.className = 'small mt-2 mb-0'; feedback.setAttribute('role', 'status');
-        box.append(summary, label, input, save, feedback); select.after(box);
+        box.append(summary, label, input, maintenanceLabel, maintenance, save, feedback); select.after(box);
         const modal = select.closest('.modal');
         modal?.addEventListener('show.bs.modal', () => {
             box.hidden = !appState.user?.permissions?.can_create_category;
-            box.open = false; input.value = ''; feedback.textContent = '';
+            box.open = false; input.value = ''; maintenance.value = 'yes'; feedback.textContent = '';
         });
         save.onclick = async () => {
             if (!input.value.trim()) { feedback.textContent = 'Ingrese el nombre de la categoría.'; input.focus(); return; }
             save.disabled = true;
             try {
-                const category = await post('/api/administration/categories/', { name: input.value.trim() });
-                if (![...select.options].some(option => option.value === category.id)) select.append(new Option(category.name, category.id));
+                const category = await post('/api/administration/categories/', {
+                    name: input.value.trim(), maintenance_required: maintenance.value === 'yes',
+                });
+                if (![...select.options].some(option => option.value === category.id)) {
+                    select.append(window.buttonMaintenanceForm.categoryOption(category));
+                }
                 select.value = category.id; select.dispatchEvent(new Event('change'));
                 input.value = ''; feedback.textContent = 'Categoría creada.';
             } catch (error) { feedback.textContent = error.message; }

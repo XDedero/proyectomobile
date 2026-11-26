@@ -24,6 +24,7 @@ from .tests import dxf_file
 class ProjectTests(TestCase):
     @classmethod
     def setUpTestData(cls):
+        ButtonCategory.objects.update(maintenance_required=False)
         cls.user = get_user_model().objects.create_user('proyectos', password='clave-proyectos')
         cls.user.user_permissions.add(Permission.objects.get(content_type__app_label='mobileApp', codename='add_savedproject'))
         cls.admin = get_user_model().objects.create_superuser('admin_proyectos', password='clave')

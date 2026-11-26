@@ -34,10 +34,11 @@
               ${window.buttonMaintenanceForm.fields('buttonDetails')}
               <button type="button" class="btn btn-outline-secondary btn-sm mb-3" id="buttonDetailsClearMaintenance">Quitar programación</button>
             </div>
+            <p id="buttonDetailsMaintenanceStatus" class="alert alert-warning mb-3 py-2" role="status" hidden></p>
             <dl id="buttonDetailsMaintenanceSummary" class="button-details-list border rounded p-3 mb-3" hidden>
               <div><dt>Última mantención</dt><dd id="buttonDetailsLastMaintenance"></dd></div>
               <div><dt>Frecuencia</dt><dd id="buttonDetailsMaintenanceFrequency"></dd></div>
-              <div><dt>Próxima mantención</dt><dd id="buttonDetailsNextMaintenance" class="fw-semibold"></dd></div>
+              <div id="buttonDetailsNextMaintenanceRow"><dt>Próxima mantención</dt><dd id="buttonDetailsNextMaintenance" class="fw-semibold"></dd></div>
             </dl>
             <div id="buttonDetailsRows"></div>
             <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="buttonDetailsAdd" hidden>Añadir descripción</button>
@@ -135,14 +136,19 @@
         byId('ColorSection').hidden = mode !== 'appearance';
         byId('DescriptionSection').hidden = mode !== 'description';
         byId('MaintenanceEditor').hidden = !editing || mode !== 'maintenance';
-        byId('ClearMaintenance').hidden = !data?.maintenance;
+        byId('ClearMaintenance').hidden = !data?.maintenance || data.maintenance_required;
         byId('MaintenanceSummary').hidden = editing || !data?.maintenance;
+        const warning = byId('MaintenanceStatus');
+        warning.textContent = data?.maintenance?.overdue ? 'Por favor realizar mantención'
+            : data?.maintenance_required && !data.maintenance ? 'Registra la mantención obligatoria de este botón.' : '';
+        warning.hidden = editing || !warning.textContent;
+        byId('NextMaintenanceRow').hidden = !data?.maintenance?.next_date;
         if (data?.maintenance) {
             const { last_date, next_date } = data.maintenance;
             const { formatDate, frequency } = window.buttonMaintenanceForm;
             byId('LastMaintenance').textContent = formatDate(last_date);
             byId('MaintenanceFrequency').textContent = frequency(data.maintenance);
-            byId('NextMaintenance').textContent = formatDate(next_date);
+            byId('NextMaintenance').textContent = next_date ? formatDate(next_date) : '';
         }
         byId('Rows').hidden = editing ? mode !== 'description' : !data?.show_description;
         byId('Edit').hidden = !options.assign || !data?.can_edit || !data?.show_description || editing;
@@ -196,7 +202,10 @@
         byId('CustomColor').checked = Boolean(current.data.color);
         byId('Enabled').checked = current.data.show_description;
         byId('Color').value = current.data.color || defaultPlanButtonColor;
-        if (mode === 'maintenance') maintenanceForm.set(current.data.maintenance);
+        if (mode === 'maintenance') {
+            maintenanceForm.set(current.data.maintenance);
+            maintenanceForm.setRequired(current.data.maintenance_required);
+        }
         render(current);
         status('');
         const focus = { name: 'Name', appearance: 'CustomColor', description: 'Enabled', maintenance: 'MaintenanceDate' };

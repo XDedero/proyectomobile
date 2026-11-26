@@ -90,6 +90,8 @@ def serve():
     call_command('migrate', verbosity=0)
     from django.contrib.auth import get_user_model
     from django.contrib.auth.models import Group
+    from mobileApp.models import ButtonCategory
+    ButtonCategory.objects.update(maintenance_required=False)
     User = get_user_model()
     editor = User.objects.create_user('empleado', password='PruebaDXF!')
     editor.groups.add(Group.objects.get(name='Editores de motores'))

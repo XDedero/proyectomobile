@@ -214,7 +214,7 @@ def workspace_data(plan, user=None):
     return {'workbook': workbook_data(document, sheets=False), 'workbook_mode': document.plan_mode,
         'sheet_options': [{'name': row.name, 'is_listing': row.is_listing} for row in rows
                           if not (row.name == EMPTY_SHEET and not row.is_listing and document.plan_mode == 'template')],
-        'button_categories': list(ButtonCategory.objects.values('id', 'name')),
+        'button_categories': list(ButtonCategory.objects.values('id', 'name', 'maintenance_required')),
         'listings': listings, 'listing': listing,
         'binding_counts': {item['sheet_name']: item['count'] for item in markers(plan).values('sheet_name').annotate(count=Count('pk'))}}
 
@@ -282,7 +282,10 @@ def new_button_options(request, plan):
     category = button_category(data.get('category_id'))
     if origin == 'piece':
         from .workbook_service import positive_integer
-        record = get_object_or_404(SavedMotor, pk=positive_integer(data.get('saved_piece_id'), 'Pieza'))
+        record = get_object_or_404(SavedMotor.objects.select_related('category'),
+                                   pk=positive_integer(data.get('saved_piece_id'), 'Pieza'))
+        if record.category_id:
+            category = record.category
         origin = ('piece', record.pk)
     if origin == 'sheet':
         if not isinstance(data.get('sheet'), str) or not data['sheet']:
@@ -307,7 +310,10 @@ def initialize_button(marker, user, origin, upload):
 
 
 def copy_button(marker, user, source_id):
+    from .maintenance import require_schedule
+
     source = get_object_or_404(markers(marker.plan).select_for_update(), pk=source_id)
+    require_schedule(source.category, marker.next_maintenance)
     fields = ['category', 'descriptions', 'button_color', 'show_description', 'button_scale',
               'piece_source', 'has_area', 'area_shape', 'area_radius_x', 'area_radius_y', 'area_color']
     for field in fields:
@@ -361,8 +367,11 @@ def stage_button_source(marker, user, upload, selected=None):
 
 def stage_piece_source(marker, user, piece_id):
     """Each button gets its own catalog copy; only its selected tab is materialized."""
+    from .maintenance import require_schedule
     from .models import PieceDeletion
-    selected = get_object_or_404(SavedMotor, pk=piece_id)
+    selected = get_object_or_404(SavedMotor.objects.select_related('category'), pk=piece_id)
+    if selected.category_id and selected.category_id != marker.category_id:
+        require_schedule(selected.category, marker.next_maintenance)
     content, mapping, origins, chosen = None, {}, {}, None
     records = SavedMotor.objects.select_related('workbook','category').exclude(uuid__in=PieceDeletion.objects.values('id')).order_by('name_key','id')
     for record in records:
@@ -547,11 +556,25 @@ def organize_project_sheets(plan, user):
 
 @transaction.atomic
 def assign_marker(marker, user, data=None, upload=None):
+    from .maintenance import require_schedule, update_schedule
+
     data = data or {}
     if data.get('action') == 'set_category' and upload is None:
+        marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())
         value = data.get('category_id')
-        marker.category = button_category(value) if value else None
-        marker.save(update_fields=['category'])
+        category = button_category(value) if value else None
+        if 'maintenance' in data:
+            changes = update_schedule(marker, data['maintenance'], user, category=category)
+        else:
+            require_schedule(category, marker.next_maintenance)
+            changes = {}
+        if changes and not marker.plan.draft_of_id:
+            from .maintenance_alerts import finish_cycle
+            finish_cycle(marker, changes)
+        for field, value in changes.items():
+            setattr(marker, field, value)
+        marker.category = category
+        marker.save(update_fields=['category', *changes])
         return None
     if data.get('action') == 'stage' and upload is not None:
         marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())
@@ -570,7 +593,8 @@ def assign_marker(marker, user, data=None, upload=None):
             fields=['source_sheet', 'source_revision']
             info = marker.source_workbook.source_pieces.get(name,{}) if marker.piece_source else {}
             category = ButtonCategory.objects.filter(pk=info['category_id']).first() if info.get('category_id') else None
-            if category:
+            if category and category.pk != marker.category_id:
+                require_schedule(category, marker.next_maintenance)
                 marker.category = category
                 fields.append('category')
             marker.save(update_fields=fields)
@@ -589,6 +613,7 @@ def assign_marker(marker, user, data=None, upload=None):
             raise ValidationError('Seleccione una hoja de motor del Excel de este plano.')
     elif data.get('saved_piece_id'):
         from .workbook_service import positive_integer
+        marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())
         stage_piece_source(marker,user,positive_integer(data['saved_piece_id'],'Pieza'))
         return None
     elif data.get('saved_motor_id'):

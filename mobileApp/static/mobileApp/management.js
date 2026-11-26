@@ -176,18 +176,22 @@
         categoryId = category?.id || null; $('categoryForm').reset();
         $('categoryFormTitle').textContent = category ? 'Editar categoría' : 'Crear categoría';
         $('categoryName').value = category?.name || '';
+        $('categoryMaintenanceRequired').value = category?.maintenance_required === false ? 'no' : 'yes';
     }
     function renderCategories() {
         const container = $('categoryRows'); container.replaceChildren();
         for (const category of state.categories) {
             const row = document.createElement('div'); row.className = 'management-row';
             const title = document.createElement('strong'); title.textContent = category.name;
+            const policy = document.createElement('div'); policy.className = 'small text-secondary';
+            policy.textContent = category.maintenance_required ? 'Mantención obligatoria' : 'Mantención opcional';
+            const info = document.createElement('div'); info.append(title, policy);
             const controls = document.createElement('div'); controls.className = 'form-actions';
             controls.append(action('Editar', () => editCategory(category)), action('Eliminar', async () => {
                 if (await confirmAction('¿Seguro que desea eliminar esta categoría?', `Se eliminará «${category.name}».`, 'Eliminar')) {
                     await mutate(() => request('/api/administration/categories/', {id: category.id, action: 'delete'}), 'Categoría eliminada.');
                 }
-            }, {danger: true})); row.append(title, controls); container.append(row);
+            }, {danger: true})); row.append(info, controls); container.append(row);
         }
         if (!state.categories.length) empty(container, 'Crea la primera categoría para comenzar.');
     }
@@ -242,7 +246,9 @@
     $('categoryForm').onsubmit = event => {
         event.preventDefault();
         mutate(async () => {
-            const result = await request('/api/administration/categories/', {id: categoryId, name: $('categoryName').value});
+            const result = await request('/api/administration/categories/', {
+                id: categoryId, name: $('categoryName').value, maintenance_required: $('categoryMaintenanceRequired').value === 'yes',
+            });
             categoryId = result.id;
         }, 'Categoría guardada.');
     };

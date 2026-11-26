@@ -47,7 +47,7 @@ from .models import ButtonCategory, Motor, Plan, PdfPlan, PdfMarker, WorkbookDoc
 
 @admin.register(ButtonCategory)
 class ButtonCategoryAdmin(admin.ModelAdmin):
-    list_display = ('name',)
+    list_display = ('name', 'maintenance_required')
     search_fields = ('name',)
 
 

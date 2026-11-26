@@ -4,6 +4,9 @@
     }
 
     const units = { days: 'días', weeks: 'semanas', months: 'meses', years: 'años' };
+    const todayInChile = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
+    });
     function frequency({ interval, unit }) {
         const singular = { days: 'día', weeks: 'semana', months: 'mes', years: 'año' };
         return `Cada ${interval} ${(interval === 1 ? singular : units)[unit]}`;
@@ -11,7 +14,7 @@
 
     function fields(id) {
         return `<fieldset id="${id}Maintenance" class="border rounded p-3 mb-3">
-          <legend class="float-none w-auto px-1 mb-2 fs-6">Mantención <small class="text-muted">(opcional)</small></legend>
+          <legend class="float-none w-auto px-1 mb-2 fs-6">Mantención <small id="${id}MaintenanceRequirement" class="text-muted">(opcional)</small></legend>
           <label class="form-label" for="${id}MaintenanceDate">Última mantención</label>
           <input type="date" id="${id}MaintenanceDate" class="form-control mb-2">
           <label class="form-label" for="${id}MaintenanceInterval">Frecuencia de mantención</label>
@@ -21,7 +24,8 @@
               ${Object.entries(units).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
             </select>
           </div>
-          <p class="small mb-0 mt-2">Próxima mantención <output id="${id}MaintenanceNext" class="fw-semibold" aria-live="polite">—</output></p>
+          <p id="${id}MaintenanceNextRow" class="small mb-0 mt-2">Próxima mantención <output id="${id}MaintenanceNext" class="fw-semibold" aria-live="polite">—</output></p>
+          <p id="${id}MaintenanceWarning" class="alert alert-warning mt-2 mb-0 py-2" role="status" hidden>Por favor realizar mantención</p>
         </fieldset>`;
     }
 
@@ -43,17 +47,28 @@
     function connect(id) {
         const find = suffix => document.getElementById(id + 'Maintenance' + suffix);
         const date = find('Date'), interval = find('Interval'), unit = find('Unit'), next = find('Next');
+        const nextRow = find('NextRow'), warning = find('Warning'), requirement = find('Requirement');
         function read() {
-            if (!date.value && !interval.value && !date.validity.badInput && !interval.validity.badInput) return null;
+            if (!date.value && !interval.value && !date.validity.badInput && !interval.validity.badInput) {
+                if (date.required) throw new Error('Esta categoría requiere la fecha de última mantención y la frecuencia.');
+                return null;
+            }
             if (!date.value || !date.validity.valid) throw new Error('Ingresa una fecha de última mantención que no sea futura.');
             if (!interval.value || !interval.validity.valid) throw new Error('Ingresa una frecuencia entre 1 y 999.');
             return { last_date: date.value, interval: interval.valueAsNumber, unit: unit.value };
         }
         function preview() {
             next.value = '—';
+            nextRow.hidden = false;
+            warning.hidden = true;
             try {
                 const values = read();
-                if (values) next.value = formatDate(nextDate(values));
+                if (!values) return;
+                const due = nextDate(values);
+                const overdue = due < todayInChile.format();
+                nextRow.hidden = overdue;
+                warning.hidden = !overdue;
+                if (!overdue) next.value = formatDate(due);
             } catch {
                 // The save action displays validation errors after the user fills in the fields.
             }
@@ -61,11 +76,13 @@
         for (const input of [date, interval, unit]) input.addEventListener('input', preview);
         return {
             read,
+            setRequired(required) {
+                date.required = interval.required = required;
+                requirement.textContent = required ? '(obligatoria)' : '(opcional)';
+                preview();
+            },
             set(values) {
-                const today = new Intl.DateTimeFormat('sv-SE', {
-                    timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
-                });
-                date.max = today.format();
+                date.max = todayInChile.format();
                 date.value = values?.last_date || '';
                 interval.value = values?.interval ?? '';
                 unit.value = values?.unit || 'months';
@@ -74,5 +91,11 @@
         };
     }
 
-    window.buttonMaintenanceForm = { fields, connect, formatDate, frequency };
+    function categoryOption(category) {
+        const option = new Option(category.name, category.id);
+        option.dataset.maintenanceRequired = String(category.maintenance_required);
+        return option;
+    }
+
+    window.buttonMaintenanceForm = { fields, connect, formatDate, frequency, categoryOption };
 })();

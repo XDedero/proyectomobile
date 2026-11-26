@@ -23,7 +23,8 @@ def serve():
     from django.core.management import call_command
     call_command('migrate', verbosity=0)
     from django.contrib.auth import get_user_model
-    from mobileApp.models import UserProfile
+    from mobileApp.models import ButtonCategory, UserProfile
+    ButtonCategory.objects.filter(name='Motores').update(maintenance_required=False)
     get_user_model().objects.create_superuser('admin', password='PruebaDXF!')
     worker = get_user_model().objects.create_user('worker', password='PruebaDXF!')
     UserProfile.objects.create(user=worker, rut='11111111-1', role='worker')

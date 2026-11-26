@@ -71,6 +71,8 @@
       <div class="management-card"><div class="section-toolbar mb-3"><h3 class="mb-0">Categorías disponibles</h3><button id="newCategory" class="btn btn-sm btn-outline-primary" type="button">+ Crear categoría</button></div><div id="categoryRows" class="management-rows"></div></div>
       <form class="management-card" id="categoryForm"><h3 id="categoryFormTitle">Crear categoría</h3>
         <label class="form-label" for="categoryName">Nombre de la categoría</label><input id="categoryName" class="form-control mb-3" required maxlength="80" placeholder="Ej. Válvulas">
+        <label class="form-label" for="categoryMaintenanceRequired">Mantención obligatoria</label>
+        <select id="categoryMaintenanceRequired" class="form-select mb-3"><option value="yes">Sí</option><option value="no">No</option></select>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar categoría</button><button id="cancelCategory" class="btn btn-link" type="button">Limpiar</button></div>
       </form>
     </div>

@@ -103,6 +103,7 @@ def marker_data(marker):
         'id': marker.pk, 'page': marker.page, 'x': marker.x, 'y': marker.y, 'label': marker.label,
         'button_color': marker.button_color, 'show_description': marker.show_description,
         'maintenance': schedule_data(marker),
+        'maintenance_required': marker.maintenance_required,
         'details_url': reverse('button_details', args=['pdf', marker.pk]),
         'sheet_name': marker.sheet_name,
         'category_id': marker.category_id,
@@ -267,7 +268,7 @@ def create_marker(request, plan_id):
         with transaction.atomic():
             marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False),
                 button_color=values['button_color'], descriptions=values.get('descriptions'),
-                **data, **new_schedule(values, request.user))
+                **data, **new_schedule(values, request.user, category))
             initialize_button(marker, request.user, origin, upload)
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)

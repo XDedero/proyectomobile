@@ -42,14 +42,22 @@ def clean_schedule(value):
     return dict(last_maintenance=last, maintenance_interval=interval, maintenance_unit=unit, next_maintenance=due)
 
 
-def new_schedule(data, user):
+def require_schedule(category, due):
+    if category and category.maintenance_required and due is None:
+        raise ValidationError('Esta categoría requiere la fecha de última mantención y la frecuencia.')
+
+
+def new_schedule(data, user, category):
     values = clean_schedule(data.get('maintenance'))
+    require_schedule(category, values['next_maintenance'])
     return {**values, 'button_creator': user.get_username(),
             'maintenance_key': uuid4() if values['next_maintenance'] else None}
 
 
-def update_schedule(button, value, user):
-    changes = {key: field_value for key, field_value in clean_schedule(value).items()
+def update_schedule(button, value, user, *, category):
+    values = clean_schedule(value)
+    require_schedule(category, values['next_maintenance'])
+    changes = {key: field_value for key, field_value in values.items()
                if getattr(button, key) != field_value}
     if not changes:
         return changes
@@ -66,11 +74,13 @@ def update_schedule(button, value, user):
 def schedule_data(button):
     if button.last_maintenance is None:
         return None
+    overdue = button.next_maintenance < timezone.localdate()
     return {
         'last_date': button.last_maintenance.isoformat(),
         'interval': button.maintenance_interval,
         'unit': button.maintenance_unit,
-        'next_date': button.next_maintenance.isoformat(),
+        'next_date': None if overdue else button.next_maintenance.isoformat(),
+        'overdue': overdue,
     }
 
 

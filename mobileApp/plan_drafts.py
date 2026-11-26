@@ -78,6 +78,20 @@ def copy_markers(source, destination, documents, previous=None):
     return result
 
 
+def validate_maintenance_assignments(draft, original):
+    related = 'motors' if isinstance(original, Plan) else 'markers'
+    incomplete = list(getattr(draft, related).filter(
+        category__maintenance_required=True, next_maintenance__isnull=True,
+    ).values_list('pk', 'category_id'))
+    original_ids = {draft.draft_markers.get(str(marker_id)) for marker_id, _ in incomplete} - {None}
+    legacy = dict(getattr(original, related).filter(
+        pk__in=original_ids, next_maintenance__isnull=True,
+    ).values_list('pk', 'category_id'))
+    # Existing assignments can be completed when their equipment details are known.
+    if any(legacy.get(draft.draft_markers.get(str(marker_id))) != category_id for marker_id, category_id in incomplete):
+        raise ValidationError('Completa la fecha y la frecuencia de mantención de los botones nuevos o reasignados.')
+
+
 @transaction.atomic
 def working_copy(original, user):
     if original.draft_of_id:
@@ -107,6 +121,7 @@ def publish_draft(draft, user):
         raise ValidationError('El permiso de edición de este plano ya no está disponible.')
     if saved_version(original) != draft.draft_version:
         raise ValidationError('Otro usuario guardó una versión más reciente. Reabra el plano antes de guardar; su borrador se conserva.', code='draft_conflict')
+    validate_maintenance_assignments(draft, original)
     documents = {}
     for field in ('name', 'sectors', 'display_settings'):
         setattr(original, field, deepcopy(getattr(draft, field)))

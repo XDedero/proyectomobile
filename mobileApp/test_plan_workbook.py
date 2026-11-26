@@ -71,6 +71,7 @@ class SharedPlanWorkbookTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        ButtonCategory.objects.filter(name='Motores').update(maintenance_required=False)
         cls.admin = get_user_model().objects.create_superuser('shared-admin', password='test')
         cls.author = get_user_model().objects.create_user('listing-author')
         cls.other = get_user_model().objects.create_user('another-reader')

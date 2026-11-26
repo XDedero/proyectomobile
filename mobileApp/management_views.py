@@ -158,7 +158,7 @@ def pending_registrations(request):
 
 
 def category_data(category):
-    return {'id': str(category.pk), 'name': category.name}
+    return {'id': str(category.pk), 'name': category.name, 'maintenance_required': category.maintenance_required}
 
 
 @require_GET
@@ -282,7 +282,7 @@ def manage_category(request):
             if not capabilities(request.user)['can_create_category'] or data.get('id') or data.get('action') not in (None, '', 'create'):
                 return error_response('Solo los administradores pueden modificar o eliminar categorías. Los trabajadores pueden crearlas.', 403)
         if request.FILES:
-            raise ValidationError('Las categorías solo admiten un nombre.')
+            raise ValidationError('Envía el nombre y la configuración de mantención de la categoría.')
         action = data.get('action')
         if action not in (None, '', 'create', 'update', 'delete'):
             raise ValidationError('La acción de categoría no es válida.')
@@ -294,6 +294,10 @@ def manage_category(request):
                 category.delete()
                 return JsonResponse({'deleted': True})
             category.name = name_value(data)
+            required = data.get('maintenance_required', category.maintenance_required)
+            if type(required) is not bool:
+                raise ValidationError('Indica si la mantención de la categoría es obligatoria.')
+            category.maintenance_required = required
             category.full_clean()
             category.save()
         return JsonResponse(category_data(category))

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 import json
 from tempfile import TemporaryDirectory
@@ -14,7 +14,8 @@ from django.urls import reverse
 from .cloud_projects import open_cloud_project
 from .maintenance import next_date
 from .maintenance_alerts import generate_alerts
-from .models import ButtonCategory, MaintenanceNotification, PdfMarker, UserProfile
+from .models import ButtonCategory, MaintenanceNotification, PdfMarker, SavedPiece, UserProfile, WorkbookDocument
+from .motor_service import template_bytes
 from .project_service import import_project
 from .test_pdf import pdf_upload
 from .tests import dxf_file
@@ -31,6 +32,7 @@ class MaintenanceTests(TestCase):
         cls.admin = users.create_superuser('admin', first_name='Ana', last_name='Rojas')
         cls.other_admin = users.create_superuser('other-admin')
         cls.category = ButtonCategory.objects.create(name='Bombas')
+        cls.optional = ButtonCategory.objects.create(name='Sensores', maintenance_required=False)
         cls.schedule = {'last_date': '2026-09-26', 'interval': 2, 'unit': 'months'}
 
     def setUp(self):
@@ -48,13 +50,15 @@ class MaintenanceTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()
 
-    def add_button(self, kind, plan, client=None, maintenance=None):
+    def button_payload(self, kind, maintenance=None, category=None):
         position = {'page': 1, 'x': .25, 'y': .35, 'label': 'Bomba de agua'} if kind == 'pdf' else {
             'svg_x': 30, 'svg_y': 30, 'name': 'Motor de agua',
         }
-        response = self.post(plan['markers_url'], {
-            **position, 'origin': 'blank', 'category_id': str(self.category.pk), 'maintenance': maintenance,
-        }, client=client)
+        return {**position, 'origin': 'blank', 'category_id': str((category or self.category).pk),
+                'maintenance': maintenance}
+
+    def add_button(self, kind, plan, client=None, maintenance=None, category=None):
+        response = self.post(plan['markers_url'], self.button_payload(kind, maintenance, category), client=client)
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()['marker' if kind == 'pdf' else 'motor']
 
@@ -74,6 +78,7 @@ class MaintenanceTests(TestCase):
         call_command('generate_maintenance_alerts')
         self.assertFalse(MaintenanceNotification.objects.exists())
         self.today.return_value = date(2026, 11, 28)
+        self.assertTrue(creator_client.get(marker['details_url']).json()['maintenance']['overdue'])
         call_command('generate_maintenance_alerts')
         call_command('generate_maintenance_alerts')
         alerts = MaintenanceNotification.objects.order_by('day', 'id')
@@ -130,13 +135,98 @@ class MaintenanceTests(TestCase):
         self.assertEqual(next_date(date(2026, 11, 26), 1, 'weeks'), date(2026, 12, 3))
         self.assertEqual(next_date(date(2026, 11, 26), 2, 'days'), date(2026, 11, 28))
         plan = self.plan('pdf')
-        marker = self.add_button('pdf', plan)
+        marker = self.add_button('pdf', plan, category=self.optional)
         for changes in ({'interval': 0}, {'last_date': '2026-11-27'}, {'interval': True}, {'unit': 'hours'}):
             response = self.post(marker['details_url'], {'maintenance': {**self.schedule, **changes}})
             self.assertEqual(response.status_code, 400, response.content)
         self.assertIsNone(PdfMarker.objects.get(pk=marker['id']).next_maintenance)
         self.assertEqual(self.post(marker['details_url'], {'maintenance': self.schedule}).status_code, 200)
         self.assertIsNone(self.post(marker['details_url'], {'maintenance': None}).json()['maintenance'])
+
+    def test_backdated_monthly_schedule_shows_overdue_and_keeps_actual_due_date_for_inbox(self):
+        today, due = date(2026, 11, 26), date(2026, 8, 26)
+        plan = self.plan('pdf')
+        marker = self.add_button('pdf', plan, maintenance={'last_date': '2026-07-26', 'interval': 1, 'unit': 'months'})
+        self.assertEqual(marker['maintenance'], {
+            'last_date': '2026-07-26', 'interval': 1, 'unit': 'months', 'overdue': True, 'next_date': None,
+        })
+        self.assertEqual(PdfMarker.objects.get(pk=marker['id']).next_maintenance, due)
+        generate_alerts()
+        for recipient in (self.owner, self.admin, self.other_admin):
+            alerts = MaintenanceNotification.objects.filter(recipient=recipient)
+            self.assertEqual(alerts.count(), (today - due).days)
+            self.assertEqual(alerts.earliest('day').day, due + timedelta(days=1))
+            self.assertEqual(alerts.latest('day').day, today)
+            self.assertFalse(alerts.exclude(due_date=due).exists())
+        self.assertContains(self.client.get(reverse('notifications')), '26-08-2026')
+
+    def test_admin_controls_category_requirement_and_buttons_enforce_it(self):
+        admin_client = Client()
+        admin_client.force_login(self.admin)
+        url = reverse('manage_category')
+        self.assertTrue(self.post(url, {'name': 'Compresores'}, admin_client).json()['maintenance_required'])
+        result = self.post(url, {'id': str(self.optional.pk), 'name': self.optional.name, 'maintenance_required': False},
+                           admin_client)
+        self.assertIs(result.json()['maintenance_required'], False)
+        result = self.post(url, {'name': 'Regla inválida', 'maintenance_required': 'false'}, admin_client)
+        self.assertEqual(result.status_code, 400)
+        for kind in ('pdf', 'dxf'):
+            with self.subTest(kind=kind):
+                plan = self.plan(kind)
+                self.assertEqual(self.post(plan['markers_url'], self.button_payload(kind)).status_code, 400)
+                marker = self.add_button(kind, plan, category=self.optional)
+                self.assertFalse(marker['maintenance_required'])
+                self.assertIsNone(marker['maintenance'])
+                category = {'action': 'set_category', 'category_id': str(self.category.pk)}
+                self.assertEqual(self.post(marker['assign_url'], category).status_code, 400)
+                self.assertEqual(self.post(marker['assign_url'], {**category, 'maintenance': self.schedule}).status_code, 200)
+                details = self.client.get(marker['details_url']).json()
+                self.assertTrue(details['maintenance_required'])
+                self.assertEqual(details['maintenance']['next_date'], '2026-11-26')
+                self.assertEqual(self.post(marker['details_url'], {'maintenance': None}).status_code, 400)
+
+                copy = {**self.button_payload(kind), 'origin': 'copy', 'copy_button_id': marker['id']}
+                self.assertEqual(self.post(plan['markers_url'], copy).status_code, 400)
+                result = self.post(plan['markers_url'], {**copy, 'maintenance': self.schedule})
+                self.assertEqual(result.status_code, 201, result.content)
+                self.assertEqual(result.json()['marker' if kind == 'pdf' else 'motor']['maintenance']['next_date'], '2026-11-26')
+
+    def test_publication_enforces_the_latest_category_policy_for_new_assignments(self):
+        plan = self.plan('pdf')
+        legacy = self.add_button('pdf', plan, category=self.optional)
+        draft = self.post(plan['draft_url']).json()['plan']
+        marker = self.add_button('pdf', draft, category=self.optional)
+        ButtonCategory.objects.filter(pk=self.optional.pk).update(maintenance_required=True)
+        self.assertEqual(self.post(draft['save_project_url']).status_code, 400)
+        self.assertEqual(self.post(marker['details_url'], {'maintenance': self.schedule}).status_code, 200)
+        self.assertEqual(self.post(draft['save_project_url']).status_code, 200)
+        existing = self.client.get(legacy['details_url']).json()
+        self.assertTrue(existing['maintenance_required'])
+        self.assertIsNone(existing['maintenance'])
+
+    def test_category_inherited_from_a_saved_piece_also_requires_maintenance(self):
+        def piece(name, category):
+            workbook = WorkbookDocument.objects.create(name=name + '.xlsx', content=template_bytes())
+            return SavedPiece.objects.create(name=name, name_key=name, fingerprint=name, category=category, workbook=workbook)
+
+        optional_piece = piece('Sensor', self.optional)
+        required_piece = piece('Bomba', self.category)
+        plan = self.plan('pdf')
+        payload = self.button_payload('pdf', category=self.optional)
+        self.assertEqual(self.post(plan['markers_url'], {**payload, 'origin': 'piece',
+                                                         'saved_piece_id': required_piece.pk}).status_code, 400)
+        marker = self.add_button('pdf', plan, category=self.optional)
+        self.assertEqual(self.post(marker['assign_url'], {'saved_piece_id': required_piece.pk}).status_code, 400)
+        self.assertEqual(self.post(marker['assign_url'], {'saved_piece_id': optional_piece.pk}).status_code, 200)
+        record = PdfMarker.objects.get(pk=marker['id'])
+        source = record.source_workbook
+        sheet = next(name for name, info in source.source_pieces.items() if info['id'] == str(required_piece.uuid))
+        selection = {'action': 'select_source', 'source_sheet': sheet, 'source_workbook_id': source.pk}
+        self.assertEqual(self.post(marker['assign_url'], selection).status_code, 400)
+        self.assertEqual(self.post(marker['details_url'], {'maintenance': self.schedule}).status_code, 200)
+        self.assertEqual(self.post(marker['assign_url'], selection).status_code, 200)
+        record.refresh_from_db()
+        self.assertEqual(record.category_id, self.category.pk)
 
     def test_cloud_restore_preserves_responsibility_but_independent_import_gets_its_own_schedule(self):
         plan = self.plan('pdf')

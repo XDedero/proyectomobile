@@ -26,6 +26,7 @@ def source_book():
 
 class PieceCatalogTests(TestCase):
     def setUp(self):
+        ButtonCategory.objects.filter(name='Motores').update(maintenance_required=False)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         setting = override_settings(MEDIA_ROOT=temporary.name)

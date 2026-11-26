@@ -186,7 +186,7 @@ class SectorTests(TestCase):
                 self.assertEqual(restored.display_settings, {})
 
     def test_new_button_saves_all_options_atomically_for_pdf_and_dxf(self):
-        category = ButtonCategory.objects.create(name='Bombas de sector')
+        category = ButtonCategory.objects.create(name='Bombas de sector', maintenance_required=False)
         for kind, model in [('pdf', PdfMarker), ('dxf', Motor)]:
             plan = self.import_plan(kind)
             values = dict(category_id=str(category.pk), origin='blank', show_description=True,

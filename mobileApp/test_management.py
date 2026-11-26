@@ -117,10 +117,10 @@ class ManagementAndVersionTests(TestCase):
     def test_category_is_a_label_and_deleting_it_preserves_the_button_workbook(self):
         self.client.force_login(self.admin)
         url = reverse('manage_category')
-        response = self.post(url, {'name': 'Válvulas'})
+        response = self.post(url, {'name': 'Válvulas', 'maintenance_required': False})
         self.assertEqual(response.status_code, 200, response.content)
         category = response.json()
-        self.assertEqual(set(category), {'id', 'name'})
+        self.assertEqual(set(category), {'id', 'name', 'maintenance_required'})
         self.assertIn(category, self.client.get(reverse('management_data')).json()['categories'])
         self.client.force_login(self.owner)
         plan = self.create_plan()

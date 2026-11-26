@@ -213,6 +213,7 @@ class Plan(models.Model):
 class ButtonCategory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     name = models.CharField('nombre', max_length=80, unique=True)
+    maintenance_required = models.BooleanField('mantención obligatoria', default=True)
 
     class Meta:
         ordering = ['name']
@@ -273,6 +274,10 @@ class ButtonSource(models.Model):
     source_sheet = models.CharField(max_length=31, blank=True)
     source_output = models.CharField(max_length=31, blank=True)
     source_revision = models.PositiveIntegerField(null=True, blank=True)
+
+    @property
+    def maintenance_required(self):
+        return bool(self.category_id and self.category.maintenance_required)
 
     class Meta:
         abstract = True

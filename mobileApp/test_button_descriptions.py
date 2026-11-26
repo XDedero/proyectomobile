@@ -18,6 +18,7 @@ from .workbook_service import edited_document
 
 class ButtonDescriptionTests(TestCase):
     def setUp(self):
+        ButtonCategory.objects.filter(name='Motores').update(maintenance_required=False)
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         settings = override_settings(MEDIA_ROOT=directory.name)

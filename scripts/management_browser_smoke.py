@@ -84,6 +84,7 @@ def check_browser(url, directory):
             expect(admin.locator('#userRut')).to_have_value('12345678-5')
             admin.locator('[data-tab=categories]').click()
             admin.locator('#categoryName').fill('Válvulas')
+            admin.locator('#categoryMaintenanceRequired').select_option('no')
             admin.locator('#categoryForm button[type=submit]').click()
             expect(admin.locator('#categoryRows')).to_contain_text('Válvulas')
             expect(admin.locator('#categoryForm input[type=file]')).to_have_count(0)

@@ -1,6 +1,7 @@
 /* A drawing owns one workbook. Buttons and listings select its worksheets. */
 (() => {
     const byId = (id) => document.getElementById(id);
+    const maintenanceFields = window.buttonMaintenanceForm;
     let epoch = 0, bookTarget = null, assignment = null, listingTarget = null;
     const active = () => window.projectWorkspace?.active;
     function modal(id, title, body) {
@@ -46,6 +47,7 @@
           <select id="sheetButtonCategory" class="form-select"></select>
           <button type="button" id="btnSaveButtonCategory" class="btn btn-outline-success">Guardar categoría</button>
         </div>
+        <div id="sheetCategoryMaintenanceFields" hidden>${maintenanceFields.fields('sheetCategory')}</div>
         <label class="form-label small" for="planMotorSheet">Hoja del Excel del plano</label>
         <select id="planMotorSheet" class="form-select mb-2"></select>
         <button type="button" id="btnAssignWorkbookSheet" class="btn btn-success w-100 mb-3">Vincular hoja</button>
@@ -98,13 +100,13 @@
         <label class="form-label small" for="planPrimaryListingSheet">Hoja del listado original</label>
         <div class="input-group"><select id="planPrimaryListingSheet" class="form-select"></select><button type="button" id="btnChangePrimaryListing" class="btn btn-outline-secondary">Cambiar</button></div>`);
     const newButtonModal = modal('newPlanButton', 'Añadir botón', `
+        <div id="newButtonOptions">
         <label class="form-label" for="newButtonCategory">Categoría</label>
         <select id="newButtonCategory" class="form-select mb-3" required></select>
         <label class="form-label" for="newButtonName">Nombre <small class="text-muted">(opcional)</small></label>
         <input id="newButtonName" class="form-control mb-3" maxlength="120" placeholder="Se usará el número del botón">
         <label class="form-label" for="newButtonColor">Color del botón</label>
         <input type="color" id="newButtonColor" class="form-control form-control-color mb-3" value="${defaultPlanButtonColor}">
-        ${window.buttonMaintenanceForm.fields('newButton')}
         <div class="form-check form-switch mb-2">
           <input type="checkbox" class="form-check-input" id="newButtonDescriptionEnabled">
           <label class="form-check-label" for="newButtonDescriptionEnabled">Añadir descripción al botón</label>
@@ -132,10 +134,14 @@
           <label for="newButtonPiece" class="form-label">Pieza guardada</label>
           <select id="newButtonPiece" class="form-select"></select>
         </div>
+        </div>
+        ${maintenanceFields.fields('newButton')}
         <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
         <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
     newButtonModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
-    const newButtonMaintenance = window.buttonMaintenanceForm.connect('newButton');
+    sheetModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
+    const newButtonMaintenance = maintenanceFields.connect('newButton');
+    const sheetCategoryMaintenance = maintenanceFields.connect('sheetCategory');
     listingsModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     let newButton = null;
 
@@ -194,11 +200,21 @@
         return data;
     }
 
-    async function newButtonOptions() {
+    function updateNewButtonMaintenance() {
+        const category = byId('newButtonCategory');
+        const piece = byId('newButtonPiece').selectedOptions[0];
+        const pieceCategory = byId('newButtonOrigin').value === 'piece' ? piece?.dataset.categoryId : null;
+        const assigned = pieceCategory ? [...category.options].find(option => option.value === pieceCategory) : category.selectedOptions[0];
+        newButtonMaintenance.setRequired(Boolean(newButton?.copySource) || assigned?.dataset.maintenanceRequired === 'true');
+    }
+
+    async function newButtonOptions(copySource = null) {
         if (newButton || !(await window.workbookEditor.requestClose())) return null;
         const context = target();
         if (!context) return null;
-        const selection = new Promise(resolve => { newButton = { context, resolve, result: null }; });
+        const selection = new Promise(resolve => { newButton = { context, resolve, result: null, copySource }; });
+        byId('newPlanButtonTitle').textContent = copySource ? 'Mantención de la copia' : 'Añadir botón';
+        byId('newButtonOptions').hidden = Boolean(copySource);
         byId('newButtonName').value = '';
         byId('newButtonName').maxLength = context.kind === 'dxf' ? 255 : 120;
         byId('newButtonColor').value = defaultPlanButtonColor;
@@ -210,13 +226,15 @@
         byId('newButtonOrigin').value = 'blank';
         for (const id of ['UploadOptions', 'SheetOptions', 'PieceOptions']) byId('newButton' + id).hidden = true;
         byId('newButtonCategory').replaceChildren(new Option('Elija una categoría', ''));
+        updateNewButtonMaintenance();
         message(newButtonModal, '');
         newButtonModal.controller.show();
+        if (copySource) return selection;
         busy(newButtonModal, true);
         try {
             const data = await load(context);
             if (newButton?.context === context) {
-                for (const item of data.button_categories) byId('newButtonCategory').append(new Option(item.name, item.id));
+                for (const item of data.button_categories) byId('newButtonCategory').append(maintenanceFields.categoryOption(item));
                 byId('newButtonSheet').replaceChildren(new Option('Elija una hoja', ''), ...data.sheet_options.filter(row => !row.is_listing).map(row => new Option(row.name, row.name)));
                 if (!data.button_categories.length) message(newButtonModal, 'Cree una categoría para añadir botones.', true);
             }
@@ -231,6 +249,14 @@
     async function chooseNewButtonSource() {
         const draft = newButton;
         if (!draft || !valid(draft.context)) return;
+        let maintenance;
+        try { maintenance = newButtonMaintenance.read(); }
+        catch (error) { message(newButtonModal, error.message, true); return; }
+        if (draft.copySource) {
+            draft.result = { origin: 'copy', copy_button_id: draft.copySource.id, maintenance };
+            await hide(newButtonModal);
+            return;
+        }
         const origin = byId('newButtonOrigin').value;
         const file = origin === 'upload' ? byId('newButtonFile').files[0] : undefined;
         if (!byId('newButtonCategory').value) return message(newButtonModal, 'Seleccione una categoría.', true);
@@ -241,7 +267,6 @@
         if (descriptions.some(row => !row.key) || new Set(descriptions.map(row => row.key.toLocaleLowerCase())).size !== descriptions.length) return message(newButtonModal, 'Cada descripción necesita una clave distinta.', true);
         busy(newButtonModal, true);
         try {
-            const maintenance = newButtonMaintenance.read();
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
             draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined,
@@ -314,6 +339,8 @@
         assignment = { ...target(), kind, plan, marker };
         if (!valid(assignment)) return;
         byId('buttonWorkbookImport').hidden = true;
+        byId('sheetCategoryMaintenanceFields').hidden = true;
+        sheetCategoryMaintenance.set(null);
         message(sheetModal, ''); sheetModal.controller.show(); busy(sheetModal, true);
         byId('sheetAssignmentName').textContent = marker.label || marker.name || `Botón ${marker.id}`;
         byId('sheetButtonDescriptionEnabled').checked = marker.show_description === true;
@@ -329,8 +356,9 @@
             select.value = marker.sheet_name || '';
             const category = byId('sheetButtonCategory');
             category.replaceChildren(new Option('Sin categoría', ''));
-            for (const item of data.button_categories) category.append(new Option(item.name, item.id));
+            for (const item of data.button_categories) category.append(maintenanceFields.categoryOption(item));
             category.value = marker.category_id || '';
+            updateSheetCategoryMaintenance();
             byId('sharedMotorSheetHint').textContent = 'Los botones que usan la misma hoja comparten sus datos.';
         } catch (error) { message(sheetModal, error.message, true); }
         finally { busy(sheetModal, false); }
@@ -501,7 +529,28 @@
     byId('btnAssignWorkbookSheet').onclick = () => { const sheet = byId('planMotorSheet').value; if (sheet) linkSheet({ sheet }); else message(sheetModal, 'Elija una hoja.', true); };
     byId('btnAssignBlankSheet').onclick = () => linkSheet({ blank: true });
     byId('btnAssignSavedMotorSheet').onclick = async () => { await hide(sheetModal); window.pieceLibrary.chooseForTarget(); };
-    byId('btnSaveButtonCategory').onclick = () => linkSheet({ action: 'set_category', category_id: byId('sheetButtonCategory').value });
+    function updateSheetCategoryMaintenance() {
+        const selected = byId('sheetButtonCategory').selectedOptions[0];
+        const missing = selected?.dataset.maintenanceRequired === 'true' && !assignment?.marker.maintenance;
+        byId('sheetCategoryMaintenanceFields').hidden = !missing;
+        sheetCategoryMaintenance.setRequired(missing);
+    }
+    byId('sheetButtonCategory').onchange = updateSheetCategoryMaintenance;
+    byId('btnSaveButtonCategory').onclick = () => {
+        const values = { action: 'set_category', category_id: byId('sheetButtonCategory').value };
+        if (!byId('sheetCategoryMaintenanceFields').hidden) {
+            try { values.maintenance = sheetCategoryMaintenance.read(); }
+            catch (error) { message(sheetModal, error.message, true); return; }
+        }
+        linkSheet(values);
+    };
+    byId('newButtonCategory').onchange = updateNewButtonMaintenance;
+    byId('newButtonPiece').onchange = event => {
+        const id = event.target.selectedOptions[0]?.dataset.categoryId;
+        const category = byId('newButtonCategory');
+        if (id && [...category.options].some(option => option.value === id)) category.value = id;
+        updateNewButtonMaintenance();
+    };
     newButtonModal.element.addEventListener('hidden.bs.modal', () => {
         const draft = newButton;
         newButton = null;
@@ -519,6 +568,7 @@
     };
     byId('newButtonOrigin').onchange = async () => {
         const origin = byId('newButtonOrigin').value;
+        updateNewButtonMaintenance();
         for (const [id, value] of [['UploadOptions','upload'], ['SheetOptions','sheet'], ['PieceOptions','piece']]) byId('newButton' + id).hidden = origin !== value;
         if (origin !== 'piece') return;
         const draft=newButton;if(!draft) return;
@@ -526,14 +576,23 @@
         try {
             const data=await request('/api/piece-library/');
             if(newButton !== draft) return;
-            byId('newButtonPiece').replaceChildren(new Option('Elija una pieza',''));
-            for(const piece of data.pieces) byId('newButtonPiece').append(new Option(`${piece.category_name} - ${piece.name}`,piece.id));
+            const select = byId('newButtonPiece');
+            select.replaceChildren(new Option('Elija una pieza',''));
+            const addPieces = pieces => {
+                for (const piece of pieces) {
+                    const option = new Option(`${piece.category_name} - ${piece.name}`, piece.id);
+                    option.dataset.categoryId = piece.category_id || '';
+                    select.append(option);
+                }
+            };
+            addPieces(data.pieces);
+            updateNewButtonMaintenance();
             // Fetch remaining pages so all saved pieces are available.
             let offset=data.next_offset;
             while(offset !== null && offset !== undefined) {
                 const more=await request(`/api/piece-library/?offset=${offset}`);
                 if(newButton !== draft) return;
-                for(const piece of more.pieces) byId('newButtonPiece').append(new Option(`${piece.category_name} - ${piece.name}`,piece.id));
+                addPieces(more.pieces);
                 offset=more.next_offset;
             }
             message(newButtonModal,data.total ? '' : 'Todavía no hay piezas guardadas.');
@@ -597,7 +656,8 @@
             `¿Copiar «${name}»${info ? ` (${info})` : ''}? Se copiarán su ficha, descripción y apariencia.`, 'Copiar botón'))) return;
         if (dialog) await hide(dialog);
         if (!valid(context)) return;
-        await active().setMode('add', { origin: 'copy', copy_button_id: marker.id });
+        const options = marker.maintenance_required ? await newButtonOptions(marker) : { origin: 'copy', copy_button_id: marker.id };
+        if (options && valid(context)) await active().setMode('add', options);
     }
     byId('btnCopyPlanButton').onclick = () => copyButton(assignment, assignment?.marker, sheetModal);
     function copySelectedButton() {
