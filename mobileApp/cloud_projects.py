@@ -437,7 +437,7 @@ def open_cloud_project(pdf_id, user, replace_plan=None):
         plan.source_content = source
     try:
         with transaction.atomic():
-            import_shared_project(plan, 'pdf', source, None, markers,
+            import_shared_project(plan, source, markers,
                                   {'w1': {'name': excel_name, 'content': content, 'sheets': sheets}}, manifest, user,
                                   restore_maintenance=True)
             from .cloud_save import capture_base_state

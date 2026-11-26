@@ -1,9 +1,6 @@
-# Conexión de cuentas y solicitudes a Supabase
+# Registro privado de cuentas en Supabase
 
-Los planos, las sesiones y las cuentas anteriores se conservan en SQLite local.
-Las solicitudes nuevas y sus cuentas aprobadas se comparten mediante el esquema
-privado `app_identity` de PostgreSQL en Supabase. No utilizan `public.users` ni
-Supabase Auth. La cuenta principal `admin` conserva su contraseña y acceso local.
+Las cuentas compartidas se almacenan en el esquema privado `app_identity` de PostgreSQL. El administrador principal las crea desde **Administración → Usuarios**. El personal accede con RUT y contraseña. Las cuentas locales conservan su acceso independiente y sus contraseñas.
 
 Si este equipo ya usa la herramienta oficial de Supabase, la app también puede
 utilizar su sesión guardada. Detecta el ejecutable instalado por npm aunque no esté
@@ -29,37 +26,18 @@ válida de la herramienta oficial.
    .\.venv-local\Scripts\python.exe manage.py sync_shared_accounts
    ```
 
-La inicialización crea las tablas y funciones de identidad que falten y actualiza
-sus funciones sin borrar cuentas ni solicitudes. Se ejecuta una vez por base de
-datos, también después de actualizar las funciones SQL. No reemplaza la migración
-local de Django: `ejecutar_debug.bat` sigue aplicando esa migración automáticamente.
+La inicialización prepara la tabla privada de cuentas y retira las funciones antiguas de solicitudes. Conserva las cuentas y los registros históricos. Ejecuta el comando en cada base de datos compartida que use esta versión. Las migraciones locales de Django siguen aplicándose con `manage.py migrate`.
 
 El documento `conexion_supabase.txt` es informativo: una URI que conserva
 `[TU_PASSWORD]` no permite conectarse. Una API key pública o una sesión del panel
 tampoco sustituyen la contraseña PostgreSQL del servidor. No publiques la URI ni
 la incorpores a JavaScript. El archivo `conexion-base-datos.txt` está excluido de Git.
 
-## Verificar el flujo entre instalaciones
+## Compartir cuentas entre instalaciones
 
-Todas las instalaciones deben ejecutar la misma versión y apuntar al mismo proyecto
-con `APP_SHARED_ACCOUNTS=1`, que es el valor predeterminado. El administrador puede
-revisar las solicitudes en **Administrar → Solicitudes**. Una cuenta aprobada accede
-con su RUT y la contraseña que eligió al solicitar el registro.
+Todas las instalaciones deben ejecutar esta versión y apuntar al mismo registro con `APP_SHARED_ACCOUNTS=1`. Las cuentas creadas por el administrador principal están disponibles en las instalaciones enlazadas. `manage.py sync_shared_accounts` actualiza la copia local para la administración. Los cambios de contraseña se guardan en el registro compartido y requieren volver a iniciar sesión en los demás equipos.
 
-Para comprobar el envío, aprobación, acceso, cambio de rol y rechazo desde dos bases
-locales independientes:
-
-```powershell
-.\.venv-local\Scripts\python.exe scripts/shared_registration_smoke.py
-```
-
-La prueba usa registros con identificadores nuevos y elimina sus propios registros
-de Supabase al terminar. Las bases de datos de prueba se crean aparte de `db.sqlite3`.
-
-Si Supabase no responde, las solicitudes aún no enviadas se conservan localmente y
-se informa el fallo. `sync_shared_accounts` permite reintentar el envío. Un fallo de
-conexión no impide iniciar sesión con cuentas locales; las cuentas compartidas sí
-necesitan consultar su contraseña y permisos vigentes en el registro remoto.
+Si Supabase no responde, el panel informa el fallo de las operaciones del registro compartido. Las cuentas locales existentes pueden seguir iniciando sesión por RUT.
 
 La conexión nativa utiliza transacciones de lectura, sin modificar opciones de
 sesión del pooler, y desactiva sentencias preparadas. Consulta la

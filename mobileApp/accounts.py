@@ -2,8 +2,10 @@
 import re
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -13,12 +15,10 @@ def rut_check_digit(body):
     return '0' if remainder == 11 else 'K' if remainder == 10 else str(remainder)
 
 
-def normalize_rut(value, *, strict=False):
+def normalize_rut(value):
     if not isinstance(value, str):
         raise ValidationError('Ingrese un RUT válido con su dígito verificador.')
     value = value.strip().upper()
-    if strict and not re.fullmatch(r'[1-9][0-9]{6,7}-[0-9K]', value):
-        raise ValidationError('Ingrese el RUT sin puntos y con guion, por ejemplo 12345678-5.')
     if not re.fullmatch(r'(?:[1-9][0-9]{6,7}|[1-9][0-9]?\.[0-9]{3}\.[0-9]{3})-?[0-9K]', value):
         raise ValidationError('Ingrese un RUT válido, por ejemplo 12.345.678-5.')
     compact = value.replace('.', '').replace('-', '')
@@ -57,18 +57,39 @@ def rut_in_use(rut, *, exclude_user=None):
     if exclude_user is not None:
         profiles = profiles.exclude(user_id=exclude_user)
         users = users.exclude(pk=exclude_user)
-    body, verifier = rut.split('-')
-    dotted = f'{int(body):,}'.replace(',', '.') + '-' + verifier
-    return (profiles.exists() or any(users.filter(username__iexact=value).exists() for value in (rut, body + verifier, dotted))
+    return (profiles.exists() or users.filter(rut_usernames(rut)).exists()
             or CompanyAccount.objects.filter(rut=rut).exists() or CompanyAdminSetup.objects.filter(rut=rut).exists())
 
 
+def rut_usernames(rut):
+    body, verifier = rut.split('-')
+    dotted = f'{int(body):,}'.replace(',', '.')
+    return (Q(username__iexact=rut) | Q(username__iexact=body + verifier) |
+            Q(username__iexact=f'{dotted}-{verifier}') | Q(username__iexact=dotted + verifier))
+
+
+def local_user_for_rut(rut):
+    from .models import UserProfile
+    profile = UserProfile.objects.select_related('user').filter(rut=rut).first()
+    if profile is not None:
+        profile.user.app_profile = profile
+        return profile.user
+    return get_user_model().objects.filter(
+        rut_usernames(rut), Q(app_profile__isnull=True) | Q(app_profile__rut_is_test=True),
+    ).first()
+
+
+def validate_account_password(password, *, rut, first_name, last_name):
+    if not isinstance(password, str) or not password or len(password) > 256:
+        raise ValidationError('Ingrese una contraseña válida de hasta 256 caracteres.')
+    validate_password(password, user=get_user_model()(username=rut, first_name=first_name, last_name=last_name))
+
+
 def next_test_rut():
-    from .models import RegistrationRequest
     body = 90000000
     while body < 100000000:
         value = f'{body}-{rut_check_digit(str(body))}'
-        if not rut_in_use(value) and not RegistrationRequest.objects.filter(rut=value, status='pending').exists():
+        if not rut_in_use(value):
             return value
         body += 1
     raise ValidationError('No se pudo asignar un RUT de prueba.')
@@ -104,13 +125,3 @@ def user_data(user):
             'rut': profile.rut if profile else '', 'rut_is_test': bool(profile and profile.rut_is_test),
             'primary_administrator': bool(profile and profile.is_primary_administrator),
             'role': role, 'administrator': role == 'administrator', 'is_active': user.is_active}
-
-
-def registration_data(item):
-    return {'id': item.pk, 'first_name': item.first_name, 'last_name': item.last_name,
-            'name': f'{item.first_name} {item.last_name}', 'rut': item.rut,
-            'company_name': item.company.name,
-            'status': item.status, 'created_at': item.created_at.isoformat(),
-            'reviewed_at': item.reviewed_at.isoformat() if item.reviewed_at else None,
-            'reviewed_by': item.reviewed_by.get_full_name() or item.reviewed_by.username if item.reviewed_by else None,
-            'user_id': item.user_id}

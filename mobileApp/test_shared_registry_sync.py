@@ -1,105 +1,83 @@
-"""Registration replication accepts native PostgreSQL and legacy CLI row types."""
-from datetime import datetime, timezone
+"""Direct enrollment in the shared identity registry."""
 from unittest.mock import patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .cloud_projects import CloudUnavailable
-from .models import RegistrationRequest
-from .shared_accounts import review_request, sync_requests
+from .models import UserProfile
+from .shared_accounts import apply_account
 
 
-@override_settings(APP_SHARED_ACCOUNTS=True)
-class SharedRegistrySyncTests(TestCase):
-    def test_native_timestamp_and_uuid_can_be_imported_and_reconciled(self):
+@override_settings(APP_SHARED_ACCOUNTS=True,
+                   PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class SharedAccountCreationTests(TestCase):
+    def setUp(self):
+        owner = get_user_model().objects.create_superuser('general', password='Bosque!Invierno2026')
+        UserProfile.objects.create(user=owner, rut='11111111-1', role='administrator', is_primary_administrator=True)
+        self.client.force_login(owner)
+        self.data = {
+            'action': 'create', 'first_name': 'Ana', 'last_name': 'Pérez', 'rut': '12345678-5',
+            'role': 'worker', 'password': 'Cascada!Sur2026',
+        }
+
+    def post(self):
+        return self.client.post(reverse('manage_user'), self.data, content_type='application/json')
+
+    def test_shared_account_is_written_then_materialized_with_a_hash(self):
         identifier = uuid4()
-        submitted_at = datetime(2026, 11, 10, 20, 0, tzinfo=timezone.utc)
         row = {
-            'id': identifier, 'rut': '12345678-5', 'first_name': 'Prueba',
-            'last_name': 'Compartida', 'status': 'pending', 'created_at': submitted_at,
+            'id': identifier, 'username': f'cuenta_{identifier.hex}', 'rut': self.data['rut'],
+            'first_name': self.data['first_name'], 'last_name': self.data['last_name'], 'role': self.data['role'],
+            'password_hash': make_password(self.data['password']), 'is_active': True, 'revision': 1,
         }
-        with patch('mobileApp.shared_accounts.query', return_value=[row]):
-            sync_requests()
-        item = RegistrationRequest.objects.get()
-        self.assertEqual(item.cloud_id, identifier)
-        self.assertEqual(item.created_at, submitted_at)
-        self.assertTrue(item.cloud_synced)
-        self.assertEqual(item.password_hash, '')
-
-        # A second installation approved this request. Retire its local replica.
-        with patch('mobileApp.shared_accounts.query', return_value=[{**row, 'status': 'approved'}]):
-            sync_requests()
-        self.assertFalse(RegistrationRequest.objects.exists())
-
-    def test_legacy_iso_timestamp_is_preserved(self):
-        submitted_at = datetime(2026, 11, 10, 20, 0, tzinfo=timezone.utc)
-        row = {
-            'id': str(uuid4()), 'rut': '12345678-5', 'first_name': 'Prueba',
-            'last_name': 'Compartida', 'status': 'pending', 'created_at': submitted_at.isoformat(),
-        }
-        with patch('mobileApp.shared_accounts.query', return_value=[row]):
-            sync_requests()
-        self.assertEqual(RegistrationRequest.objects.get().created_at, submitted_at)
-
-    def test_rejection_never_materializes_an_account_from_old_null_composites(self):
-        item = RegistrationRequest.objects.create(
-            first_name='Prueba', last_name='Compartida', rut='12345678-5', cloud_synced=True,
-        )
-        actor = get_user_model().objects.create_superuser('review-test-admin')
-        result = {'status': 'rejected', 'account': {'id': None, 'rut': None, 'revision': None}}
-        with patch('mobileApp.shared_accounts.query', return_value=[{'result': result}]):
-            with patch('mobileApp.shared_accounts.apply_account') as apply_account:
-                review_request(item, 'reject', 'viewer', actor)
-        apply_account.assert_not_called()
-        self.assertFalse(RegistrationRequest.objects.exists())
-
-    def test_resubmission_after_another_installation_rejected_uses_a_new_identity(self):
-        payload = {
-            'first_name': 'Prueba', 'last_name': 'Compartida', 'rut': '12345678-5',
-            'password': 'Cascada!Sur2026', 'confirm_password': 'Cascada!Sur2026',
-        }
-        previous = RegistrationRequest.objects.create(
-            first_name=payload['first_name'], last_name=payload['last_name'], rut=payload['rut'],
-            password_hash=make_password(payload['password']), cloud_synced=True,
-        )
-        results = [[{'status': 'rejected'}], [{'result': {'status': 'pending'}}]]
-        with patch('mobileApp.shared_accounts.query', side_effect=results):
-            response = self.client.post(reverse('request_registration'), payload, content_type='application/json')
+        with patch('mobileApp.shared_accounts.query', return_value=[row]) as query:
+            response = self.post()
         self.assertEqual(response.status_code, 201, response.content)
-        item = RegistrationRequest.objects.get()
-        self.assertNotEqual(item.cloud_id, previous.cloud_id)
-        self.assertTrue(item.cloud_synced)
+        sql = query.call_args.args[0]
+        self.assertIn('INSERT INTO app_identity.accounts', sql)
+        self.assertNotIn(self.data['password'], sql)
+        self.assertTrue(query.call_args.kwargs['write'])
+        profile = UserProfile.objects.get(rut=self.data['rut'])
+        self.assertEqual(profile.cloud_id, identifier)
+        self.assertTrue(profile.user.check_password(self.data['password']))
 
-    def test_an_existing_shared_pending_request_remains_a_duplicate(self):
-        payload = {
-            'first_name': 'Prueba', 'last_name': 'Compartida', 'rut': '12345678-5',
-            'password': 'Cascada!Sur2026', 'confirm_password': 'Cascada!Sur2026',
-        }
-        previous = RegistrationRequest.objects.create(
-            first_name=payload['first_name'], last_name=payload['last_name'], rut=payload['rut'],
-            password_hash=make_password(payload['password']), cloud_synced=True,
-        )
-        with patch('mobileApp.shared_accounts.query', return_value=[{'status': 'pending'}]) as query:
-            response = self.client.post(reverse('request_registration'), payload, content_type='application/json')
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(RegistrationRequest.objects.get().cloud_id, previous.cloud_id)
-        query.assert_called_once()
-
-    def test_failed_refresh_keeps_the_existing_synced_request(self):
-        payload = {
-            'first_name': 'Prueba', 'last_name': 'Compartida', 'rut': '12345678-5',
-            'password': 'Cascada!Sur2026', 'confirm_password': 'Cascada!Sur2026',
-        }
-        previous = RegistrationRequest.objects.create(
-            first_name=payload['first_name'], last_name=payload['last_name'], rut=payload['rut'],
-            password_hash=make_password(payload['password']), cloud_synced=True,
-        )
+    def test_cloud_failures_and_duplicates_do_not_create_local_only_accounts(self):
         with patch('mobileApp.shared_accounts.query', side_effect=CloudUnavailable('Sin conexión')):
-            response = self.client.post(reverse('request_registration'), payload, content_type='application/json')
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(RegistrationRequest.objects.get().cloud_id, previous.cloud_id)
-        self.assertEqual(RegistrationRequest.objects.get().password_hash, previous.password_hash)
+            self.assertEqual(self.post().status_code, 503)
+        with patch('mobileApp.shared_accounts.query', return_value=[]):
+            self.assertEqual(self.post().status_code, 400)
+        self.assertFalse(UserProfile.objects.filter(rut=self.data['rut']).exists())
+
+    def test_shared_user_updates_the_registry_when_changing_its_own_password(self):
+        identifier = uuid4()
+        row = {
+            'id': identifier, 'username': f'cuenta_{identifier.hex}', 'rut': self.data['rut'],
+            'first_name': self.data['first_name'], 'last_name': self.data['last_name'], 'role': self.data['role'],
+            'password_hash': make_password(self.data['password']), 'is_active': True, 'revision': 1,
+        }
+        user, _ = apply_account(row)
+        self.client.force_login(user)
+        new_password = 'Navegante!Verde2026'
+
+        def query(sql, *, write=False):
+            if not write:
+                return [row]
+            self.assertIn('UPDATE app_identity.accounts', sql)
+            self.assertNotIn(new_password, sql)
+            row['password_hash'] = sql.split("password_hash='", 1)[1].split("'", 1)[0]
+            row['revision'] += 1
+            return [{'revision': row['revision']}]
+
+        with patch('mobileApp.shared_accounts.query', side_effect=query):
+            url = reverse('change_password')
+            response = self.client.post(url, {
+                'current_password': self.data['password'], 'new_password': new_password, 'confirm_password': new_password,
+            })
+            self.assertRedirects(response, url)
+            self.assertEqual(self.client.get(reverse('auth_session')).json()['user']['id'], user.pk)
+        self.assertTrue(check_password(new_password, row['password_hash']))
+        self.assertEqual(UserProfile.objects.get(user=user).cloud_revision, 2)

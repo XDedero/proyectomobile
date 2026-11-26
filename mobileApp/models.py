@@ -152,6 +152,7 @@ class CompanyAccount(models.Model):
 
 
 class RegistrationRequest(models.Model):
+    """Historical records from the retired registration request workflow."""
     cloud_id = models.UUIDField(default=uuid4, unique=True, editable=False)
     cloud_synced = models.BooleanField(default=False, editable=False)
     class Status(models.TextChoices):

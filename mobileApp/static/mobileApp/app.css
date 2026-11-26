@@ -71,13 +71,6 @@ html, body {
     margin-top: 8px;
     margin-bottom: 18px;
 }
-.registration-name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-.registration-name-fields > div { min-width: 0; }
-#registrationPanel[hidden], #loginForm[hidden] { display: none !important; }
-#registrationStatus { padding: .75rem; border-radius: 10px; }
-#registrationStatus.text-success { background: #e2f4e9; }
-#registrationStatus.text-danger { background: #fce9ec; }
-@media (max-width: 360px) { .registration-name-fields { grid-template-columns: 1fr; gap: 0; } }
 .brand-badge {
     width: 60px;
     height: 60px;
@@ -160,36 +153,6 @@ html, body {
 .icon-btn:hover, .icon-btn:focus {
     background: var(--company-soft, #f1f5f9);
     color: var(--company-ink, #0f172a);
-}
-
-/* Tarjeta de Importar Plano */
-.cad-card {
-    border: 2px dashed var(--company-border, #cbd5e1);
-    border-radius: 20px;
-    padding: 24px 18px;
-    text-align: center;
-    background: var(--company-surface, #ffffff);
-    transition: all 0.25s ease;
-}
-.cad-card:hover {
-    border-color: var(--company-primary, #3b82f6);
-    background: var(--company-surface, #f8fafc);
-}
-
-.btn-cad {
-    background: linear-gradient(135deg, var(--company-hover, #174e83), var(--company-primary, #2878b7));
-    color: white;
-    border: none;
-    font-weight: 600;
-    border-radius: 14px;
-    padding: 13px 20px;
-    box-shadow: 0 6px 16px rgba(var(--company-primary-rgb, 35, 104, 167), 0.23);
-    transition: all 0.2s;
-}
-.btn-cad:hover {
-    background: linear-gradient(135deg, var(--company-pressed, #123e6b), var(--company-hover, #1c619d));
-    color: white;
-    transform: scale(1.02);
 }
 
 .btn-excel {

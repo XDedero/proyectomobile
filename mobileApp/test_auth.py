@@ -7,8 +7,9 @@ from django.contrib.auth.models import Group, Permission
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from .models import Motor, Plan, WorkbookDocument
-from .tests import dxf_file, xlsx_file
+from .models import Motor, Plan, UserProfile, WorkbookDocument
+from .test_pdf import pdf_upload
+from .tests import dxf_file, plan_fixture, xlsx_file
 
 
 class AuthenticationPermissionTests(TestCase):
@@ -22,6 +23,8 @@ class AuthenticationPermissionTests(TestCase):
         cls.admin = User.objects.create_superuser('admin', password='clave-admin')
         cls.no_permissions = User.objects.create_user('sin_permisos', password='clave')
         cls.inactive = User.objects.create_user('inactivo', password='clave', is_active=False)
+        for user, rut, role in ((cls.admin, '22222222-2', 'administrator'), (cls.inactive, '44444444-4', 'viewer')):
+            UserProfile.objects.create(user=user, rut=rut, role=role)
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix='dxf-auth-test-')
@@ -38,8 +41,8 @@ class AuthenticationPermissionTests(TestCase):
 
     def import_plan(self, user=None):
         self.client.force_login(user or self.editor)
-        response = self.client.post(reverse('plan_import'), {'file': dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content[:500])
+        response = plan_fixture(self.client, 'dxf', dxf_file())
+        self.assertEqual(response.status_code, 200, response.content[:500])
         return response.json()
 
     def assign_excel(self, plan):
@@ -47,8 +50,9 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content[:500])
         return response.json()['motor']
 
-    def test_login_uses_real_django_username_and_password(self):
-        response = self.login('lector', 'clave-lector')
+    def test_login_uses_rut_to_resolve_the_django_account(self):
+        UserProfile.objects.create(user=self.reader, rut='11111111-1', role='worker')
+        response = self.login('11111111-1', 'clave-lector')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['user']['id'], self.reader.pk)
         self.assertEqual(self.client.get(reverse('auth_session')).json()['user']['username'], 'lector')
@@ -65,12 +69,13 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(len({match.group(1) for match in versions}), 1)
         self.assertIn('no-store', response['Cache-Control'])
 
-    def test_existing_short_username_and_password_are_not_rejected_by_form_rules(self):
-        get_user_model().objects.create_user('a', password='x')
-        self.assertEqual(self.login('a', 'x').status_code, 200)
+    def test_existing_short_password_is_still_accepted_for_a_rut(self):
+        get_user_model().objects.create_user('12345678-5', password='x')
+        self.assertEqual(self.login('12345678-5', 'x').status_code, 200)
 
     def test_unknown_wrong_password_and_inactive_users_are_rejected(self):
-        for username, password in [('ficticio', 'clave'), ('lector', 'incorrecta'), ('inactivo', 'clave')]:
+        UserProfile.objects.create(user=self.reader, rut='11111111-1', role='worker')
+        for username, password in [('12345678-5', 'clave'), ('11111111-1', 'incorrecta'), ('44444444-4', 'clave')]:
             with self.subTest(username=username):
                 self.assertEqual(self.login(username, password).status_code, 401)
                 self.assertIsNone(self.client.get(reverse('auth_session')).json()['user'])
@@ -80,17 +85,19 @@ class AuthenticationPermissionTests(TestCase):
             self.assertEqual(self.client.post(reverse('auth_login'), data, content_type='application/json').status_code, 400)
 
     def test_logout_invalidates_server_session(self):
-        self.login('lector', 'clave-lector')
+        UserProfile.objects.create(user=self.reader, rut='11111111-1', role='worker')
+        self.login('11111111-1', 'clave-lector')
         self.assertEqual(self.client.post(reverse('auth_logout')).status_code, 200)
         self.assertIsNone(self.client.get(reverse('auth_session')).json()['user'])
         self.assertEqual(self.client.get(reverse('plans')).status_code, 401)
         self.assertNotIn('_auth_user_id', self.client.session)
 
     def test_authentication_changes_require_csrf_and_post(self):
+        UserProfile.objects.create(user=self.reader, rut='11111111-1', role='worker')
         client = Client(enforce_csrf_checks=True)
         client.get(reverse('index'))
         original_token = client.cookies['csrftoken'].value
-        data = {'username': 'lector', 'password': 'clave-lector'}
+        data = {'rut': '11111111-1', 'password': 'clave-lector'}
         self.assertEqual(client.post(reverse('auth_login'), data, content_type='application/json').status_code, 403)
         response = client.post(reverse('auth_login'), data, content_type='application/json', HTTP_X_CSRFTOKEN=original_token)
         self.assertEqual(response.status_code, 200)
@@ -102,7 +109,8 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(client.get(reverse('auth_logout')).status_code, 405)
 
     def test_reader_can_import_assign_and_edit_own_plan_excel(self):
-        user = self.login('lector', 'clave-lector').json()['user']
+        self.client.force_login(self.reader)
+        user = self.client.get(reverse('auth_session')).json()['user']
         self.assertTrue(user['permissions']['can_import'])
         self.assertFalse(user['permissions']['can_administer'])
         self.assertFalse(self.reader.has_perm('mobileApp.add_plan'))
@@ -119,7 +127,7 @@ class AuthenticationPermissionTests(TestCase):
         plan = self.import_plan()
         motor = self.assign_excel(plan)
         client = Client()
-        self.assertEqual(self.login('lector', 'clave-lector', client).status_code, 200)
+        client.force_login(self.reader)
         self.assertEqual(client.get(reverse('plans')).json()['plans'][0]['id'], plan['id'])
         detail = client.get(plan['detail_url']).json()
         self.assertEqual(detail['motors'][0]['sheet_name'], 'Motor')
@@ -173,7 +181,7 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(self.client.get(reverse('plans')).status_code, 401)
 
     def test_registered_user_without_groups_can_import_list_and_assign(self):
-        self.assertEqual(self.login('sin_permisos', 'clave').status_code, 200)
+        self.client.force_login(self.no_permissions)
         self.assertEqual(self.client.get(reverse('plans')).status_code, 200)
         plan = self.import_plan(self.no_permissions)
         motor = self.assign_excel(plan)
@@ -197,7 +205,7 @@ class AuthenticationPermissionTests(TestCase):
         self.assertEqual(self.client.get(motor['excel']['preview_url']).json()['rows'][1][0], 30)
 
     def test_superuser_has_admin_button_capability_and_existing_admin_session(self):
-        response = self.login('admin', 'clave-admin')
+        response = self.login('22222222-2', 'clave-admin')
         self.assertTrue(response.json()['user']['permissions']['can_administer'])
         self.assertEqual(self.client.get(reverse('admin:index')).status_code, 200)
         self.assertEqual(self.client.get(reverse('admin:auth_user_changelist')).status_code, 200)
@@ -223,7 +231,7 @@ class AuthenticationPermissionTests(TestCase):
                     motor['excel']['preview_url'], motor['excel']['metadata_url'], motor['excel']['cells_url']]:
             with self.subTest(url=url):
                 self.assertEqual(client.get(url).status_code, 401)
-        self.assertEqual(client.post(reverse('plan_import'), {'file': dxf_file()}).status_code, 401)
+        self.assertEqual(client.post(reverse('import_pdf'), {'file': pdf_upload()}).status_code, 401)
         self.assertEqual(client.post(motor['assign_url'], {'file': xlsx_file()}).status_code, 401)
         for url in [plan['update_url'], plan['delete_url'], plan['markers_url'], motor['excel']['save_url']]:
             with self.subTest(url=url):

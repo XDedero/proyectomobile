@@ -14,30 +14,18 @@
   <header class="mb-4">
     <a class="back-link" href="/">← Volver a los planos</a>
     <h1 class="mt-3 mb-1">Administración{% if company_name %} · {{ company_name }}{% endif %}</h1>
-    <p class="text-secondary mb-0">Solicitudes, usuarios y categorías en un solo lugar.</p>
+    <p class="text-secondary mb-0">Usuarios y categorías de la empresa.</p>
     <a href="{% url 'notifications' %}" class="btn btn-outline-primary btn-sm mt-3"><i class="bi bi-bell" aria-hidden="true"></i> Buzón de notificaciones</a>
     {% if can_edit_company %}<a href="{% url 'company_profile' %}" class="btn btn-outline-primary btn-sm mt-3">Configuración de la empresa</a>{% endif %}
   </header>
   <div class="management-summary mb-4" id="managementSummary"></div>
   <nav class="management-tabs mb-3" aria-label="Secciones de administración">
-    <button type="button" data-tab="requests" class="active" aria-pressed="true"><i class="bi bi-inbox" aria-hidden="true"></i> Solicitudes <span id="pendingCount" class="tab-count" hidden></span></button>
-    <button type="button" data-tab="users" aria-pressed="false"><i class="bi bi-people" aria-hidden="true"></i> Usuarios</button>
+    <button type="button" data-tab="users" class="active" aria-pressed="true"><i class="bi bi-people" aria-hidden="true"></i> Usuarios</button>
     <button type="button" data-tab="categories" aria-pressed="false"><i class="bi bi-grid" aria-hidden="true"></i> Categorías</button>
   </nav>
   <p id="managementStatus" role="status" aria-live="polite"></p>
-  <section class="management-section" id="requestsPanel">
-    <div class="section-intro"><h2>Solicitudes de registro</h2><p>Todos los administradores pueden aceptar o eliminar solicitudes. Elige el rol que tendrá la cuenta al aceptarla. Solo se muestran las solicitudes pendientes.</p></div>
-    <div class="management-card">
-      <div class="section-toolbar mb-3">
-        <h3 class="mb-0">Solicitudes pendientes</h3>
-        <button id="refreshRequests" class="btn btn-sm btn-outline-primary" type="button">Actualizar solicitudes</button>
-      </div>
-      <p id="requestRefreshStatus" class="small text-secondary" role="status" aria-live="polite">{% if registration_error %}{{ registration_error }}{% else %}Consultando solicitudes…{% endif %}</p>
-      <div id="requestRows" class="management-rows" aria-live="polite"></div>
-    </div>
-  </section>
-  <section class="management-section" id="usersPanel" hidden>
-    <div class="section-intro"><h2>Usuarios y permisos</h2><p>Todos los administradores pueden aprobar solicitudes y asignar los roles Espectador, Trabajador o Administrador a las cuentas. El administrador principal también puede modificar o eliminar otros administradores. Las cuentas nuevas se crean al aprobar una solicitud.</p></div>
+  <section class="management-section" id="usersPanel">
+    <div class="section-intro"><h2>Usuarios y permisos</h2><p>El administrador principal puede crear cuentas y asignarles un rol.</p></div>
     <div class="management-grid">
       <div class="management-card">
         <label for="userSearch" class="form-label fw-semibold">Buscar usuario por nombre</label>
@@ -45,7 +33,8 @@
         <div id="userRows" class="management-rows"></div>
       </div>
       <div class="management-card">
-        <p id="userSelectionHint" class="empty-state mb-0">Selecciona un usuario para ver y editar sus datos.</p>
+        {% if can_create_users %}<button id="newUser" type="button" class="btn btn-outline-primary mb-3" disabled>Crear usuario</button>{% endif %}
+        <p id="userSelectionHint" class="empty-state mb-0">Las cuentas se identifican por su RUT.</p>
         <form id="userForm" hidden>
           <h3 id="userFormTitle">Editar usuario</h3>
           <p id="userAccountName" class="small text-secondary"></p>
@@ -58,9 +47,9 @@
           <label for="userRole" class="form-label">Rol en la aplicación</label>
           <select id="userRole" class="form-select mb-2"><option value="viewer">Espectador</option><option value="worker">Trabajador</option><option value="administrator">Administrador</option></select>
           <p id="userRoleHelp" class="role-help small"></p>
-          <label for="userPassword" class="form-label">Nueva contraseña <span class="text-secondary">(opcional)</span></label><input id="userPassword" type="password" class="form-control mb-2" minlength="8" autocomplete="new-password" aria-describedby="userPasswordHelp">
+          <label for="userPassword" class="form-label" id="userPasswordLabel">Nueva contraseña (opcional)</label><input id="userPassword" type="password" class="form-control mb-2" minlength="8" maxlength="256" autocomplete="new-password" aria-describedby="userPasswordHelp">
           <p id="userPasswordHelp" class="small text-secondary">Deja este campo vacío para conservar la contraseña. Si la cambias, usa al menos 8 caracteres, evita claves comunes, solo números o datos personales.</p>
-          <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><button id="deleteUser" class="btn btn-outline-danger" type="button">Eliminar usuario</button><button id="cancelUser" class="btn btn-link" type="button">Cancelar</button></div>
+          <div class="form-actions"><button id="saveUser" class="btn btn-primary" type="submit">Guardar cambios</button><button id="deleteUser" class="btn btn-outline-danger" type="button">Eliminar usuario</button><button id="cancelUser" class="btn btn-link" type="button">Cancelar</button></div>
         </form>
       </div>
     </div>
@@ -86,7 +75,6 @@
     <button type="submit" value="cancel" class="decision-button decision-reject" autofocus><i class="bi bi-x-lg" aria-hidden="true"></i><span>Cancelar</span></button>
   </form>
 </dialog>
-{{ pending_requests|json_script:"initialRegistrationRequests" }}
 <script src="{% static 'mobileApp/management.js' %}?v={{ asset_version }}"></script>
 </body>
 </html>

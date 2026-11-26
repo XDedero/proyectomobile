@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from .models import ButtonCategory, PdfPlan, UserProfile
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -38,9 +38,8 @@ class ApplicationRolePermissionsTests(TestCase):
 
     def import_plan(self, user, kind='pdf'):
         self.client.force_login(user)
-        result = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'),
-                                  {'file': pdf_upload() if kind == 'pdf' else dxf_file()})
-        self.assertEqual(result.status_code, 201, result.content[:300])
+        result = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(result.status_code, 201 if kind == 'pdf' else 200, result.content[:300])
         return result.json()
 
     def test_viewer_can_import_both_formats_but_cannot_edit_save_or_delete_them(self):

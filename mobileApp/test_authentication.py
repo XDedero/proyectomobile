@@ -17,7 +17,7 @@ class AuthenticationAvailabilityTests(TestCase):
 
     def login(self, identifier, password=None):
         return self.client.post(reverse('auth_login'), {
-            'username': identifier, 'password': password or self.password,
+            'rut': identifier, 'password': password or self.password,
         }, content_type='application/json')
 
     def create_admin(self, *, shared=False, profile=True):
@@ -32,7 +32,7 @@ class AuthenticationAvailabilityTests(TestCase):
     def test_local_primary_admin_logs_in_without_querying_the_shared_database(self):
         user = self.create_admin()
         with patch('mobileApp.shared_accounts.sync_login', side_effect=CloudUnavailable('Sin conexión')) as sync:
-            response = self.login('admin')
+            response = self.login('12345678-5')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['user']['id'], user.pk)
         self.assertTrue(response.json()['user']['primary_administrator'])
@@ -46,18 +46,21 @@ class AuthenticationAvailabilityTests(TestCase):
         self.assertEqual(response.json()['user']['id'], user.pk)
         sync.assert_not_called()
 
-    def test_legacy_account_without_profile_still_authenticates_locally(self):
-        user = self.create_admin(profile=False)
+    def test_login_rejects_a_username_even_for_a_valid_password(self):
+        self.create_admin()
         with patch('mobileApp.shared_accounts.sync_login') as sync:
             response = self.login(' admin ')
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()['user']['id'], user.pk)
+        self.assertEqual(response.status_code, 401, response.content)
         sync.assert_not_called()
+        self.assertRedirects(self.client.post(reverse('admin:login'), {
+            'username': 'admin', 'password': self.password,
+        }), reverse('index'))
+        self.assertNotIn('_auth_user_id', self.client.session)
 
     def test_incorrect_local_password_is_rejected_even_when_cloud_is_down(self):
         self.create_admin()
         with patch('mobileApp.shared_accounts.sync_login', side_effect=CloudUnavailable('Sin conexión')) as sync:
-            response = self.login('admin', 'Incorrecta!2026')
+            response = self.login('12345678-5', 'Incorrecta!2026')
         self.assertEqual(response.status_code, 401)
         self.assertNotIn('_auth_user_id', self.client.session)
         sync.assert_not_called()
@@ -65,10 +68,10 @@ class AuthenticationAvailabilityTests(TestCase):
     def test_shared_account_cannot_use_stale_local_credentials_during_cloud_failure(self):
         self.create_admin(shared=True)
         with patch('mobileApp.shared_accounts.sync_login', side_effect=CloudUnavailable('Sin conexión')) as sync:
-            response = self.login('admin')
+            response = self.login('12345678-5')
         self.assertEqual(response.status_code, 503)
         self.assertNotIn('_auth_user_id', self.client.session)
-        sync.assert_called_once_with('admin')
+        sync.assert_called_once_with('12345678-5')
 
     def test_unknown_identity_needs_the_shared_database(self):
         with patch('mobileApp.shared_accounts.sync_login', side_effect=CloudUnavailable('Sin conexión')) as sync:
@@ -87,4 +90,4 @@ class AuthenticationAvailabilityTests(TestCase):
             response = self.login(' 12.345.678-5 ')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['user']['username'], 'cuenta_global')
-        sync.assert_called_once_with('12.345.678-5')
+        sync.assert_called_once_with('12345678-5')

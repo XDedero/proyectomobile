@@ -1,25 +1,27 @@
-"""Registration requests and administrator-managed accounts."""
-from uuid import UUID, uuid4
+"""Administrator-managed accounts and personal password changes."""
+from uuid import uuid4
 
-from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import check_password, make_password
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth import get_user_model, update_session_auth_hash
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import Permission
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.debug import sensitive_post_parameters
+from django.views.decorators.http import require_http_methods, require_POST
 
-from .accounts import (application_role, can_edit_user, invalidate_user_sessions, next_test_rut,
-                       normalize_rut, rut_in_use, user_data, validate_name)
+from .accounts import (application_role, can_edit_user, invalidate_user_sessions, is_primary_administrator,
+                       next_test_rut, normalize_rut, rut_in_use, user_data, validate_account_password, validate_name)
 from .access import is_administrator
 from .management_views import administrators_only
-from .models import Company, RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
+from .models import Company, CompanyAccount, CompanyAdminSetup, CompanyAudit, RELONCAVI_COMPANY_ID, UserProfile
 from .pdf_views import error_response, json_body
 from .cloud_projects import CloudUnavailable
-from .company_access import registration_companies
 
 
 def record_id(data):
@@ -29,142 +31,69 @@ def record_id(data):
     return value
 
 
-@require_GET
-@never_cache
-def list_registration_companies(request):
-    return JsonResponse({'companies': list(registration_companies().values('id', 'name'))})
+def account_input(data):
+    values = {
+        'first_name': validate_name(data.get('first_name'), 'nombre'),
+        'last_name': validate_name(data.get('last_name'), 'apellido'),
+        'rut': normalize_rut(data.get('rut')),
+        'role': data.get('role'),
+    }
+    if values['role'] not in UserProfile.Role.values:
+        raise ValidationError('Seleccione un rol válido para la cuenta.')
+    validate_account_password(data.get('password'), rut=values['rut'],
+                              first_name=values['first_name'], last_name=values['last_name'])
+    return {**values, 'password_hash': make_password(data['password'])}
 
 
-def registration_company(data):
-    if 'company_id' not in data:
-        # Older installations and cached forms predate the company selector.
-        if registration_companies().exclude(pk=RELONCAVI_COMPANY_ID).exists():
-            raise ValidationError('Recargue el formulario y seleccione la empresa a la que solicita acceso.')
-        company_id = RELONCAVI_COMPANY_ID
-    else:
-        value = data['company_id']
-        if not isinstance(value, str) or len(value) != 36:
-            raise ValidationError('Seleccione una empresa válida.')
-        try:
-            company_id = UUID(value)
-        except ValueError as exc:
-            raise ValidationError('Seleccione una empresa válida.') from exc
-    company = registration_companies().filter(pk=company_id).first()
-    if company is None:
-        raise ValidationError('Esta empresa no está disponible para recibir solicitudes.')
-    return company
-
-
-@require_POST
-@never_cache
-def request_registration(request):
+@transaction.atomic
+def save_account(values, *, company_owner=None):
     from . import shared_accounts
 
-    try:
-        data = json_body(request)
-        company = registration_company(data)
-        shared_registration = company.pk == RELONCAVI_COMPANY_ID and shared_accounts.enabled()
-        first_name = validate_name(data.get('first_name'), 'nombre')
-        last_name = validate_name(data.get('last_name'), 'apellido')
-        rut = normalize_rut(data.get('rut'), strict=True)
-        password = data.get('password')
-        if not isinstance(password, str) or len(password) > 256:
-            raise ValidationError('Ingrese una contraseña válida de hasta 256 caracteres.')
-        if 'confirm_password' in data and data['confirm_password'] != password:
-            raise ValidationError('Las contraseñas no coinciden.')
-        user = get_user_model()(username=rut, first_name=first_name, last_name=last_name)
-        validate_password(password, user=user)
-        pending = RegistrationRequest.objects.filter(company=company, rut=rut, status='pending')
-        if shared_registration:
-            previous = pending.filter(cloud_synced=True).first()
-            if previous:
-                shared_accounts.refresh_request(previous)
-        with transaction.atomic():
-            if not registration_companies().select_for_update().filter(pk=company.pk).exists():
-                raise ValidationError('Esta empresa no está disponible para recibir solicitudes.')
-            if rut_in_use(rut):
-                raise ValidationError('Ya existe un usuario con ese RUT.')
-            item = pending.first()
-            if item:
-                if (not shared_registration or item.cloud_synced
-                        or item.first_name != first_name or item.last_name != last_name
-                        or not check_password(password, item.password_hash)):
-                    raise ValidationError('Ya hay una solicitud pendiente para ese RUT.')
-            else:
-                item = pending.create(company=company, first_name=first_name, last_name=last_name,
-                                      rut=rut, password_hash=make_password(password))
-        if shared_registration:
-            try:
-                result = shared_accounts.publish_request(item)
-            except ValidationError:
-                item.delete()
-                raise
-            if result.get('status') != 'pending':
-                item.delete()
-                return JsonResponse({'message': 'La solicitud ya fue resuelta. Consulte con un administrador.'})
-        return JsonResponse({'id': item.pk, 'message': 'Solicitud enviada. Un administrador debe aprobar su cuenta.'}, status=201)
-    except CloudUnavailable as exc:
-        return error_response(str(exc) + ' La solicitud quedó pendiente de envío en este equipo.', 503)
-    except (ValidationError, IntegrityError) as exc:
-        return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario o una solicitud pendiente con ese RUT.')
+    # Every company shares the RUT namespace, including the legacy workspace.
+    Company.objects.select_for_update().get(pk=RELONCAVI_COMPANY_ID)
+    rut = values['rut']
+    if rut_in_use(rut):
+        raise ValidationError('Ya existe un usuario con ese RUT.')
+    if company_owner is not None:
+        if not CompanyAdminSetup.objects.select_for_update().filter(pk=company_owner.pk).exists():
+            raise ValidationError('El administrador principal de la empresa cambió.')
+        if settings.APP_SHARED_ACCOUNTS and shared_accounts.account_rut_exists(rut):
+            raise ValidationError('Ya existe un usuario con ese RUT.')
+        account = CompanyAccount.objects.create(company_id=company_owner.company_id, **values)
+        CompanyAudit.objects.create(company_id=company_owner.company_id, company_code=company_owner.company_id,
+                                    actor=company_owner.rut, action='usuario_creado')
+        from .company_access import company_user_data
+        return company_user_data(account)
+    if shared_accounts.enabled():
+        return user_data(shared_accounts.create_account(**values))
+
+    administrator = values['role'] == UserProfile.Role.ADMINISTRATOR
+    user = get_user_model().objects.create(
+        username=f'cuenta_{uuid4().hex}', first_name=values['first_name'], last_name=values['last_name'],
+        password=values['password_hash'], is_staff=administrator,
+    )
+    UserProfile.objects.create(user=user, rut=rut, role=values['role'])
+    if administrator:
+        user.user_permissions.add(Permission.objects.get(
+            content_type__app_label='mobileApp', codename='administer_application',
+        ))
+    return user_data(user)
 
 
-@require_POST
-@administrators_only
-def manage_registration(request):
-    try:
-        data = json_body(request)
-        action = data.get('action')
-        if action not in ('approve', 'reject'):
-            raise ValidationError('Seleccione aceptar o eliminar la solicitud.')
-        role = data.get('role', UserProfile.Role.VIEWER)
-        if role not in UserProfile.Role.values:
-            raise ValidationError('Seleccione un rol válido para la cuenta.')
-        company_account = getattr(request, 'company_account', None)
-        if company_account is not None:
-            from django.conf import settings
-            from .company_access import company_administrator, review_company_request
-            from .tenant_runtime import using_schema
-            if not company_administrator(company_account):
-                return error_response('No puede revisar las solicitudes de esta empresa.', 403)
-            data['id'] = record_id(data)
-            data['role'] = role
-            with using_schema(settings.PLANOS_DATABASE_SCHEMA):
-                error = review_company_request(company_account, data)
-            if error:
-                return error_response(error)
-            return JsonResponse({'deleted': True, 'message': 'Solicitud resuelta.'})
-        from . import shared_accounts
-        requests = RegistrationRequest.objects.filter(company_id=RELONCAVI_COMPANY_ID)
-        if shared_accounts.enabled():
-            item = get_object_or_404(requests, pk=record_id(data))
-            shared_accounts.review_request(item, action, role, request.user)
-            message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
-            return JsonResponse({'deleted': True, 'message': message})
-        with transaction.atomic():
-            item = get_object_or_404(requests.select_for_update(), pk=record_id(data))
-            if item.status != 'pending':
-                return error_response('La solicitud ya fue resuelta. Recargue la lista.', 409)
-            if action == 'approve':
-                role = data.get('role', UserProfile.Role.VIEWER)
-                if role not in UserProfile.Role.values:
-                    raise ValidationError('Seleccione un rol válido para la cuenta.')
-                if rut_in_use(item.rut):
-                    raise ValidationError('Ya existe un usuario con ese RUT.')
-                user = get_user_model().objects.create(username=f'cuenta_{uuid4().hex}', first_name=item.first_name,
-                                                       last_name=item.last_name, password=item.password_hash,
-                                                       is_staff=role == UserProfile.Role.ADMINISTRATOR)
-                UserProfile.objects.create(user=user, rut=item.rut, role=role)
-                if role == UserProfile.Role.ADMINISTRATOR:
-                    user.user_permissions.add(Permission.objects.get(
-                        content_type__app_label='mobileApp', codename='administer_application'))
-            item.delete()
-        message = f'Cuenta creada con el rol {UserProfile.Role(role).label.lower()}.' if action == 'approve' else 'Solicitud eliminada.'
-        return JsonResponse({'deleted': True, 'message': message})
-    except CloudUnavailable as exc:
-        return error_response(exc, 503)
-    except (ValidationError, IntegrityError) as exc:
-        return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT.')
+def create_user(request, data):
+    if not is_primary_administrator(request.user):
+        return error_response('Solo el administrador principal puede crear usuarios.', 403)
+    company_account = getattr(request, 'company_account', None)
+    values = account_input(data)
+    if company_account is not None:
+        if not isinstance(company_account, CompanyAdminSetup):
+            return error_response('Solo el administrador principal puede crear usuarios.', 403)
+        from .tenant_runtime import using_schema
+        with using_schema(settings.PLANOS_DATABASE_SCHEMA):
+            account = save_account(values, company_owner=company_account)
+    else:
+        account = save_account(values)
+    return JsonResponse({'user': account, 'message': 'Usuario creado. Ya puede iniciar sesión con su RUT.'}, status=201)
 
 
 def ensure_other_administrator(user):
@@ -178,11 +107,13 @@ def ensure_other_administrator(user):
 @administrators_only
 def manage_user(request):
     from .tenant_runtime import workspace
-    if workspace.get() is not None:
-        return error_response('Las credenciales de esta empresa se administran desde el registro de acceso.', 403)
     try:
         data = json_body(request)
         action = data.get('action', 'update')
+        if action == 'create':
+            return create_user(request, data)
+        if workspace.get() is not None:
+            return error_response('Los usuarios de esta empresa cambian su contraseña desde su propia cuenta.', 403)
         if action not in ('update', 'delete'):
             raise ValidationError('La acción de usuario no es válida.')
         with transaction.atomic():
@@ -218,8 +149,6 @@ def manage_user(request):
                 raise ValidationError('El administrador principal debe conservar su rol de administrador.')
             if rut_in_use(rut, exclude_user=user.pk):
                 raise ValidationError('Ya existe un usuario con ese RUT.')
-            if RegistrationRequest.objects.filter(rut=rut, status='pending').exists() and rut != profile.rut:
-                raise ValidationError('Ese RUT ya tiene una solicitud pendiente.')
             if previous_role == 'administrator' and role != 'administrator':
                 ensure_other_administrator(user)
             user.first_name, user.last_name = first_name, last_name
@@ -258,4 +187,62 @@ def manage_user(request):
     except CloudUnavailable as exc:
         return error_response(exc, 503)
     except (ValidationError, IntegrityError) as exc:
-        return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT o nombre de acceso.')
+        return error_response(exc if isinstance(exc, ValidationError) else 'Ya existe un usuario con ese RUT.')
+
+
+@transaction.atomic
+def change_local_password(request, old_password, new_password):
+    from . import shared_accounts
+
+    user = get_user_model().objects.select_for_update().filter(pk=request.user.pk, is_active=True).first()
+    if user is None or not user.check_password(old_password):
+        raise ValidationError('La contraseña actual es incorrecta.')
+    profile = getattr(user, 'app_profile', None)
+    validate_account_password(new_password, rut=profile.rut if profile else user.username,
+                              first_name=user.first_name, last_name=user.last_name)
+    user.set_password(new_password)
+    if shared_accounts.enabled() and profile and profile.cloud_id:
+        shared_accounts.update_account(user, profile)
+        profile.save(update_fields=['cloud_revision'])
+    user.save(update_fields=['password'])
+    update_session_auth_hash(request, user)
+
+
+@require_http_methods(['GET', 'POST'])
+@never_cache
+@sensitive_post_parameters('current_password', 'new_password', 'confirm_password')
+def change_password(request):
+    if not request.user.is_authenticated or not request.user.is_active:
+        return redirect('index')
+    from .company_brand import brand_context
+    from .pwa import asset_version
+    from .tenant_runtime import using_schema, workspace
+
+    errors = []
+    status = 200
+    if request.method == 'POST':
+        old_password = request.POST.get('current_password', '')
+        new_password = request.POST.get('new_password', '')
+        try:
+            if not old_password or len(old_password) > 256:
+                raise ValidationError('Ingrese la contraseña actual.')
+            if new_password != request.POST.get('confirm_password'):
+                raise ValidationError('Las contraseñas nuevas no coinciden.')
+            company_account = getattr(request, 'company_account', None)
+            if company_account is not None:
+                from .company_access import change_password as change_company_password
+                with using_schema(settings.PLANOS_DATABASE_SCHEMA):
+                    change_company_password(request, company_account, old_password, new_password)
+            else:
+                change_local_password(request, old_password, new_password)
+            messages.success(request, 'Contraseña actualizada.')
+            return redirect('change_password')
+        except ValidationError as exc:
+            errors, status = exc.messages, 400
+        except CloudUnavailable as exc:
+            errors, status = [str(exc)], 503
+    company = workspace.get()
+    return render(request, 'mobileApp/change_password.html', {
+        'errors': errors, 'asset_version': asset_version(),
+        **(company.brand if company else brand_context()),
+    }, status=status)

@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db import DatabaseError, connection, transaction
 from psycopg import sql
 
-from mobileApp.company_access import registration_companies
+from mobileApp.company_access import usable_companies
 from mobileApp.models import CompanyDriveConnection, RELONCAVI_COMPANY_ID
 from mobileApp.tenant_runtime import load_drive, schema_name, using_schema, workspace_is_ready
 
@@ -66,7 +66,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not settings.PLANOS_CLOUD_MODE:
             return
-        companies = list(registration_companies().exclude(pk=RELONCAVI_COMPANY_ID))
+        companies = list(usable_companies().exclude(pk=RELONCAVI_COMPANY_ID))
         for company in companies:
             drive = CompanyDriveConnection.objects.get(company=company)
             if load_drive(company.pk, drive) is None:

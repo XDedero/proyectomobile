@@ -15,7 +15,7 @@ from .access import can_edit_plan
 from .cloud_projects import CloudUnavailable, open_cloud_project, workbook_version
 from .models import ButtonCategory, Plan, PdfPlan, PlanRole, PlanRoleGroup, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload, excel_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -40,8 +40,8 @@ class ManagementAndVersionTests(TestCase):
         return self.client.post(url, data or {}, content_type='application/json')
 
     def create_plan(self, kind='pdf'):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'), {'file': pdf_upload() if kind == 'pdf' else dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content[:500])
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content[:500])
         return response.json()
 
     def test_creator_without_legacy_permissions_can_edit_save_and_delete_both_formats(self):

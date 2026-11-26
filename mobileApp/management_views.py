@@ -10,10 +10,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .access import api_permissions, is_administrator
-from .accounts import can_edit_user, is_primary_administrator, normalize_rut, registration_data, user_data
+from .accounts import can_edit_user, is_primary_administrator, normalize_rut, user_data
 from .company_brand import brand_context, normalize_logo
-from .models import (ButtonCategory, Company, CompanyAudit, CompanyBrand, PlanRole, PlanRoleGroup, Plan, PdfPlan,
-                     RegistrationRequest, RELONCAVI_COMPANY_ID)
+from .models import (ButtonCategory, Company, CompanyAccount, CompanyAdminSetup, CompanyAudit, CompanyBrand,
+                     PlanRole, PlanRoleGroup, Plan, PdfPlan, RELONCAVI_COMPANY_ID)
 from .pdf_views import error_response, json_body
 from .pwa import asset_version
 
@@ -46,17 +46,10 @@ def administrators_only(view):
 def management_panel(request):
     from .tenant_runtime import offline_user_id, workspace
     company = workspace.get()
-    from .cloud_projects import CloudUnavailable
-    try:
-        pending = pending_registration_data(request)
-        error = ''
-    except (CloudUnavailable, ValidationError) as exc:
-        pending = local_registration_data()
-        error = str(exc)
     return render(request, 'mobileApp/management.html', {
         'interface_user_id': offline_user_id(request),
         'asset_version': asset_version(),
-        'pending_requests': pending, 'registration_error': error,
+        'can_create_users': is_primary_administrator(request.user),
         'can_edit_company': is_primary_administrator(request.user),
         **(company.brand if company else brand_context()),
     })
@@ -120,45 +113,24 @@ def _edit_company_brand(request, company_id, actor):
     }, status=400 if error else 200)
 
 
-def pending_registration_data(request=None):
+def category_data(category):
+    return {'id': str(category.pk), 'name': category.name, 'maintenance_required': category.maintenance_required}
+
+
+def management_users(request):
     company_account = getattr(request, 'company_account', None)
     if company_account is not None:
         from django.conf import settings
-        from .company_access import company_administrator
+        from .company_access import company_user_data
         from .tenant_runtime import using_schema
-        if not company_administrator(company_account):
-            return []
         with using_schema(settings.PLANOS_DATABASE_SCHEMA):
-            return [registration_data(item) for item in RegistrationRequest.objects.filter(
-                company_id=company_account.company_id, status='pending').select_related('company', 'reviewed_by')]
-    from . import shared_accounts
-    if shared_accounts.enabled():
-        shared_accounts.sync_requests()
-    return local_registration_data()
-
-
-def local_registration_data():
-    requests = RegistrationRequest.objects.filter(
-        company_id=RELONCAVI_COMPANY_ID, status='pending',
-    ).select_related('company', 'reviewed_by')
-    return [
-        registration_data(item)
-        for item in requests
-    ]
-
-
-@require_GET
-@administrators_only
-def pending_registrations(request):
-    from .cloud_projects import CloudUnavailable
-    try:
-        return JsonResponse({'requests': pending_registration_data(request)})
-    except (CloudUnavailable, ValidationError) as exc:
-        return error_response(exc, 503)
-
-
-def category_data(category):
-    return {'id': str(category.pk), 'name': category.name, 'maintenance_required': category.maintenance_required}
+            identifier = company_account.company_id
+            owner = CompanyAdminSetup.objects.filter(company_id=identifier).first()
+            members = CompanyAccount.objects.filter(company_id=identifier).order_by('first_name', 'last_name', 'pk')
+            return [company_user_data(account) for account in ([owner] if owner else []) + list(members)]
+    return [{**user_data(user), 'can_edit': can_edit_user(request.user, user),
+             'can_delete': user.pk != request.user.pk and can_edit_user(request.user, user)}
+            for user in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')]
 
 
 @require_GET
@@ -166,20 +138,15 @@ def category_data(category):
 def management_data(request):
     from . import shared_accounts
     from .cloud_projects import CloudUnavailable
-    from .tenant_runtime import workspace
-    company = workspace.get()
     try:
         if shared_accounts.enabled():
             shared_accounts.sync_accounts()
-        requests = pending_registration_data(request)
     except (CloudUnavailable, ValidationError) as exc:
         return error_response(exc, 503)
     return JsonResponse({
         'can_manage_administrators': is_administrator(request.user),
-        'users': [{**user_data(u), 'can_edit': company is None and can_edit_user(request.user, u),
-                   'can_delete': company is None and u.pk != request.user.pk and can_edit_user(request.user, u)}
-                  for u in get_user_model().objects.select_related('app_profile').order_by('first_name', 'last_name', 'username')],
-        'requests': requests,
+        'can_create_users': is_primary_administrator(request.user),
+        'users': management_users(request),
         'roles': [{'id': r.pk, 'name': r.name, 'description': r.description,
                    **{key: getattr(r, key) for key in ('can_view', 'can_export', 'can_create', 'all_plans')},
                    'users': list(r.users.values_list('pk', flat=True)),

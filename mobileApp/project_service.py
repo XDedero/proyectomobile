@@ -6,7 +6,6 @@ import hashlib
 import math
 from pathlib import Path, PurePosixPath
 from uuid import UUID
-from xml.etree import ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 from zlib import error as ZlibError
 
@@ -16,8 +15,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from pypdf import PdfReader
 
-from .dxf_service import import_dxf, MAX_MOTORS
-from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet, SavedProject
+from .models import ButtonCategory, PdfMarker, PdfPlan, Plan, WorkbookDocument, PlanWorkbookSheet, SavedProject
+
+MAX_PLAN_BUTTONS = 5_000
 
 MAX_PROJECT_BYTES = 100 * 1024 * 1024
 MAX_PROJECT_UNPACKED = 250 * 1024 * 1024
@@ -108,7 +108,7 @@ def export_project(kind, plan, *, source=None):
     if source is None:
         with open_plan_source(kind, plan) as stream:
             source = stream.read()
-    if len(markers) > MAX_MOTORS or len(manifest_bytes) > 8 * 1024 * 1024 or len(source) + len(content) + len(manifest_bytes) > MAX_PROJECT_UNPACKED:
+    if len(markers) > MAX_PLAN_BUTTONS or len(manifest_bytes) > 8 * 1024 * 1024 or len(source) + len(content) + len(manifest_bytes) > MAX_PROJECT_UNPACKED:
         raise ValidationError('El proyecto supera el tamaño transportable permitido.')
     output = BytesIO()
     with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
@@ -152,9 +152,9 @@ def finite(value):
 
 
 @transaction.atomic
-def import_shared_project(plan, kind, source, svg, markers, books, manifest, user, *, restore_maintenance=False):
+def import_shared_project(plan, source, markers, books, manifest, user, *, restore_maintenance=False):
     from .sectors import clean_sectors
-    plan.sectors = clean_sectors(manifest.get('sectors', []), pages=len(plan.pages) if kind == 'pdf' else 1)
+    plan.sectors = clean_sectors(manifest.get('sectors', []), pages=len(plan.pages))
     from .button_descriptions import imported_details
     from .display_settings import clean_display
     from .maintenance import import_schedule
@@ -205,25 +205,16 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
         is_listing=row['is_listing'], is_primary=row['is_primary'], listing_order=row['listing_order'],
         is_protected=row.get('is_protected', row['is_primary']), origin_uuid=row.get('origin_uuid'), created_by=user) for row in specs])
     plan.workbook = plan.listing = document
-    plan.source.save(f'plan.{kind}', SimpleUploadedFile(f'plan.{kind}', source), save=False)
+    plan.source.save('plan.pdf', SimpleUploadedFile('plan.pdf', source), save=False)
     plan.save()
-    if kind == 'pdf':
-        PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'],
-            label=item.get('label', ''),
-            has_area=item.get('has_area', False),
-            area_radius_x=item.get('area_radius_x'),
-            area_radius_y=item.get('area_radius_y'),
-            area_color=item.get('area_color', 'rgba(59, 130, 246, 0.25)'),
-             workbook=document, sheet_name=item['sheet'], category_id=category_for(item), **detail) for item, detail in zip(markers, details)])
-    else:
-        a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
-        Motor.objects.bulk_create([Motor(plan=plan, entity_key=item['entity_key'], name=item['name'],
-            has_area=item.get('has_area', False), area_radius_x=item.get('area_radius_x'), area_radius_y=item.get('area_radius_y'),
-            x=item['x'], y=item['y'], z=item['z'], svg_x=a*item['x']+c*item['y']+e,
-            svg_y=b*item['x']+d*item['y']+f, svg_bounds=[a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f, 0, 0],
-            workbook=document, sheet_name=item['sheet'], excel_sheets=[item['sheet']] if item['sheet'] else [],
-             category_id=category_for(item), **detail) for item, detail in zip(markers, details)])
-    return kind, plan
+    PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'],
+        label=item.get('label', ''),
+        has_area=item.get('has_area', False),
+        area_radius_x=item.get('area_radius_x'),
+        area_radius_y=item.get('area_radius_y'),
+        area_color=item.get('area_color', 'rgba(59, 130, 246, 0.25)'),
+        workbook=document, sheet_name=item['sheet'], category_id=category_for(item), **detail) for item, detail in zip(markers, details)])
+    return 'pdf', plan
 
 
 def import_project(upload, user):
@@ -234,7 +225,7 @@ def import_project(upload, user):
         with ZipFile(upload) as archive:
             entries = archive.infolist()
             names = [entry.filename for entry in entries]
-            if len(entries) > MAX_MOTORS + 3 or len(names) != len(set(names)) or sum(entry.file_size for entry in entries) > MAX_PROJECT_UNPACKED:
+            if len(entries) > MAX_PLAN_BUTTONS + 3 or len(names) != len(set(names)) or sum(entry.file_size for entry in entries) > MAX_PROJECT_UNPACKED:
                 raise ValidationError('El proyecto contiene demasiados archivos o es demasiado grande.')
             if any('\\' in name or PurePosixPath(name).is_absolute() or '..' in PurePosixPath(name).parts for name in names):
                 raise ValidationError('El proyecto contiene rutas no válidas.')
@@ -243,23 +234,19 @@ def import_project(upload, user):
             manifest = json.loads(archive.read('manifest.json'))
             if not isinstance(manifest, dict) or manifest.get('format') != 'motor-plan-project' or type(manifest.get('version')) is not int or manifest['version'] not in (1, 2, 3):
                 raise ValidationError('El archivo no es un proyecto compatible de esta aplicación.')
-            kind = manifest.get('kind')
-            model = plan_model(kind)
+            if manifest.get('kind') != 'pdf':
+                raise ValidationError('Solo se pueden importar proyectos que contienen un plano PDF.')
             name = manifest.get('name')
             if not isinstance(name, str) or not name.strip() or len(name) > 255:
                 raise ValidationError('El nombre del proyecto no es válido.')
-            if manifest.get('source') != f'plan/source.{kind}':
+            if manifest.get('source') != 'plan/source.pdf':
                 raise ValidationError('La referencia al plano no es válida.')
             if archive.getinfo(manifest['source']).file_size > settings.PLAN_UPLOAD_MAX_BYTES:
                 raise ValidationError('El plano del proyecto supera 20 MB.')
             source = archive.read(manifest['source'])
-            if kind == 'pdf':
-                pages, svg = validate_pdf_source(source), None
-            else:
-                svg, _ = import_dxf(SimpleUploadedFile('source.dxf', source))
-                pages = None
+            pages = validate_pdf_source(source)
             specifications = manifest.get('workbooks')
-            if not isinstance(specifications, list) or len(specifications) > MAX_MOTORS + 1:
+            if not isinstance(specifications, list) or len(specifications) > MAX_PLAN_BUTTONS + 1:
                 raise ValidationError('La lista de Excel del proyecto no es válida.')
             books = {}
             allowed = {'manifest.json', manifest['source']}
@@ -279,7 +266,7 @@ def import_project(upload, user):
             if set(names) != allowed:
                 raise ValidationError('El proyecto contiene archivos ajenos a su índice.')
             markers = manifest.get('markers')
-            if not isinstance(markers, list) or len(markers) > MAX_MOTORS:
+            if not isinstance(markers, list) or len(markers) > MAX_PLAN_BUTTONS:
                 raise ValidationError('La lista de botones del proyecto no es válida.')
             if manifest.get('listing') is not None and manifest['listing'] not in books:
                 raise ValidationError('No se encontró el listado asociado al plano.')
@@ -292,27 +279,19 @@ def import_project(upload, user):
                     raise ValidationError('La categoría de un botón no es válida.')
                 if marker.get('category_name') is not None and (not isinstance(marker['category_name'], str) or len(marker['category_name']) > 80):
                     raise ValidationError('El nombre de la categoría de un botón no es válido.')
-                if kind == 'pdf':
-                    if type(marker.get('page')) is not int or not 1 <= marker['page'] <= len(pages) or any(not finite(marker.get(key)) or not 0 <= marker[key] <= 1 for key in ('x', 'y')):
-                        raise ValidationError('Un botón PDF tiene página o coordenadas no válidas.')
-                    if not isinstance(marker.get('label', ''), str) or len(marker.get('label', '')) > 120:
-                        raise ValidationError('El nombre de un botón no es válido.')
-                else:
-                    if any(not finite(marker.get(key)) for key in ('x', 'y', 'z')) or not isinstance(marker.get('name'), str) or len(marker['name']) > 255 or not isinstance(marker.get('entity_key'), str) or len(marker['entity_key']) > 2048:
-                        raise ValidationError('Un botón DXF tiene datos no válidos.')
+                if type(marker.get('page')) is not int or not 1 <= marker['page'] <= len(pages) or any(not finite(marker.get(key)) or not 0 <= marker[key] <= 1 for key in ('x', 'y')):
+                    raise ValidationError('Un botón PDF tiene página o coordenadas no válidas.')
+                if not isinstance(marker.get('label', ''), str) or len(marker.get('label', '')) > 120:
+                    raise ValidationError('El nombre de un botón no es válido.')
     except ValidationError:
         raise
     except (BadZipFile, KeyError, ValueError, TypeError, OSError, RuntimeError, UnicodeError, EOFError, ZlibError) as exc:
         raise ValidationError('El proyecto está dañado o incompleto.') from exc
 
-    plan = model(name=name, size=len(source), imported_by=user)
-    if kind == 'pdf':
-        plan.pages = pages
-    else:
-        plan.svg = svg
+    plan = PdfPlan(name=name, size=len(source), imported_by=user, pages=pages)
     if manifest['version'] == 3:
         try:
-            return import_shared_project(plan, kind, source, svg, markers, books, manifest, user)
+            return import_shared_project(plan, source, markers, books, manifest, user)
         except Exception:
             if plan.source:
                 plan.source.delete(save=False)
@@ -334,20 +313,11 @@ def import_project(upload, user):
                     origin_uuid=books[item['workbook']]['origin'] if item.get('workbook') else None, is_motor=True, updated_by=user)
                 for index, item in enumerate(markers)
             ])
-            plan.source.save(f'plan.{kind}', SimpleUploadedFile(f'plan.{kind}', source), save=False)
+            plan.source.save('plan.pdf', SimpleUploadedFile('plan.pdf', source), save=False)
             plan.save()
-            if kind == 'pdf':
-                PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'], label=item.get('label', ''), workbook=documents[index]) for index, item in enumerate(markers)])
-            else:
-                a, b, c, d, e, f = map(float, ET.fromstring(svg).get('data-wcs-transform').split())
-                motors = []
-                for index, item in enumerate(markers):
-                    sx, sy = a*item['x']+c*item['y']+e, b*item['x']+d*item['y']+f
-                    key = item.get('workbook')
-                    motors.append(Motor(plan=plan, entity_key=item['entity_key'], name=item['name'], x=item['x'], y=item['y'], z=item['z'], svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0], workbook=documents[index], excel_sheets=books[key]['sheets'] if key else ['1']))
-                Motor.objects.bulk_create(motors)
+            PdfMarker.objects.bulk_create([PdfMarker(plan=plan, page=item['page'], x=item['x'], y=item['y'], label=item.get('label', ''), workbook=documents[index]) for index, item in enumerate(markers)])
     except Exception:
         if plan.source:
             plan.source.delete(save=False)
         raise
-    return kind, plan
+    return 'pdf', plan

@@ -113,11 +113,11 @@ def generate_all_workspaces():
     generate_alerts()
     if not settings.PLANOS_CLOUD_MODE:
         return
-    from .company_access import registration_companies
+    from .company_access import usable_companies
     from .models import CompanyAccount, CompanyAdminSetup, RELONCAVI_COMPANY_ID, UserProfile
     from .tenant_runtime import schema_name, using_schema, workspace_is_ready, workspace_user
 
-    companies = registration_companies().exclude(pk=RELONCAVI_COMPANY_ID)
+    companies = usable_companies().exclude(pk=RELONCAVI_COMPANY_ID)
     for company_id in companies.values_list('pk', flat=True):
         schema = schema_name(company_id)
         if not workspace_is_ready(schema):

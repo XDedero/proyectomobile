@@ -12,7 +12,7 @@ from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 from io import BytesIO
 
-from .dxf_service import find_motors
+from .dxf_service import find_motors, import_dxf
 from .models import Motor, Plan
 
 
@@ -36,6 +36,18 @@ def dxf_file(doc=None, name='plano.dxf', binary=False):
     doc.write(stream, fmt='bin' if binary else 'asc')
     data = stream.getvalue()
     return SimpleUploadedFile(name, data if binary else data.encode('utf-8'))
+
+
+def plan_fixture(client, kind, upload):
+    if kind == 'pdf':
+        return client.post(reverse('import_pdf'), {'file': upload})
+    user_id = client.session['_auth_user_id']
+    svg, motors = import_dxf(upload)
+    plan = Plan(imported_by_id=user_id, name=upload.name, size=upload.size, svg=svg)
+    plan.source.save(upload.name, upload, save=False)
+    plan.save()
+    Motor.objects.bulk_create([Motor(plan=plan, **motor) for motor in motors])
+    return client.get(reverse('plan_detail', args=[plan.pk]))
 
 
 def xlsx_file(name='mantenimiento.xlsx'):
@@ -131,11 +143,11 @@ class PlanWorkflowTests(TestCase):
         self.addCleanup(setting.disable)
 
     def import_plan(self, upload=None):
-        response = self.client.post(reverse('plan_import'), {'file': upload or dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content[:500])
+        response = plan_fixture(self.client, 'dxf', upload or dxf_file())
+        self.assertEqual(response.status_code, 200, response.content[:500])
         return response.json()
 
-    def test_import_renders_plan_and_extracts_real_motor_coordinates(self):
+    def test_archived_plan_displays_its_saved_motor_coordinates(self):
         data = self.import_plan()
         self.assertEqual(data['motor_count'], 2)
         self.assertEqual([(m['x'], m['y']) for m in data['motors']], [(10, 20), (70, 80)])
@@ -155,11 +167,9 @@ class PlanWorkflowTests(TestCase):
     def test_binary_dxf_and_uppercase_extension(self):
         self.assertEqual(self.import_plan(dxf_file(name='PLANO.DXF', binary=True))['motor_count'], 2)
 
-    def test_dwg_file_import_is_rejected_even_with_dxf_content(self):
-        doc = sample_drawing()
-        response = self.client.post(reverse('plan_import'), {'file': dxf_file(doc, name='plano_sala.dwg')})
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('Solo se admiten archivos .dxf.', response.json()['error'])
+    def test_dxf_upload_route_is_gone(self):
+        response = self.client.post('/api/plans/import/', {'file': dxf_file()})
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(Plan.objects.exists())
 
     def test_long_original_filenames_are_preserved_without_long_storage_paths(self):
@@ -178,23 +188,6 @@ class PlanWorkflowTests(TestCase):
         data = self.import_plan(dxf_file(doc))
         self.assertEqual(data['motors'], [])
         self.assertEqual(self.client.get(data['svg_url']).status_code, 200)
-
-    def test_rejects_wrong_extensions_and_files_renamed_dxf(self):
-        for name in ['plano.bin', 'plano.pdf', 'falso.dxf']:
-            with self.subTest(name=name):
-                response = self.client.post(reverse('plan_import'), {'file': SimpleUploadedFile(name, b'not a DXF')})
-                self.assertEqual(response.status_code, 400)
-                self.assertIn('error', response.json())
-        self.assertEqual(Plan.objects.count(), 0)
-
-    def test_empty_dxf_is_rejected(self):
-        response = self.client.post(reverse('plan_import'), {'file': dxf_file(ezdxf.new())})
-        self.assertEqual(response.status_code, 400)
-
-    @override_settings(PLAN_UPLOAD_MAX_BYTES=100)
-    def test_upload_size_limit_is_checked_on_server(self):
-        response = self.client.post(reverse('plan_import'), {'file': dxf_file()})
-        self.assertEqual(response.status_code, 400)
 
     def test_xlsx_is_persisted_to_selected_instance_and_can_be_downloaded(self):
         plan = self.import_plan()
@@ -255,10 +248,12 @@ class PlanWorkflowTests(TestCase):
         self.assertEqual(other.post(motor['assign_url'], {'file': xlsx_file()}).status_code, 401)
 
     def test_csrf_is_required_for_uploads(self):
+        from .test_pdf import pdf_upload
+
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.user)
         client.get(reverse('index'))
-        self.assertEqual(client.post(reverse('plan_import'), {'file': dxf_file()}).status_code, 403)
+        self.assertEqual(client.post(reverse('import_pdf'), {'file': pdf_upload()}).status_code, 403)
         token = client.cookies['csrftoken'].value
-        response = client.post(reverse('plan_import'), {'file': dxf_file()}, HTTP_X_CSRFTOKEN=token)
+        response = client.post(reverse('import_pdf'), {'file': pdf_upload()}, HTTP_X_CSRFTOKEN=token)
         self.assertEqual(response.status_code, 201)

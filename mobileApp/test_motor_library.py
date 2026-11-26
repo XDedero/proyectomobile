@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from .models import Motor, PdfMarker, PdfPlan, SavedMotor, WorkbookDocument
 from .motor_service import inspect_motor, read_origin, template_bytes, single_sheet
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 from .workbook_service import edited_document
 
 
@@ -93,7 +93,7 @@ class SavedMotorTests(TestCase):
         self.assertIsNone(self.cell(first['workbook']['id'], 'C39'))
 
     def test_detected_and_manually_added_dxf_motors_have_independent_empty_forms(self):
-        plan = self.client.post(reverse('plan_import'), {'file': dxf_file()}).json()
+        plan = plan_fixture(self.client, 'dxf', dxf_file()).json()
         ids = [motor['excel']['id'] for motor in plan['motors']]
         self.assertEqual(len(set(ids)), 1)
         reference = plan['motors'][0]

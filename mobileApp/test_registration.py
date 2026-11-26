@@ -1,6 +1,8 @@
-"""Approval, unique Chilean identities, account editing and session changes."""
+"""Account creation, Chilean identities and personal password changes."""
 from importlib import import_module
+from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -18,7 +20,7 @@ from .models import (Company, CompanyAccount, CompanyAdminSetup, CompanyBrand, C
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
-class RegistrationTests(TestCase):
+class AccountManagementTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = get_user_model().objects.create_superuser('admin-registration', password='Zorro!Luna2026')
@@ -42,33 +44,8 @@ class RegistrationTests(TestCase):
         return user
 
     def payload(self, **changes):
-        return {'first_name': 'María José', 'last_name': 'Muñoz Ochoa', 'rut': '12345678-5',
-                'password': 'Cascada!Sur2026', 'confirm_password': 'Cascada!Sur2026', **changes}
-
-    def submit(self, **changes):
-        response = self.post('request_registration', self.payload(**changes))
-        self.assertEqual(response.status_code, 201, response.content)
-        return RegistrationRequest.objects.get(pk=response.json()['id'])
-
-    def decide(self, item, action):
-        self.client.force_login(self.admin)
-        return self.post('manage_registration', {'id': item.pk, 'action': action})
-
-    def test_company_list_only_includes_companies_available_for_registration(self):
-        Company.objects.create(name='Taller Sur', slug='taller-sur', drive_ready=True)
-        Company.objects.create(name='Taller Norte', slug='taller-norte', status=Company.Status.SUSPENDED)
-        response = self.client.get(reverse('registration_companies'))
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('no-store', response['Cache-Control'])
-        self.assertEqual(response.json(), {'companies': [{'id': str(RELONCAVI_COMPANY_ID), 'name': 'Reloncaví'}]})
-
-        Company.objects.filter(pk=RELONCAVI_COMPANY_ID).update(drive_ready=False)
-        self.assertEqual(self.client.get(reverse('registration_companies')).json(), {'companies': []})
-
-    def test_registration_form_renders_the_company_selector(self):
-        response = self.client.get(reverse('index'))
-        self.assertContains(response, 'id="registrationCompany"')
-        self.assertContains(response, 'name="company_id"')
+        return {'action': 'create', 'first_name': 'María José', 'last_name': 'Muñoz Ochoa', 'rut': '12345678-5',
+                'password': 'Cascada!Sur2026', 'role': 'worker', **changes}
 
     def verified_company(self, slug, admin_rut):
         company = Company.objects.create(name=slug, slug=slug, drive_ready=True)
@@ -78,36 +55,103 @@ class RegistrationTests(TestCase):
                                          password_hash=make_password('Partida!Sur2026'))
         return company
 
-    def test_company_access_through_global_login_and_company_registration(self):
+    def test_only_primary_can_create_accounts_and_users_sign_in_with_rut(self):
+        url = reverse('management_panel')
+        self.assertNotContains(self.client.get(reverse('index')), 'Solicitar registro')
+        for path in ('/api/auth/register/', '/api/auth/register/companies/', '/api/administration/requests/pending/'):
+            self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.post('manage_user', self.payload()).status_code, 401)
+        self.client.force_login(self.worker)
+        self.assertEqual(self.post('manage_user', self.payload()).status_code, 403)
+        self.client.force_login(self.ordinary_administrator())
+        self.assertNotContains(self.client.get(url), 'id="newUser"')
+        self.assertEqual(self.post('manage_user', self.payload()).status_code, 403)
+        self.client.force_login(self.primary_administrator())
+        panel = self.client.get(url)
+        self.assertContains(panel, 'id="newUser"')
+        self.assertNotContains(panel, 'Solicitudes de registro')
+        for change in ({'rut': '12345678-9'}, {'first_name': ''}, {'password': '12345678'}, {'role': 'root'}):
+            self.assertEqual(self.post('manage_user', self.payload(**change)).status_code, 400)
+        for rut, role in (('12345678-5', 'worker'), ('22222222-2', 'viewer'), ('33333333-3', 'administrator')):
+            response = self.post('manage_user', self.payload(rut=rut, role=role))
+            self.assertEqual(response.status_code, 201, response.content)
+            self.assertNotIn('password_hash', response.json()['user'])
+            profile = UserProfile.objects.get(rut=rut)
+            self.assertNotEqual(profile.user.password, self.payload()['password'])
+            self.assertEqual(profile.role, role)
+            self.assertTrue(profile.user.check_password(self.payload()['password']))
+            other = Client()
+            self.assertEqual(self.post('auth_login', {'rut': profile.user.username, 'password': self.payload()['password']}, other).status_code, 401)
+            login = self.post('auth_login', {'rut': rut, 'password': self.payload()['password']}, other)
+            self.assertEqual(login.status_code, 200, login.content)
+            self.assertEqual(login.json()['user']['role'], role)
+            self.assertFalse(login.json()['user']['primary_administrator'])
+        self.assertEqual(self.post('manage_user', self.payload(rut='12.345.678-5')).status_code, 400)
+        self.assertNotIn('requests', self.client.get(reverse('management_data')).json())
+
+    def test_personal_password_change_requires_current_key_and_keeps_the_current_session(self):
+        user = self.worker
+        url = reverse('change_password')
+        self.assertRedirects(self.client.get(url), reverse('index'))
+        old = 'Zorro!Luna2026'
+        new = 'Acequia!Norte2026'
+        stale = Client()
+        stale.force_login(user)
+        self.client.force_login(user)
+        page = self.client.get(url)
+        self.assertContains(page, 'Contraseña actual')
+        values = {'current_password': old, 'new_password': new, 'confirm_password': new}
+        self.assertEqual(self.client.post(url, {**values, 'current_password': 'incorrecta'}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**values, 'confirm_password': 'diferente'}).status_code, 400)
+        self.assertRedirects(self.client.post(url, values), url)
+        self.assertEqual(self.client.get(reverse('auth_session')).json()['user']['id'], user.pk)
+        self.assertIsNone(stale.get(reverse('auth_session')).json()['user'])
+        fresh = Client()
+        self.assertEqual(self.post('auth_login', {'rut': user.app_profile.rut, 'password': old}, fresh).status_code, 401)
+        self.assertEqual(self.post('auth_login', {'rut': user.app_profile.rut, 'password': new}, fresh).status_code, 200)
+
+    def test_account_creation_and_password_change_require_csrf(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.primary_administrator())
+        client.get(reverse('index'))
+        self.assertEqual(self.post('manage_user', self.payload(), client).status_code, 403)
+        self.assertEqual(client.post(reverse('change_password'), {}).status_code, 403)
+
+    @override_settings(PLANOS_DATABASE_SCHEMA='central')
+    def test_company_principal_creates_accounts_in_its_company_and_members_change_password(self):
+        from .tenant_runtime import Workspace
+
         company = self.verified_company('pitrufquen', '22222222-2')
-        foreign = self.verified_company('taller-sur', '33333333-3')
-        listed = self.client.get(reverse('registration_companies')).json()['companies']
-        self.assertEqual({row['id'] for row in listed}, {str(RELONCAVI_COMPANY_ID), str(company.pk), str(foreign.pk)})
-        item = self.submit(company_id=str(company.pk))
-        other = self.submit(company_id=str(foreign.pk), rut='44444444-4', first_name='Solicitud externa')
-        credentials = {'username': '22.222.222-2', 'password': 'Partida!Sur2026'}
-        self.assertEqual(self.post('auth_login', {**credentials, 'password': 'incorrecta'}).status_code, 401)
-        login = self.post('auth_login', credentials)
-        self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.json()['company_url'], reverse('company_home'))
-        self.assertIsNone(login.json()['user'])
-        portal = self.client.get(reverse('company_home'))
-        self.assertContains(portal, item.rut)
-        self.assertNotContains(portal, other.rut)
-        self.assertEqual(self.client.get(reverse('list_pdf_plans')).status_code, 401)
-        denied = self.client.post(reverse('company_home'), {'id': other.pk, 'action': 'approve', 'role': 'worker'})
-        self.assertEqual(denied.status_code, 400)
-        approved = self.client.post(reverse('company_home'), {'id': item.pk, 'action': 'approve', 'role': 'worker'})
-        self.assertRedirects(approved, reverse('company_home'))
-        self.assertTrue(CompanyAccount.objects.filter(rut=item.rut, company=company, role='worker').exists())
-        worker = Client()
-        self.assertEqual(self.post('auth_login', {'username': item.rut, 'password': 'Cascada!Sur2026'}, worker).json()['company_url'],
-                         reverse('company_home'))
-        self.assertEqual(worker.post(reverse('company_home'), {'id': other.pk, 'action': 'reject'}).status_code, 403)
-        company.status = Company.Status.SUSPENDED
-        company.save(update_fields=['status'])
-        self.assertIsNone(self.client.get(reverse('auth_session')).json()['company_url'])
-        self.assertNotIn(str(company.pk), {row['id'] for row in self.client.get(reverse('registration_companies')).json()['companies']})
+        other = self.verified_company('valdivia', '44444444-4')
+        CompanyAccount.objects.create(company=other, rut='12345678-5', first_name='Rosa', last_name='Sur',
+                                      password_hash=make_password('Partida!Sur2026'), role='viewer')
+        with patch('mobileApp.tenant_runtime.resolve_workspace', return_value=(Workspace('', str(company.pk), {}, {}), False)), \
+             patch('mobileApp.tenant_runtime.using_schema', side_effect=lambda _: nullcontext()), \
+             patch('mobileApp.accounts.local_user_for_rut', return_value=None):
+            self.assertEqual(self.post('auth_login', {'rut': '22.222.222-2', 'password': 'Partida!Sur2026'}).status_code, 200)
+            self.assertContains(self.client.get(reverse('management_panel')), 'id="newUser"')
+            self.assertEqual(self.post('manage_user', self.payload()).status_code, 400)
+            created = self.post('manage_user', self.payload(rut='33333333-3', role='administrator', company_id=str(other.pk)))
+            self.assertEqual(created.status_code, 201, created.content)
+            member = CompanyAccount.objects.get(rut='33333333-3')
+            self.assertEqual(member.company_id, company.pk)
+            users = self.client.get(reverse('management_data')).json()['users']
+            self.assertEqual({user['rut'] for user in users}, {'22222222-2', '33333333-3'})
+            member_client = Client()
+            credentials = {'rut': member.rut, 'password': self.payload()['password']}
+            self.assertEqual(self.post('auth_login', credentials, member_client).status_code, 200)
+            self.assertNotContains(member_client.get(reverse('management_panel')), 'id="newUser"')
+            self.assertEqual(self.post('manage_user', self.payload(), member_client).status_code, 403)
+            new = 'Carretera!Norte2026'
+            url = reverse('change_password')
+            self.assertRedirects(member_client.post(url, {
+                'current_password': credentials['password'], 'new_password': new, 'confirm_password': new,
+            }), url)
+            self.assertEqual(member_client.get(reverse('auth_session')).json()['user']['rut'], member.rut)
+            member.refresh_from_db()
+            self.assertTrue(check_password(new, member.password_hash))
+            self.assertEqual(self.post('auth_login', credentials, Client()).status_code, 401)
+            self.assertEqual(self.post('auth_login', {**credentials, 'password': new}, Client()).status_code, 200)
 
     def test_only_the_general_admin_can_edit_its_brand(self):
         url = reverse('company_profile')
@@ -163,31 +207,6 @@ class RegistrationTests(TestCase):
         self.assertEqual(legacy_appearance['company_identity'], '')
         self.assertEqual(legacy_appearance['company_theme'], palette('#2368a7'))
 
-    def test_submission_stores_the_selected_company_and_rechecks_availability(self):
-        pending = Company.objects.create(name='Taller Sur', slug='taller-sur')
-        for value in (str(pending.pk), '', None, 1, 'empresa-inválida'):
-            with self.subTest(value=value):
-                self.assertEqual(self.post('request_registration', self.payload(company_id=value)).status_code, 400)
-        self.assertFalse(RegistrationRequest.objects.exists())
-
-        item = self.submit(company_id=str(RELONCAVI_COMPANY_ID))
-        self.assertEqual(item.company_id, RELONCAVI_COMPANY_ID)
-
-        Company.objects.filter(pk=RELONCAVI_COMPANY_ID).update(status=Company.Status.SUSPENDED)
-        payload = self.payload(company_id=str(RELONCAVI_COMPANY_ID), rut='22222222-2')
-        self.assertEqual(self.post('request_registration', payload).status_code, 400)
-        self.assertEqual(RegistrationRequest.objects.count(), 1)
-
-    def test_legacy_admin_cannot_list_or_review_another_company_request(self):
-        other = Company.objects.create(name='Taller Sur', slug='taller-sur')
-        request = RegistrationRequest.objects.create(
-            company=other, first_name='María', last_name='Muñoz', rut='12345678-5',
-        )
-        self.client.force_login(self.admin)
-        self.assertEqual(self.client.get(reverse('pending_registrations')).json(), {'requests': []})
-        self.assertEqual(self.post('manage_registration', {'id': request.pk, 'action': 'approve'}).status_code, 404)
-        self.assertTrue(RegistrationRequest.objects.filter(pk=request.pk, status='pending').exists())
-
     def test_second_company_cannot_activate_while_runtime_permissions_are_global(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
             Company.objects.create(name='Taller Sur', slug='taller-sur', status=Company.Status.ACTIVE, drive_ready=True)
@@ -200,96 +219,8 @@ class RegistrationTests(TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValidationError):
                 normalize_rut(invalid)
 
-    def test_registration_requires_rut_without_dots_and_with_hyphen(self):
-        for rut in ('12.345.678-5', '123456785', '012345678-5', '1２345678-5'):
-            with self.subTest(rut=rut):
-                self.assertEqual(self.post('request_registration', self.payload(rut=rut)).status_code, 400)
-        self.assertFalse(RegistrationRequest.objects.exists())
-        self.assertEqual(normalize_rut('10000013-k', strict=True), '10000013-K')
-        self.submit()
-
-    def test_submission_hashes_password_and_never_creates_or_logs_in_user(self):
-        item = self.submit()
-        self.assertEqual(item.rut, '12345678-5')
-        self.assertNotEqual(item.password_hash, 'Cascada!Sur2026')
-        self.assertTrue(check_password('Cascada!Sur2026', item.password_hash))
-        self.assertFalse(get_user_model().objects.filter(username=item.rut).exists())
-        self.assertIsNone(self.client.get(reverse('auth_session')).json()['user'])
-        self.assertEqual(self.post('auth_login', {'username': item.rut, 'password': 'Cascada!Sur2026'}).status_code, 401)
-
-    def test_duplicate_pending_and_registered_ruts_are_rejected(self):
-        self.submit()
-        response = self.post('request_registration', self.payload(rut='12345678-5'))
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(RegistrationRequest.objects.count(), 1)
-        self.assertEqual(self.post('request_registration', self.payload(rut='11111111-1')).status_code, 400)
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            UserProfile.objects.create(user=self.admin, rut='11.111.111-1')
-
-    def test_invalid_names_password_confirmation_and_existing_password_policy(self):
-        for changes in ({'first_name': ''}, {'last_name': '1234'}, {'rut': '12.345.678-0'},
-                        {'password': 'abc', 'confirm_password': 'abc'},
-                        {'password': '12345678', 'confirm_password': '12345678'}, {'confirm_password': 'distinta'}):
-            with self.subTest(changes=changes):
-                self.assertEqual(self.post('request_registration', self.payload(**changes)).status_code, 400)
-        self.assertEqual(RegistrationRequest.objects.count(), 0)
-
-    def test_only_admin_can_review_or_edit_users_and_password_hash_is_private(self):
-        item = self.submit()
-        for actor in (None, self.worker):
-            if actor:
-                self.client.force_login(actor)
-            expected = 403 if actor else 401
-            self.assertEqual(self.post('manage_registration', {'id': item.pk, 'action': 'approve'}).status_code, expected)
-            self.assertEqual(self.post('manage_user', {'id': self.worker.pk, 'action': 'delete'}).status_code, expected)
-            self.assertEqual(self.client.get(reverse('pending_registrations')).status_code, expected)
-        self.client.force_login(self.admin)
-        data = self.client.get(reverse('management_data')).json()
-        self.assertEqual(data['requests'][0]['status'], 'pending')
-        self.assertNotIn('password', str(data))
-        self.assertEqual(next(user for user in data['users'] if user['id'] == self.worker.pk)['rut'], '11111111-1')
-
-    def test_approval_creates_viewer_who_can_login_with_rut_and_cannot_edit(self):
-        item = self.submit()
-        response = self.decide(item, 'approve')
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertFalse(RegistrationRequest.objects.filter(pk=item.pk).exists())
-        self.assertEqual(UserProfile.objects.get(rut=item.rut).role, 'viewer')
-        client = Client()
-        response = self.post('auth_login', {'username': '12.345.678-5', 'password': 'Cascada!Sur2026'}, client)
-        self.assertEqual(response.status_code, 200, response.content)
-        user = response.json()['user']
-        self.assertEqual(user['role'], 'viewer')
-        self.assertTrue(user['permissions']['can_import'])
-        self.assertFalse(user['permissions']['can_administer'])
-        self.assertFalse(user['permissions']['can_save_plan'])
-        self.assertEqual(self.decide(item, 'approve').status_code, 404)
-        self.assertEqual(self.post('request_registration', self.payload()).status_code, 400)
-
-    def test_rejection_deletes_request_and_credential_and_allows_new_request(self):
-        item = self.submit()
-        self.assertEqual(self.decide(item, 'reject').status_code, 200)
-        self.assertFalse(RegistrationRequest.objects.filter(pk=item.pk).exists())
-        self.assertFalse(UserProfile.objects.filter(rut=item.rut).exists())
-        self.assertEqual(self.client.get(reverse('management_data')).json()['requests'], [])
-        self.submit()
-        self.assertEqual(RegistrationRequest.objects.count(), 1)
-
-    def test_administration_lists_all_users_and_only_pending_requests(self):
-        inactive = get_user_model().objects.create_user('cuenta-inactiva', is_active=False)
-        pending = self.submit()
-        for status in ('approved', 'rejected'):
-            RegistrationRequest.objects.create(first_name='Solicitud', last_name='Resuelta',
-                                                rut='22222222-2', status=status)
-        self.client.force_login(self.admin)
-        data = self.client.get(reverse('management_data')).json()
-        self.assertEqual({user['id'] for user in data['users']},
-                         set(get_user_model().objects.values_list('pk', flat=True)))
-        self.assertIn(inactive.pk, [user['id'] for user in data['users']])
-        self.assertEqual([item['id'] for item in data['requests']], [pending.pk])
-
     def test_cleanup_removes_resolved_requests_and_preserves_users_and_pending(self):
-        pending = self.submit()
+        pending = RegistrationRequest.objects.create(first_name='Solicitud', last_name='Pendiente', rut='12345678-5')
         for status in ('approved', 'rejected'):
             RegistrationRequest.objects.create(first_name='Solicitud', last_name='Resuelta',
                                                 rut='22222222-2', status=status, user=self.worker)
@@ -297,76 +228,6 @@ class RegistrationTests(TestCase):
         cleanup(apps, SimpleNamespace(connection=connection))
         self.assertEqual(list(RegistrationRequest.objects.values_list('pk', flat=True)), [pending.pk])
         self.assertEqual(get_user_model().objects.count(), 2)
-
-    def test_approval_rechecks_identity_uniqueness(self):
-        item = self.submit()
-        user = get_user_model().objects.create_user('conflicto')
-        UserProfile.objects.create(user=user, rut=item.rut)
-        self.assertEqual(self.decide(item, 'approve').status_code, 400)
-        item.refresh_from_db()
-        self.assertEqual(item.status, 'pending')
-        self.assertIsNone(item.user_id)
-
-    def test_pending_requests_reach_primary_and_ordinary_administrators(self):
-        primary, ordinary = self.primary_administrator(), self.ordinary_administrator()
-        item = self.submit()
-        clients = []
-        for administrator in (primary, ordinary):
-            client = Client()
-            client.force_login(administrator)
-            clients.append(client)
-            response = client.get(reverse('management_data'))
-            self.assertEqual(response.status_code, 200)
-            self.assertIn('no-store', response.headers['Cache-Control'])
-            data = response.json()
-            self.assertTrue(data['can_manage_administrators'])
-            self.assertEqual([request['id'] for request in data['requests']], [item.pk])
-            self.assertEqual(data['requests'][0]['name'], 'María José Muñoz Ochoa')
-            self.assertNotIn('password_hash', data['requests'][0])
-            pending = client.get(reverse('pending_registrations'))
-            self.assertIn('no-store', pending.headers['Cache-Control'])
-            self.assertEqual(pending.json(), {'requests': data['requests']})
-            panel = client.get(reverse('management_panel'))
-            self.assertIn('no-store', panel.headers['Cache-Control'])
-            self.assertEqual(panel.context['pending_requests'], data['requests'])
-            self.assertNotContains(panel, item.password_hash)
-            self.assertContains(client.get(reverse('admin:index')), reverse('management_panel'))
-        decision = {'id': item.pk, 'action': 'approve', 'role': 'worker'}
-        self.assertEqual(self.post('manage_registration', decision, clients[1]).status_code, 200)
-        self.assertEqual(clients[0].get(reverse('pending_registrations')).json()['requests'], [])
-        self.assertEqual(self.post('manage_registration', decision, clients[0]).status_code, 404)
-        rejected = self.submit(rut='22222222-2')
-        self.assertEqual(self.post('manage_registration', {'id': rejected.pk, 'action': 'reject'}, clients[1]).status_code, 200)
-        self.assertFalse(UserProfile.objects.filter(rut=rejected.rut).exists())
-        self.assertEqual(clients[0].get(reverse('pending_registrations')).json()['requests'], [])
-
-    def test_every_administrator_can_approve_with_any_application_role(self):
-        for administrator in (self.admin, self.primary_administrator(), self.ordinary_administrator()):
-            client = Client()
-            client.force_login(administrator)
-            for role in UserProfile.Role.values:
-                with self.subTest(administrator=administrator.username, role=role):
-                    item = self.submit(rut=next_test_rut())
-                    response = self.post('manage_registration', {'id': item.pk, 'action': 'approve', 'role': role}, client)
-                    self.assertEqual(response.status_code, 200, response.content)
-                    profile = UserProfile.objects.select_related('user').get(rut=item.rut)
-                    self.assertEqual(profile.role, role)
-                    self.assertFalse(profile.is_primary_administrator)
-                    self.assertTrue(profile.user.check_password('Cascada!Sur2026'))
-                    login = self.post('auth_login', {'username': item.rut, 'password': 'Cascada!Sur2026'}, Client())
-                    self.assertEqual(login.status_code, 200, login.content)
-                    self.assertEqual(login.json()['user']['permissions']['can_administer'], role == 'administrator')
-                    self.assertFalse(RegistrationRequest.objects.filter(pk=item.pk).exists())
-
-    def test_invalid_approval_role_preserves_pending_request_and_does_not_create_account(self):
-        item = self.submit()
-        self.client.force_login(self.ordinary_administrator())
-        for role in ('superusuario', '', None):
-            with self.subTest(role=role):
-                response = self.post('manage_registration', {'id': item.pk, 'action': 'approve', 'role': role})
-                self.assertEqual(response.status_code, 400)
-                self.assertTrue(RegistrationRequest.objects.filter(pk=item.pk, status='pending').exists())
-                self.assertFalse(UserProfile.objects.filter(rut=item.rut).exists())
 
     def test_role_promotion_invalidates_prior_sessions_and_requires_login(self):
         client = Client()
@@ -376,7 +237,7 @@ class RegistrationTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()['requires_login'])
         self.assertIsNone(client.get(reverse('auth_session')).json()['user'])
-        response = self.post('auth_login', {'username': self.worker.username, 'password': 'Zorro!Luna2026'}, client)
+        response = self.post('auth_login', {'rut': self.worker.app_profile.rut, 'password': 'Zorro!Luna2026'}, client)
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()['user']['permissions']['can_administer'])
         self.assertEqual(client.get(reverse('management_data')).status_code, 200)
@@ -426,7 +287,7 @@ class RegistrationTests(TestCase):
         self.assertEqual(self.admin.app_profile.role, 'administrator')
         self.assertTrue(self.admin.check_password('Bosque!Invierno2026'))
         self.assertIsNone(self.client.get(reverse('auth_session')).json()['user'])
-        login = self.post('auth_login', {'username': self.admin.username, 'password': 'Bosque!Invierno2026'})
+        login = self.post('auth_login', {'rut': self.admin.app_profile.rut, 'password': 'Bosque!Invierno2026'})
         self.assertEqual(login.status_code, 200)
         self.assertTrue(login.json()['user']['permissions']['can_administer'])
 
@@ -456,9 +317,9 @@ class RegistrationTests(TestCase):
         self.assertFalse(self.admin.is_superuser)
 
     def test_editing_rut_preserves_stable_plan_ownership_and_changes_public_login(self):
-        item = self.submit()
-        self.assertEqual(self.decide(item, 'approve').status_code, 200)
-        user = UserProfile.objects.get(rut=item.rut).user
+        self.client.force_login(self.primary_administrator())
+        self.assertEqual(self.post('manage_user', self.payload()).status_code, 201)
+        user = UserProfile.objects.get(rut=self.payload()['rut']).user
         username = user.username
         plan = PdfPlan.objects.create(name='Nube', size=1, owner_username=username,
                                       cloud_origin='drive-fixture', imported_by=user)
@@ -485,17 +346,6 @@ class RegistrationTests(TestCase):
         self.assertEqual(self.post('manage_user', {'id': self.admin.pk, 'action': 'delete'}).status_code, 400)
         self.assertEqual(self.post('manage_user', {'id': self.worker.pk, 'action': 'delete'}).status_code, 200)
         self.assertFalse(get_user_model().objects.filter(pk=self.worker.pk).exists())
-
-    def test_registration_requires_csrf_and_supported_methods(self):
-        client = Client(enforce_csrf_checks=True)
-        client.get(reverse('index'))
-        self.assertEqual(self.post('request_registration', self.payload(), client).status_code, 403)
-        token = client.cookies['csrftoken'].value
-        response = client.post(reverse('request_registration'), self.payload(), content_type='application/json', HTTP_X_CSRFTOKEN=token)
-        self.assertEqual(response.status_code, 201, response.content)
-        self.assertEqual(self.client.get(reverse('request_registration')).status_code, 405)
-        for payload in ('{', '[]', '{}'):
-            self.assertEqual(self.client.post(reverse('request_registration'), payload, content_type='application/json').status_code, 400)
 
     def test_migration_assigns_unique_valid_test_ruts_without_changing_passwords(self):
         seed = import_module('mobileApp.migrations.0028_registration_accounts').seed_existing_accounts

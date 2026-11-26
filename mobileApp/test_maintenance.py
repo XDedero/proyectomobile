@@ -21,7 +21,7 @@ from .models import ButtonCategory, MaintenanceNotification, PdfMarker, SavedPie
 from .motor_service import template_bytes
 from .project_service import import_project
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -48,9 +48,8 @@ class MaintenanceTests(TestCase):
         return (client or self.client).post(url, data or {}, content_type='application/json')
 
     def plan(self, kind):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'),
-                                    {'file': pdf_upload() if kind == 'pdf' else dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content)
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content)
         return response.json()
 
     def button_payload(self, kind, maintenance=None, category=None):

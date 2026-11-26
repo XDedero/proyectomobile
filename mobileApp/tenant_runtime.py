@@ -205,7 +205,7 @@ class CompanyWorkspaceMiddleware:
 
     central_paths = frozenset({
         '/api/auth/login/', '/api/auth/logout/', '/empresa/', '/empresa/salir/',
-        '/api/auth/register/', '/api/auth/register/companies/', '/marca/logo.png', '/manifest.webmanifest',
+        '/marca/logo.png', '/manifest.webmanifest',
         '/service-worker.js', '/healthz/',
     })
 
@@ -222,7 +222,7 @@ class CompanyWorkspaceMiddleware:
         if account is None:
             return self.get_response(request)
         company, _ = resolve_workspace(account, include_brand=request.path in (
-            '/', '/administracion/', '/api/auth/session/', '/notificaciones/',
+            '/', '/administracion/', '/api/auth/session/', '/notificaciones/', '/mi-cuenta/contrasena/',
         ))
         if company is None:
             return self.get_response(request)

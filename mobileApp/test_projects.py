@@ -18,7 +18,7 @@ from openpyxl import load_workbook
 
 from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload, excel_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 class ProjectTests(TestCase):
@@ -41,8 +41,8 @@ class ProjectTests(TestCase):
         return self.client.post(url, json.dumps(data or {}), content_type='application/json')
 
     def plan(self, kind):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'), {'file': pdf_upload() if kind == 'pdf' else dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content[:400])
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content[:400])
         return response.json()
 
     def document(self):
@@ -801,9 +801,11 @@ class ProjectTests(TestCase):
                 self.assertNotEqual(copied.sheet_name, source.sheet_name)
                 portable = self.download(plan['export_project_url'])
                 restored = self.client.post(reverse('upload_project'), {'file':SimpleUploadedFile('Copia.planproj',portable)})
-                self.assertEqual(restored.status_code,201,restored.content)
-                buttons = restored.json()['plan']['markers' if kind == 'pdf' else 'motors']
-                self.assertEqual(buttons[-1]['button_scale'],.25)
+                if kind == 'pdf':
+                    self.assertEqual(restored.status_code, 201, restored.content)
+                    self.assertEqual(restored.json()['plan']['markers'][-1]['button_scale'], .25)
+                else:
+                    self.assertEqual(restored.status_code, 400, restored.content)
 
     def test_pdf_project_round_trip_keeps_pages_positions_listing_and_shared_xlsx_bytes(self):
         original, content = self.bundle('pdf')
@@ -854,18 +856,13 @@ class ProjectTests(TestCase):
             finally:
                 book.close()
 
-    def test_dxf_round_trip_preserves_motor_world_positions_and_attachments(self):
+    def test_dxf_project_import_is_rejected_and_original_is_preserved(self):
         original, content = self.bundle('dxf')
-        restored_response = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('cad.planproj', content)})
-        self.assertEqual(restored_response.status_code, 201, restored_response.content[:400])
-        restored = restored_response.json()['plan']
-        self.assertEqual([(motor['name'], motor['x'], motor['y'], motor['z']) for motor in restored['motors']], [(motor['name'], motor['x'], motor['y'], motor['z']) for motor in original['motors']])
-        ids = {motor['excel']['id'] for motor in restored['motors']}
-        self.assertEqual(len(ids), 1)
-        self.assertIn(restored['listing']['id'], ids)
-        for motor in restored['motors']:
-            self.assertEqual(self.download(motor['excel']['url']), self.download(restored['listing']['download_url']))
-        self.assertEqual(self.download(restored['export_project_url'])[:2], b'PK')
+        response = self.client.post(reverse('upload_project'), {'file': SimpleUploadedFile('cad.planproj', content)})
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('plano PDF', response.json()['error'])
+        self.assertEqual(Plan.objects.count(), 1)
+        self.assertEqual(self.client.get(original['detail_url']).status_code, 200)
 
     def test_saved_snapshot_contains_bytes_from_save_including_excel_updates(self):
         plan, _ = self.bundle('pdf')

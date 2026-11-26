@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+TEST_RUTS = {'empleado': '11111111-1', 'admin': '22222222-2', 'lector': '33333333-3'}
 
 
 def format_workbook_fixture(path):
@@ -90,21 +91,24 @@ def serve():
     call_command('migrate', verbosity=0)
     from django.contrib.auth import get_user_model
     from django.contrib.auth.models import Group
-    from mobileApp.models import ButtonCategory
+    from mobileApp.models import ButtonCategory, UserProfile
     ButtonCategory.objects.update(maintenance_required=False)
     User = get_user_model()
     editor = User.objects.create_user('empleado', password='PruebaDXF!')
     editor.groups.add(Group.objects.get(name='Editores de motores'))
     reader = User.objects.create_user('lector', password='PruebaDXF!')
     reader.groups.add(Group.objects.get(name='Lectores de planos'))
-    User.objects.create_superuser('admin', password='PruebaDXF!')
+    admin = User.objects.create_superuser('admin', password='PruebaDXF!')
+    for user, role in ((editor, UserProfile.Role.WORKER), (reader, UserProfile.Role.VIEWER),
+                       (admin, UserProfile.Role.ADMINISTRATOR)):
+        UserProfile.objects.update_or_create(user=user, defaults={'rut': TEST_RUTS[user.username], 'role': role})
     call_command('runserver', f"127.0.0.1:{os.environ['DXF_BROWSER_TEST_PORT']}", use_reloader=False)
 
 
 def login(page, username='empleado', open_import=True):
     page.wait_for_function('appState.authReady')
     if page.locator('#loginForm').is_visible():
-        page.locator('#usernameInput').fill(username)
+        page.locator('#usernameInput').fill(TEST_RUTS.get(username, username))
         page.locator('#passwordInput').fill('PruebaDXF!')
         page.locator('#loginForm button[type=submit]').click()
     if open_import:

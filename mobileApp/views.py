@@ -7,7 +7,7 @@ from xml.etree import ElementTree
 from zipfile import ZipFile
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, login as django_login, logout as django_logout
+from django.contrib.auth import login as django_login, logout as django_logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -20,7 +20,6 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import load_workbook
 
-from .dxf_service import import_dxf
 from .access import api_permissions, capabilities, visible_plans
 from .models import Motor, Plan, WorkbookDocument, SavedMotor
 
@@ -78,40 +77,37 @@ def auth_login(request):
         data = json.loads(request.body)
     except (ValueError, UnicodeError):
         return JsonResponse({'error': 'Solicitud de acceso no válida.'}, status=400)
-    if not isinstance(data, dict) or not all(isinstance(data.get(key), str) for key in ('username', 'password')):
-        return JsonResponse({'error': 'Ingrese su nombre de usuario y contraseña.'}, status=400)
-    from .accounts import normalize_rut
-    from .models import UserProfile
+    if not isinstance(data, dict):
+        return JsonResponse({'error': 'Ingrese su RUT y contraseña.'}, status=400)
+    identifier = data.get('rut', data.get('username'))
+    password = data.get('password')
+    if not isinstance(identifier, str) or not identifier.strip() or not isinstance(password, str):
+        return JsonResponse({'error': 'Ingrese su RUT y contraseña.'}, status=400)
+    from .accounts import local_user_for_rut, normalize_rut
     from . import shared_accounts
     from .cloud_projects import CloudUnavailable
-    identifier = data['username'].strip()
     try:
         rut = normalize_rut(identifier)
     except ValidationError:
-        rut = None
-    profile = UserProfile.objects.select_related('user').filter(rut=rut).first() if rut else None
-    local_user = profile.user if profile else get_user_model().objects.select_related('app_profile').filter(
-        username=identifier).first()
+        return JsonResponse({'error': 'Ingrese un RUT válido con su dígito verificador.'}, status=401)
+    local_user = local_user_for_rut(rut)
     local_profile = getattr(local_user, 'app_profile', None)
-    if local_user is None and rut:
+    if local_user is None:
         from .company_access import sign_in
-        if sign_in(request, rut, data['password']):
+        if sign_in(request, rut, password):
             return JsonResponse(session_data(request))
     # Legacy accounts, including the primary admin, have local credentials.
     # Only shared or unknown identities need a cloud refresh before authentication.
     if shared_accounts.enabled() and (local_user is None or (local_profile and local_profile.cloud_id)):
         try:
-            shared_accounts.sync_login(identifier)
+            local_user = shared_accounts.sync_login(rut)
         except (CloudUnavailable, ValidationError) as exc:
             return JsonResponse({'error': str(exc)}, status=503)
-    data['username'] = identifier
-    if rut:
-        profile = UserProfile.objects.select_related('user').filter(rut=rut).first()
-        if profile:
-            data['username'] = profile.user.username
-    form = AuthenticationForm(request, data=data)
+    if local_user is None:
+        return JsonResponse({'error': 'RUT o contraseña incorrectos, o cuenta inactiva.'}, status=401)
+    form = AuthenticationForm(request, data={'username': local_user.username, 'password': password})
     if not form.is_valid():
-        return JsonResponse({'error': 'Usuario o contraseña incorrectos, o cuenta inactiva.'}, status=401)
+        return JsonResponse({'error': 'RUT o contraseña incorrectos, o cuenta inactiva.'}, status=401)
     from .company_access import SESSION_KEY
     request.session.pop(SESSION_KEY, None)
     django_login(request, form.get_user())
@@ -197,32 +193,6 @@ def plan_data(plan, detail=False):
 @api_permissions()
 def plans(request):
     return JsonResponse({'plans': [plan_data(plan) for plan in visible_plans(request.user, Plan.objects.defer('svg'))]})
-
-
-@require_POST
-@api_permissions()
-def plan_import(request):
-    upload = request.FILES.get('file')
-    if upload is None:
-        return JsonResponse({'error': 'Seleccione un archivo .dxf.'}, status=400)
-    try:
-        svg_content, motors = import_dxf(upload)
-    except ValidationError as exc:
-        return JsonResponse({'error': ' '.join(exc.messages)}, status=400)
-    plan = Plan(
-        imported_by=request.user,
-        name=upload.name, size=upload.size, svg=svg_content,
-    )
-    try:
-        with transaction.atomic():
-            plan.source.save(upload.name, upload, save=False)
-            plan.save()
-            Motor.objects.bulk_create([Motor(plan=plan, **motor) for motor in motors])
-    except Exception:
-        if plan.source:
-            plan.source.delete(save=False)
-        raise
-    return JsonResponse(plan_data(plan, detail=True), status=201)
 
 
 @require_GET
@@ -409,7 +379,6 @@ def cad_world_position(plan, sx, sy):
     vx, vy, vw, vh = map(float, root.attrib['viewBox'].split())
     if not (vx <= sx <= vx + vw and vy <= sy <= vy + vh):
         raise ValidationError('El botón debe estar dentro del plano.')
-    # New imports store the DXF->SVG affine transform alongside the drawing.
     transform = root.get('data-wcs-transform')
     if not transform and plan.source:
         # Recover the transform from an older saved DXF. Re-rendering does
@@ -417,6 +386,7 @@ def cad_world_position(plan, sx, sy):
         with plan.source.open('rb') as source:
             from django.core.files.uploadedfile import SimpleUploadedFile
             upload = SimpleUploadedFile('saved.dxf', source.read())
+        from .dxf_service import import_dxf
         recovered_svg, _ = import_dxf(upload)
         recovered = ElementTree.fromstring(recovered_svg)
         transform = recovered.get('data-wcs-transform')
@@ -435,7 +405,7 @@ def cad_world_position(plan, sx, sy):
         x = (d * (sx - e) - c * (sy - f)) / determinant
         y = (-b * (sx - e) + a * (sy - f)) / determinant
     else:
-        raise ValidationError('Reimporte este plano antiguo para añadir botones con coordenadas CAD.')
+        raise ValidationError('El plano archivado no contiene coordenadas CAD compatibles.')
     return x, y
 
 

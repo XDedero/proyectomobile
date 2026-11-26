@@ -1,8 +1,7 @@
-"""Shared registration and credentials, accessed only by the trusted app server."""
-import json
+"""Shared accounts and credentials, accessed only by the trusted app server."""
 import threading
 import time
-from datetime import datetime
+from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -10,10 +9,9 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import JsonResponse
-from django.utils.dateparse import parse_datetime
 
 from .cloud_projects import CloudUnavailable, supabase_query
-from .models import RELONCAVI_COMPANY_ID, RegistrationRequest, UserProfile
+from .models import UserProfile
 
 
 def enabled():
@@ -53,68 +51,8 @@ def query(sql, *, write=False):
         raise CloudUnavailable(message, code=exc.code) from exc
 
 
-def publish_request(item):
-    if item.company_id != RELONCAVI_COMPANY_ID:
-        raise ValidationError('El registro compartido anterior solo admite solicitudes de Reloncaví.')
-    rows = query(
-        'SELECT app_identity.submit_registration(' +
-        ','.join(literal(value) for value in (
-            item.cloud_id, item.rut, item.first_name, item.last_name,
-            item.password_hash, item.created_at.isoformat())) + ') AS result;', write=True)
-    result = rows[0]['result']
-    if result.get('error'):
-        raise ValidationError(result['error'])
-    RegistrationRequest.objects.filter(pk=item.pk).update(cloud_synced=True)
-    item.cloud_synced = True
-    return result
-
-
-def refresh_request(item):
-    """Retire a local replica resolved by an administrator on another installation."""
-    rows = query('SELECT status FROM app_identity.registration_requests WHERE id=' +
-                 literal(item.cloud_id) + '::uuid;')
-    if not rows or rows[0]['status'] != 'pending':
-        item.delete()
-
-
-def sync_requests():
-    """Reconcile the legacy Reloncaví registry using its shared UUIDs."""
-    requests = RegistrationRequest.objects.filter(company_id=RELONCAVI_COMPANY_ID)
-    for item in requests.filter(status='pending', cloud_synced=False):
-        try:
-            publish_request(item)
-        except ValidationError:
-            # Another installation already submitted this RUT. Its request is authoritative.
-            item.delete()
-    rows = query("""SELECT id::text, rut, first_name, last_name, created_at, status
-        FROM app_identity.registration_requests
-        WHERE status='pending' OR id IN (
-            """ + (','.join(literal(identifier) + '::uuid' for identifier in
-                           requests.values_list('cloud_id', flat=True)) or 'NULL') + ');')
-    with transaction.atomic():
-        for row in rows:
-            if row['status'] != 'pending':
-                requests.filter(cloud_id=row['id']).delete()
-                continue
-            item = requests.filter(cloud_id=row['id']).first()
-            if item is None:
-                # A pre-migration local duplicate can use the canonical request UUID.
-                item = requests.filter(rut=row['rut'], status='pending').first()
-            values = {key: row[key] for key in ('rut', 'first_name', 'last_name')}
-            values.update(cloud_id=row['id'], cloud_synced=True)
-            if item:
-                requests.filter(pk=item.pk).update(**values)
-            else:
-                item = requests.create(company_id=RELONCAVI_COMPANY_ID, **values)
-            # psycopg returns timestamptz as datetime; the legacy CLI returns ISO text.
-            created_at = row['created_at']
-            if not isinstance(created_at, datetime):
-                created_at = parse_datetime(created_at)
-            requests.filter(pk=item.pk).update(created_at=created_at)
-
-
 def apply_account(data):
-    """Materialize an approved identity while preserving local plan foreign keys."""
+    """Materialize a shared identity while preserving local plan foreign keys."""
     from .accounts import invalidate_user_sessions
     with transaction.atomic():
         profile = UserProfile.objects.select_related('user').filter(cloud_id=data['id']).first()
@@ -148,34 +86,28 @@ def apply_account(data):
         return user, changed_access
 
 
-def review_request(item, action, role, actor):
-    if not item.cloud_synced:
-        publish_request(item)
-    rows = query('SELECT app_identity.review_registration(' +
-                 ','.join(literal(value) for value in (item.cloud_id, action, role, actor.username)) +
-                 ') AS result;', write=True)
-    result = rows[0]['result']
-    if result.get('error'):
-        raise ValidationError(result['error'])
-    # Old database functions could return a composite with null fields on reject.
-    # Rejection must never attempt to create an account in this installation.
-    if action == 'approve' and result.get('account'):
-        apply_account(result['account'])
-    item.delete()
+def account_rut_exists(rut):
+    return bool(query('SELECT 1 FROM app_identity.accounts WHERE is_active AND rut=' + literal(rut) + ';'))
 
 
-def sync_login(identifier):
-    from .accounts import normalize_rut
-    try:
-        rut = normalize_rut(identifier)
-    except ValidationError:
-        rut = None
-    rows = query('SELECT * FROM app_identity.accounts WHERE ' +
-                 ('rut=' + literal(rut) if rut else 'username=' + literal(identifier)) +
+def create_account(*, rut, first_name, last_name, password_hash, role):
+    identifier = uuid4()
+    values = (identifier, f'cuenta_{identifier.hex}', rut, first_name, last_name, password_hash, role)
+    rows = query(
+        'INSERT INTO app_identity.accounts (id,username,rut,first_name,last_name,password_hash,role) VALUES (' +
+        ','.join(literal(value) for value in values) + ') ON CONFLICT DO NOTHING RETURNING *;',
+        write=True,
+    )
+    if not rows:
+        raise ValidationError('Ya existe un usuario con ese RUT.')
+    return apply_account(rows[0])[0]
+
+
+def sync_login(rut):
+    rows = query('SELECT * FROM app_identity.accounts WHERE rut=' + literal(rut) +
                  ' ORDER BY is_active DESC, revision DESC LIMIT 1;')
     if not rows:
-        profiles = UserProfile.objects.filter(cloud_id__isnull=False)
-        profile = (profiles.filter(rut=rut) if rut else profiles.filter(user__username=identifier)).first()
+        profile = UserProfile.objects.filter(cloud_id__isnull=False, rut=rut).first()
         if profile:
             rows = query('SELECT * FROM app_identity.accounts WHERE id=' + literal(profile.cloud_id) + '::uuid;')
             if not rows:
@@ -184,7 +116,9 @@ def sync_login(identifier):
         if not rows[0]['is_active']:
             remove_local_account(rows[0]['id'])
             return None
-        return apply_account(rows[0])[0]
+        user, _ = apply_account(rows[0])
+        if rows[0]['rut'] == rut:
+            return user
     return None
 
 

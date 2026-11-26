@@ -16,6 +16,7 @@ from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+TEST_RUTS = {'pdf_usuario': '11111111-1', 'pdf_otro': '22222222-2'}
 
 
 def serve():
@@ -32,11 +33,11 @@ def serve():
     from django.contrib.auth.models import Permission
     call_command('migrate', verbosity=0)
     User = get_user_model()
-    editor = User.objects.create_user('pdf_usuario', password='PruebaPDF!')
+    editor = User.objects.create_user(TEST_RUTS['pdf_usuario'], password='PruebaPDF!')
     editor.user_permissions.add(*Permission.objects.filter(
         content_type__app_label='mobileApp', codename__in=['change_workbookdocument', 'change_pdfplan'],
     ))
-    User.objects.create_user('pdf_otro', password='PruebaPDF!')
+    User.objects.create_user(TEST_RUTS['pdf_otro'], password='PruebaPDF!')
     call_command('runserver', f"127.0.0.1:{os.environ['PDF_BROWSER_TEST_PORT']}", use_reloader=False)
 
 
@@ -44,7 +45,7 @@ def login(page, username='pdf_usuario'):
     from playwright.sync_api import expect
     page.wait_for_function('appState.authReady')
     if page.locator('#loginForm').is_visible():
-        page.locator('#usernameInput').fill(username)
+        page.locator('#usernameInput').fill(TEST_RUTS[username])
         page.locator('#passwordInput').fill('PruebaPDF!')
         page.locator('#btnLogin').click()
     expect(page.locator('#btnGoToPdfSection')).to_be_visible()

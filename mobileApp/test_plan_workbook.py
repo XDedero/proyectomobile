@@ -15,7 +15,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .models import ButtonCategory, Motor, PdfMarker, PdfPlan, Plan, PlanWorkbookSheet, SavedMotor, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 def source_workbook():
@@ -88,10 +88,8 @@ class SharedPlanWorkbookTests(TestCase):
         return self.client.post(url, json.dumps(data or {}), content_type='application/json')
 
     def plan(self, kind='pdf'):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'), {
-            'file': pdf_upload() if kind == 'pdf' else dxf_file(),
-        })
-        self.assertEqual(response.status_code, 201, response.content[:500])
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content[:500])
         return response.json()
 
     def marker(self, plan):
@@ -402,7 +400,7 @@ class SharedPlanWorkbookTests(TestCase):
         self.assertEqual([sheet['name'] for sheet in response.json()['sheets']], ['Listado', 'Listado motores 2'])
         self.assertEqual(self.post(plan['assign_listing_url'], {'workbook_id': result['workbook']['id']}).status_code, 400)
 
-    def test_renamed_listings_survive_save_and_project_roundtrip_in_both_formats(self):
+    def test_renamed_listings_survive_save_and_pdf_project_roundtrip(self):
         for kind, model in [('pdf', PdfPlan), ('dxf', Plan)]:
             with self.subTest(kind=kind):
                 plan = self.plan(kind)
@@ -434,8 +432,11 @@ class SharedPlanWorkbookTests(TestCase):
                 restored = self.client.post(reverse('upload_project'), {
                     'file': SimpleUploadedFile('Nombres.planproj', archive_bytes),
                 })
-                self.assertEqual(restored.status_code, 201, restored.content[:500])
-                self.assertEqual([row['name'] for row in restored.json()['plan']['listings']], names)
+                if kind == 'pdf':
+                    self.assertEqual(restored.status_code, 201, restored.content[:500])
+                    self.assertEqual([row['name'] for row in restored.json()['plan']['listings']], names)
+                else:
+                    self.assertEqual(restored.status_code, 400, restored.content[:500])
                 document.refresh_from_db()
                 book = load_workbook(BytesIO(bytes(document.content)))
                 try:

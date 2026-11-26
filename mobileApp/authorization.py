@@ -192,7 +192,7 @@ def api_permissions(*permissions):
             local_action = view.__name__ in ('clear_local_project', 'refresh_project')
             profile = application_profile(request.user)
             if mutation and profile is not None and profile.role == 'viewer' and view.__name__ not in (
-                    'plan_import', 'import_pdf', 'upload_project', 'open_cloud_project', 'refresh_project', 'clear_local_project'):
+                    'import_pdf', 'upload_project', 'open_cloud_project', 'refresh_project', 'clear_local_project'):
                 return JsonResponse({'error': 'El espectador solo puede consultar e importar planos.'}, status=403)
             if mutation and plan is not None and view.__name__ in ('delete_plan', 'delete_pdf_plan') and not can_delete_plan(request.user, plan):
                 return JsonResponse({'error': 'Solo puede eliminar sus propios planos. Un administrador puede eliminar cualquier plano.'}, status=403)
@@ -200,7 +200,7 @@ def api_permissions(*permissions):
                 return JsonResponse({'error': 'Su rol no permite modificar o guardar este plano.'}, status=403)
             if mutation and document is not None and not can_edit_workbook(request.user, document, plans=plans):
                 return JsonResponse({'error': 'Solo el creador del plano o un administrador puede modificar su Excel.'}, status=403)
-            if view.__name__ in ('plan_import', 'import_pdf', 'upload_project') and not capabilities(request.user)['can_import']:
+            if view.__name__ in ('import_pdf', 'upload_project') and not capabilities(request.user)['can_import']:
                 return JsonResponse({'error': 'Su rol no permite crear planos.'}, status=403)
             if plan is not None and view.__name__ == 'download_project' and not can_access_plan(request.user, plan, 'can_export'):
                 return JsonResponse({'error': 'Su rol no permite exportar este plano.'}, status=403)

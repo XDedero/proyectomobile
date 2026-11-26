@@ -43,10 +43,10 @@
 
                 <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
                     <form id="loginForm" method="post">
-                        <p class="text-muted small">Ingrese con su usuario y contraseña.</p>
+                        <p class="text-muted small">Ingrese con su RUT y contraseña.</p>
                         <div class="mb-3">
-                            <label for="usernameInput" class="form-label small fw-semibold">Nombre de usuario</label>
-                            <input type="text" class="form-control" id="usernameInput" name="username" autocomplete="username" required>
+                            <label for="usernameInput" class="form-label small fw-semibold">RUT</label>
+                            <input type="text" class="form-control" id="usernameInput" name="rut" autocomplete="username" maxlength="12" placeholder="12.345.678-5" required>
                         </div>
                         <div class="mb-3">
                             <label for="passwordInput" class="form-label small fw-semibold">Contraseña</label>
@@ -154,10 +154,6 @@
                         </div>
 
                         <div class="main-import-actions">
-                            <button type="button" class="btn import-action import-action-cad" id="btnGoToImportSection" hidden>
-                                <i class="bi bi-file-earmark-ruled" aria-hidden="true"></i>
-                                <span>Importar plano DXF</span>
-                            </button>
                             <button type="button" class="btn import-action import-action-pdf" id="btnGoToPdfSection" hidden>
                                 <i class="bi bi-file-earmark-pdf" aria-hidden="true"></i>
                                 <span>Importar PDF configurable</span>
@@ -211,35 +207,9 @@
                         <i class="bi bi-exclamation-octagon-fill fs-5 flex-shrink-0 text-danger"></i>
                         <div class="flex-grow-1">
                             <div class="fw-bold" style="font-size: 0.85rem;">Atención</div>
-                            <div id="errorNoPlanText" style="font-size: 0.82rem;">No hay plano autocad para asignar excel de datos</div>
+                            <div id="errorNoPlanText" style="font-size: 0.82rem;"></div>
                         </div>
                         <button type="button" class="btn-close btn-sm flex-shrink-0" id="btnCloseErrorAlert" aria-label="Cerrar"></button>
-                    </div>
-
-                    <!-- Tarjeta para Importar Plano AutoCAD -->
-                    <div class="cad-card mb-3">
-                        <div class="mb-3">
-                            <span class="d-inline-flex p-3 rounded-circle bg-danger-subtle text-danger mb-2">
-                                <i class="bi bi-file-earmark-ruled-fill fs-1"></i>
-                            </span>
-                            <h5 class="fw-bold text-dark mb-1">Plano AutoCAD</h5>
-                            <p class="text-muted small mb-3">
-                                Seleccione un archivo <strong>.DXF</strong> desde su dispositivo. Los motores se detectan por la palabra MOTOR y reciben un botón automáticamente.
-                            </p>
-                        </div>
-
-                        <!-- Botón oficial de importar plano AutoCAD que abre el explorador del dispositivo -->
-                        <button type="button" class="btn btn-cad w-100 py-3 d-flex align-items-center justify-content-center gap-2 mb-2" id="btnImportAutoCAD">
-                            <i class="bi bi-folder-symlink-fill fs-5"></i>
-                            <span>Importar plano AutoCAD</span>
-                        </button>
-
-                        <div class="text-muted" style="font-size: 0.72rem;">
-                            Solo archivos .dxf · Máximo 20 MB
-                        </div>
-
-                        <!-- Input File oculto para archivos AutoCAD -->
-                        <input type="file" id="autocadFileInput" accept=".dxf" style="display: none;">
                     </div>
 
                     <!-- Tarjeta de Estado del Plano Importado -->

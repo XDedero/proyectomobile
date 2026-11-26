@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 from .models import PdfPlan, Plan, SavedProject, UserProfile
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -39,9 +39,8 @@ class PlanCollaborationTests(TestCase):
         return (client or self.client).post(url, data or {}, content_type='application/json')
 
     def original(self, kind, saved=True):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'),
-            {'file': pdf_upload() if kind == 'pdf' else dxf_file()})
-        self.assertEqual(response.status_code, 201, response.content[:400])
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content[:400])
         plan = response.json()
         if saved:
             self.assertEqual(self.post(plan['save_project_url']).status_code, 200)

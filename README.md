@@ -1,4 +1,4 @@
-# Planos PDF y DXF con fichas de motores
+# Planos PDF con fichas de motores
 
 Aplicación Django para importar planos, colocar botones, vincular fichas Excel y guardar o transportar proyectos completos.
 
@@ -31,13 +31,11 @@ Para iniciar manualmente desde un entorno ya creado:
 .\.venv\Scripts\python.exe manage.py runserver
 ```
 
-Abra http://127.0.0.1:8000/ e inicie sesión con una cuenta activa de Django. Para crear un administrador use `manage.py createsuperuser`. La importación y el guardado requieren el servidor; `index.html` solo sirve como copia de la interfaz.
+Abre http://127.0.0.1:8000/ e inicia sesión con el RUT y la contraseña de una cuenta activa. Para preparar el administrador principal de una instalación nueva, configura `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_PASSWORD` y `DJANGO_SUPERUSER_RUT` y ejecuta `python init_admin.py` después de las migraciones. El archivo `index.html` es una vista previa de la interfaz.
 
 ## Importar y usar planos
 
-**Importar plano AutoCAD** acepta exclusivamente DXF de texto o binarios, hasta 20 MB. DWG se rechaza por extensión y contenido. Los motores se detectan por `MOTOR` en nombres de bloques, textos TEXT/MTEXT y atributos, respetando sus coordenadas y transformaciones. Cada motor recibe automáticamente un botón.
-
-**Importar PDF configurable** admite PDF sin contraseña de hasta 20 MB y 1.000 páginas. Ambos formatos permiten añadir botones, importar fichas del dispositivo o usar motores de la sección **Motores guardados**.
+**Importar PDF configurable** admite PDF sin contraseña de hasta 20 MB y 1.000 páginas. Permite añadir botones, importar fichas o usar motores guardados. Los planos DXF archivados se conservan en la biblioteca.
 
 **Pantalla completa** amplía el visor al dispositivo. El menú **⋮** contiene Explorar, Agregar botón, Mover botón, Importar motor guardado, Asignar listado, Ver listado, Guardar plano, Exportar proyecto y zoom. Los PDF tienen también un selector de página. Las fichas y los diálogos de asignación funcionan sobre el visor completo; **Volver** recupera la vista normal. Los navegadores sin la API nativa usan la misma vista que ocupa toda la ventana.
 
@@ -135,51 +133,21 @@ La biblioteca permite buscar por nombre, consultar una ficha e incorporarla al b
 
 El formato actual es la **versión 3**: incluye el plano, un único XLSX, las hojas asignadas a cada botón, todos los listados y su protección. También se aceptan proyectos de las versiones 1 y 2 y se reúnen sus fichas en el libro del plano al abrirlos. Los documentos antiguos se conservan durante esa adaptación.
 
-En otra instalación, use **Importar PDF configurable → Importar proyecto**. Se admiten PDF y DXF; el visor elige el formato automáticamente. **Guardar plano** añade la copia importada a la biblioteca. La importación valida el manifiesto, los nombres de hojas y los archivos y no extrae rutas arbitrarias del ZIP. Límites: proyecto de 100 MB, contenido de 250 MB y hasta 5.000 botones. La importación normal de XLSX admite 20 MB; el libro reunido puede alcanzar 100 MB.
+En otra instalación, usa **Importar PDF configurable → Importar proyecto** para abrir un archivo `.planproj` con un plano PDF. **Guardar plano** añade la copia importada a la biblioteca. La importación valida el manifiesto, los nombres de hojas y los archivos y no extrae rutas arbitrarias del ZIP. Límites: proyecto de 100 MB, contenido de 250 MB y hasta 5.000 botones. La importación normal de XLSX admite 20 MB; el libro reunido puede alcanzar 100 MB.
 
 ## Usuarios, roles y categorías
 
-**Solicitar registro**, en el acceso, pide nombre, apellido, RUT y contraseña. El RUT se ingresa sin puntos y con guion, por ejemplo `12345678-5`, y se valida su dígito verificador. Se aplican las reglas de contraseña de Django: al menos ocho caracteres, evitando claves comunes, solo números y semejanzas con datos personales. El servidor evita cuentas y solicitudes pendientes duplicadas. La cuenta no existe hasta que un administrador aprueba la solicitud; entonces se inicia sesión con el RUT y la contraseña solicitada.
+El **administrador principal** de cada empresa crea las cuentas en **Administración → Usuarios → Crear usuario**. Allí elige nombre, apellido, RUT, rol y contraseña inicial. La cuenta queda habilitada en cuanto se guarda. El servidor valida el dígito verificador, reserva un solo acceso por RUT y aplica las reglas de contraseña de Django.
 
-**Administrar** abre `/administracion/`, un panel adaptable a celulares con tres secciones:
+El acceso usa **RUT y contraseña**. Desde el menú de usuario, **Cambiar contraseña** pide la contraseña actual y confirma la nueva. La sesión actual sigue abierta y las demás sesiones deben volver a iniciar sesión.
 
-Las solicitudes se envían al registro privado `app_identity` de Supabase y se consultan
-desde cada instalación con `APP_SHARED_ACCOUNTS=1` (valor predeterminado). La aprobación
-es atómica en la base compartida. La cuenta aprobada conserva el mismo identificador,
-contraseña y rol al iniciar sesión desde otro equipo. Los cambios de rol y contraseña
-y la eliminación de estas cuentas también se sincronizan. Las cuentas anteriores sin
-vinculación al registro compartido conservan su administración local.
-El servidor usa una conexión PostgreSQL privada mediante `SUPABASE_DATABASE_URL`. En una
-instalación local también puede guardarse la misma URL completa, como una única línea, en
-`conexion-base-datos.txt`; ese archivo está excluido de Git y debe entregarse por un medio
-privado solo a quien administra la instalación. Las tablas y funciones de identidad son
-privadas y no conceden acceso a los roles públicos del navegador. La herramienta de línea
-de comandos anterior se conserva únicamente como compatibilidad temporal.
-La conexión y la instalación del esquema se explican en [Configurar Supabase](docs/SUPABASE.md).
-`manage.py migrate` prepara SQLite; el registro privado de Supabase se prepara por separado con
-`manage.py setup_shared_accounts --initialize` y se comprueba con `manage.py setup_shared_accounts`.
-El documento informativo `conexion_supabase.txt`, si contiene `[TU_PASSWORD]`, no es una conexión válida.
-Cada servidor debe ejecutar esta versión y tener configurada la misma conexión privada.
-Al abrir el panel se envían las solicitudes pendientes que todavía existían en ese equipo.
-`python manage.py sync_shared_accounts` permite ejecutar esa sincronización manualmente.
-Si falla la conexión, la app informa el error y conserva las solicitudes pendientes de envío.
-Las pruebas aisladas utilizan `APP_SHARED_ACCOUNTS=0`.
+- **Espectador** consulta planos guardados e importa PDF para verlos.
+- **Trabajador** crea y modifica sus planos, guarda proyectos y gestiona fichas y categorías.
+- **Administrador** gestiona usuarios y categorías y puede editar o eliminar planos. La creación de cuentas y la administración de otros administradores se reservan al administrador principal.
 
-- **Solicitudes:** muestra únicamente las pendientes y se actualiza cada cinco segundos, al abrir la pestaña, volver a la aplicación o recuperar la conexión. **Actualizar solicitudes** permite consultar de inmediato; si falla la consulta, se avisa y se conserva la última lista confirmada. Todos los administradores pueden elegir el rol Espectador, Trabajador o Administrador antes de aceptar. El tick verde crea la cuenta con ese rol y retira la solicitud; la X roja pide confirmación y elimina definitivamente la solicitud. Otorgar administración pide confirmación adicional. No se almacena un historial de solicitudes resueltas. La migración `0029` retira los registros resueltos de versiones anteriores.
-- **Usuarios:** al abrir la pestaña se muestran y actualizan todas las cuentas existentes. Permite buscar por nombre, apellido o RUT, editar datos y contraseña, cambiar el rol y eliminar con confirmación. Todos los administradores pueden otorgar cualquiera de los tres roles a trabajadores y espectadores. `admin`, el **administrador principal**, conserva la facultad de modificar o eliminar otros administradores. Los demás administradores pueden editarse a sí mismos y gestionar trabajadores y espectadores. La protección de otros administradores se aplica también en Django Admin. Otorgar administración pide una confirmación adicional. Cambiar el rol o la contraseña invalida las sesiones de esa cuenta: debe volver a iniciar sesión.
-- **Categorías:** crear, consultar, renombrar y eliminar las etiquetas que se asignan a los botones. La ficha se elige al crear o editar cada botón.
+Las cuentas existentes conservan sus contraseñas y autoría. Las cuentas sin RUT asignado requieren que un administrador les asigne uno. En instalaciones con `APP_SHARED_ACCOUNTS=1`, las cuentas compartidas usan el [registro privado de Supabase](docs/SUPABASE.md).
 
-Los roles de la aplicación son:
-
-- **Espectador:** rol inicial de las solicitudes aprobadas. Consulta los planos guardados e importa archivos para verlos; no puede editar, guardar, exportar, eliminar ni crear categorías y no tiene historial propio.
-- **Trabajador:** crea planos y puede editar, guardar, exportar o eliminar los propios, con sus botones, sectores y fichas. Consulta los planos ajenos en modo lectura. También puede gestionar piezas y crear categorías desde Añadir botón o Añadir pieza.
-- **Administrador:** gestiona solicitudes, usuarios y categorías y puede editar o eliminar cualquier plano.
-
-La migración `0030_primary_administrator` configura la cuenta existente `admin` como administrador principal sin cambiar su contraseña. Una restricción de la base de datos impide que otra cuenta tenga simultáneamente ese privilegio y exige que la cuenta principal mantenga el rol de administrador. No existe una opción en el panel para duplicar o transferir ese permiso. `admin` puede editar sus propios datos y contraseña; no se permite eliminarlo ni quitarle su rol. En instalaciones nuevas, `init_admin.py` asigna este privilegio únicamente a la cuenta `admin` configurada mediante `DJANGO_SUPERUSER_USERNAME=admin` y la contraseña del entorno.
-
-**Historial de mis planos**, en el menú principal y el menú de usuario de trabajadores y administradores, reúne únicamente los planos que esa persona creó y guardó, con fecha, apertura, edición y eliminación con confirmación. Los permisos se verifican en cada endpoint, además de ocultar las acciones en la interfaz.
-
-La migración `0028_registration_accounts` conserva las cuentas, contraseñas y planos existentes; asigna a cada cuenta un RUT de prueba válido y único (marcado en el panel). Los administradores conservan su rol y las demás cuentas existentes pasan a trabajador. Los nombres de acceso anteriores siguen funcionando. Las cuentas nuevas utilizan un identificador interno estable para conservar la autoría aunque se cambie su RUT. Los roles y grupos antiguos se conservan para compatibilidad, pero el panel utiliza los tres roles anteriores para las cuentas con perfil.
+**Historial de mis planos**, en el menú principal y el menú de usuario, reúne los planos que esa persona creó y guardó.
 
 En PDF y DXF, la opacidad general se multiplica por la opacidad base del radio (25 %). Al seleccionar el botón o pasar el puntero sobre él, el botón recupera el 100 % y el radio su 25 %.
 
@@ -199,27 +167,21 @@ La detección entre navegadores de la misma instalación funciona tanto con PDF 
 .\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run
 .\.venv\Scripts\python.exe manage.py test mobileApp --noinput
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe scripts/management_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/registration_browser_smoke.py
+.\.venv\Scripts\python.exe scripts/account_access_browser_smoke.py
 .\.venv\Scripts\python.exe scripts/annotation_opacity_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/shared_workbook_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/sectors_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/plan_visuals_browser_smoke.py
 node --test scripts/sector-geometry.test.js
 .\.venv\Scripts\python.exe scripts/pdf_resolution_browser_smoke.py
-.\.venv\Scripts\python.exe scripts/multi_device_deletion_browser_smoke.py
 .\.venv\Scripts\python.exe -m playwright install webkit
 .\.venv\Scripts\python.exe scripts/pdf_compatibility_browser_smoke.py
 ```
 
 Las migraciones 0008–0011 incorporan las referencias a hojas y la protección de listados. Los planos de instalaciones anteriores reúnen sus documentos al abrirse; los originales anteriores permanecen disponibles en la base de datos como respaldo de la conversión.
 
-Las pruebas usan bases de datos y archivos temporales. Cubren PDF/DXF, libros con formato, motores compartidos, originales de la biblioteca, varios listados, permisos, importación y exportación de proyectos y el flujo móvil. Las capturas quedan en `.test-artifacts/`. La prueba de navegador actual del sistema de hojas es `shared_workbook_browser_smoke.py`.
+Las pruebas usan bases de datos y archivos temporales. Cubren PDF, planos DXF guardados en versiones anteriores, libros con formato, motores compartidos, originales de la biblioteca, varios listados, permisos, importación y exportación de proyectos PDF y el flujo móvil. Las capturas quedan en `.test-artifacts/`.
 
 `pdf_resolution_browser_smoke.py` comprueba el límite de resolución, la calidad del recorte frente al renderizado completo, el agrupamiento de cambios de zoom, el arrastre, la alineación de botones, páginas giradas, escaneos, cambios de orientación y la liberación de lienzos.
 
-`multi_device_deletion_browser_smoke.py` abre sesiones independientes, elimina PDF y DXF y comprueba su retirada de los visores, fichas y bibliotecas del otro dispositivo, incluida la recarga. También cubre consultas que llegan fuera de orden y fallos de conexión.
 
 `pdf_compatibility_browser_smoke.py` comprueba Chromium y WebKit con sesiones independientes, funciones JavaScript ausentes en la página y el worker y un PDF cuyo archivo en `media/` se ha eliminado. Abre la copia guardada, páginas giradas y escaneadas y verifica el zoom a 1280 píxeles. También comprueba el mensaje de archivo inaccesible y la reapertura posterior.
 
-La migración `0032` retira las antiguas plantillas de categoría del almacenamiento local. Las fichas ya copiadas a los botones se conservan. `management_browser_smoke.py` verifica sesiones independientes, avisos de actualización PDF/DXF, el bloqueo de modificaciones ajenas y el panel administrativo en escritorio y móvil.
+La migración `0032` retira las antiguas plantillas de categoría del almacenamiento local. Las fichas ya copiadas a los botones se conservan. `account_access_browser_smoke.py` comprueba la administración de cuentas y la edición de un PDF desde el navegador móvil.

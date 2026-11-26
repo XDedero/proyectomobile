@@ -10,7 +10,7 @@ from django.urls import reverse
 
 from .models import Motor, PdfMarker, PdfPlan, Plan, SavedProject, WorkbookDocument
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 class PlanActionTests(TestCase):
@@ -34,10 +34,8 @@ class PlanActionTests(TestCase):
         return (client or self.client).post(url, json.dumps(data or {}), content_type='application/json')
 
     def import_plan(self, kind):
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'), {
-            'file': pdf_upload() if kind == 'pdf' else dxf_file(),
-        })
-        self.assertEqual(response.status_code, 201, response.content[:300])
+        response = plan_fixture(self.client, kind, pdf_upload() if kind == 'pdf' else dxf_file())
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200, response.content[:300])
         return response.json()
 
     def test_creator_can_save_both_formats_without_legacy_permissions(self):

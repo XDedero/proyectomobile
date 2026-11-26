@@ -94,7 +94,7 @@ class PrimaryAdministratorTests(TestCase):
         self.assertEqual(self.client.get(reverse('admin:auth_user_add')).status_code, 403)
         self.assertEqual(self.client.post(reverse('admin:auth_user_password_change', args=[self.primary.pk]), {}).status_code, 403)
         self.client.force_login(self.primary)
-        self.assertEqual(self.client.get(reverse('admin:auth_user_add')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('admin:auth_user_add')).status_code, 403)
         request.user = self.primary
         self.assertTrue(model_admin.has_change_permission(request, self.administrator))
         self.assertTrue(model_admin.has_delete_permission(request, self.administrator))

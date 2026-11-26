@@ -11,7 +11,7 @@ from django.urls import reverse
 
 from .models import PdfPlan, Plan, SavedProject
 from .test_pdf import pdf_upload
-from .tests import dxf_file
+from .tests import dxf_file, plan_fixture
 
 
 class PlanSourceTests(TestCase):
@@ -34,8 +34,8 @@ class PlanSourceTests(TestCase):
         upload = pdf_upload() if kind == 'pdf' else dxf_file()
         original = upload.read()
         upload.seek(0)
-        response = self.client.post(reverse('import_pdf' if kind == 'pdf' else 'plan_import'), {'file': upload})
-        self.assertEqual(response.status_code, 201)
+        response = plan_fixture(self.client, kind, upload)
+        self.assertEqual(response.status_code, 201 if kind == 'pdf' else 200)
         data = response.json()
         if saved:
             self.assertEqual(self.client.post(data['save_project_url']).status_code, 200)

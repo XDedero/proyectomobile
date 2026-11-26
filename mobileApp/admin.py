@@ -2,11 +2,14 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
 from django.core.exceptions import PermissionDenied
+from django.shortcuts import redirect
 from .accounts import can_edit_user, is_primary_administrator
 from .access import is_administrator
 
 # Django's own user/group pages must obey the same administrator boundary.
 admin.site.has_permission = lambda request: is_administrator(request.user)
+admin.site.login = lambda request, extra_context=None: redirect('index')
+admin.site.password_change = lambda request, extra_context=None: redirect('change_password')
 admin.site.index_template = 'mobileApp/django_admin_index.html'
 
 
@@ -17,7 +20,7 @@ class ApplicationUserAdmin(UserAdmin):
         return super().delete_queryset(request, queryset)
 
     def has_add_permission(self, request):
-        return is_primary_administrator(request.user) and super().has_add_permission(request)
+        return False
 
     def get_readonly_fields(self, request, obj=None):
         fields = list(super().get_readonly_fields(request, obj))

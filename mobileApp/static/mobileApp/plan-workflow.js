@@ -4,7 +4,6 @@
     const viewerSection = document.getElementById('dxfViewerSection');
     const motorList = document.getElementById('motorList');
     const motorCard = document.getElementById('selectedMotorCard');
-    const originalImportLabel = btnImportAutoCAD.innerHTML;
     let busy = false;
     let revision = 0;
     let pendingAssignment = null;
@@ -31,9 +30,7 @@
 
     function setBusy(value, message = '') {
         busy = value;
-        btnImportAutoCAD.disabled = value || !permissions().can_import;
         btnRemovePlan.disabled = value;
-        btnImportAutoCAD.innerHTML = value ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Procesando…' : originalImportLabel;
         if (message) status.textContent = message;
         updateActions();
         window.projectWorkspace?.update();
@@ -73,16 +70,6 @@
     function validateFile(file, extension) {
         if (!file.name.toLowerCase().endsWith(extension)) throw new Error(`Solo se admiten archivos ${extension}.`);
         if (!file.size || file.size > 20 * 1024 * 1024) throw new Error('Seleccione un archivo con contenido y de hasta 20 MB.');
-    }
-
-    function validatePlanFile(file) {
-        const lower = file.name.toLowerCase();
-        if (!lower.endsWith('.dxf')) {
-            throw new Error('Solo se admiten archivos .dxf.');
-        }
-        if (!file.size || file.size > 20 * 1024 * 1024) {
-            throw new Error('Seleccione un archivo con contenido y de hasta 20 MB.');
-        }
     }
 
     function selectedMotor() {
@@ -214,7 +201,6 @@
         pendingAssignment = null;
         placing = viewer.placing = false;
         resetPreview();
-        autocadFileInput.value = '';
         excelFileInput.value = '';
         remember(null);
         viewer.clear();
@@ -223,25 +209,10 @@
         status.textContent = '';
     }
 
-    btnImportAutoCAD.addEventListener('click', () => { if (!busy) autocadFileInput.click(); });
-    autocadFileInput.addEventListener('change', async () => {
-        const file = autocadFileInput.files[0];
-        autocadFileInput.value = '';
-        if (!file || busy || !permissions().can_import) return;
-        const currentRevision = ++revision;
-        try {
-            validatePlanFile(file);
-            setBusy(true, 'Leyendo plano y buscando motores…');
-            const plan = await request('/api/plans/import/', file);
-            if (currentRevision === revision) await openPlan(plan, currentRevision);
-        } catch (error) { if (currentRevision === revision) { showError(error.message); status.textContent = ''; } }
-        finally { setBusy(false); }
-    });
-
     function chooseExcel() {
         if (busy) return;
         if (!permissions().can_assign) { showError('Su usuario no tiene permiso para modificar el Excel de los motores.'); return; }
-        if (!appState.currentPlan) { showError('Importe un plano DXF antes de asignar un Excel.'); return; }
+        if (!appState.currentPlan) { showError('Abra un plano guardado para asignar un Excel.'); return; }
         const motor = selectedMotor();
         if (!motor) { showError('Toque un motor en el plano o selecciónelo en la lista antes de asignar su Excel.'); return; }
         if (window.planExcel) { window.planExcel.assign('dxf', appState.currentPlan, motor); return; }
@@ -489,7 +460,6 @@
     });
 
     function permissionsChanged() {
-        btnImportAutoCAD.hidden = !permissions().can_import;
         updateActions();
         if (!permissions().can_view && appState.currentPlan) {
             close();
