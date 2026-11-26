@@ -45,9 +45,9 @@ def button_details(request, kind, button_id):
                 button.descriptions = rows
         except ValidationError as exc:
             return error_response(exc)
-        if maintenance and not button.plan.draft_of_id:
-            from .maintenance_alerts import finish_cycle
-            finish_cycle(button, maintenance)
+        if 'next_maintenance' in maintenance and not button.plan.draft_of_id:
+            from .maintenance_alerts import clear_resolved_alerts
+            clear_resolved_alerts(button.maintenance_key, maintenance['next_maintenance'])
         for field, value in maintenance.items():
             setattr(button, field, value)
         setattr(button, name_field, name.strip())

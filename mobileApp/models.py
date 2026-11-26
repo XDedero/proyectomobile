@@ -406,8 +406,8 @@ class MaintenanceNotification(models.Model):
         indexes = [models.Index(fields=['recipient', '-day', '-id'], name='maintenance_inbox_order')]
         constraints = [
             models.UniqueConstraint(
-                fields=['maintenance_key', 'last_maintenance', 'recipient', 'day'],
-                condition=models.Q(kind='alert'), name='unique_daily_maintenance_alert',
+                fields=['maintenance_key', 'recipient'],
+                condition=models.Q(kind='alert'), name='unique_overdue_maintenance_alert',
             ),
             models.UniqueConstraint(
                 fields=['maintenance_key', 'last_maintenance', 'due_date', 'recipient'],

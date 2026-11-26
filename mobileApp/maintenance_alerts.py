@@ -1,4 +1,4 @@
-"""Send advance reminders and daily overdue alerts to maintenance inboxes."""
+"""Send advance reminders and keep overdue alerts current in maintenance inboxes."""
 from datetime import timedelta
 import logging
 from threading import Thread
@@ -7,7 +7,7 @@ from time import sleep
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, close_old_connections, transaction
-from django.db.models import Exists, Max, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from .authorization import is_administrator
@@ -29,57 +29,59 @@ def administrators():
     return {user.pk: user for user in candidates if is_administrator(user)}
 
 
-def record_notifications(button, through, admins, responsible):
+def record_notifications(button, today, admins, responsible):
     recipients = set(admins)
     if responsible and responsible.is_active:
         recipients.add(responsible.pk)
     if not recipients:
         return
     due = button.next_maintenance
-    kind = MaintenanceNotification.Kind.ALERT if due < through else MaintenanceNotification.Kind.REMINDER
+    kind = MaintenanceNotification.Kind.ALERT if due < today else MaintenanceNotification.Kind.REMINDER
     notifications = MaintenanceNotification.objects.filter(
-        kind=kind, maintenance_key=button.maintenance_key,
-        last_maintenance=button.last_maintenance, recipient_id__in=recipients,
-    )
+        kind=kind, maintenance_key=button.maintenance_key, recipient_id__in=recipients,
+    ).order_by()
+    refresh_ids = []
     if kind == MaintenanceNotification.Kind.REMINDER:
-        already_sent = set(notifications.filter(due_date=due).values_list('recipient_id', flat=True))
-        days = dict.fromkeys(recipients - already_sent, through - timedelta(days=1))
+        existing = set(notifications.filter(
+            last_maintenance=button.last_maintenance, due_date=due,
+        ).values_list('recipient_id', flat=True))
     else:
-        latest = dict(notifications.order_by().values('recipient_id').annotate(latest_day=Max('day')).values_list(
-            'recipient_id', 'latest_day'
-        ))
-        days = {recipient: max(due, latest.get(recipient, due)) for recipient in recipients}
-    if all(day >= through for day in days.values()):
+        existing = set()
+        for pk, recipient, day, previous_last, previous_due in notifications.values_list(
+            'pk', 'recipient_id', 'day', 'last_maintenance', 'due_date',
+        ):
+            existing.add(recipient)
+            if day < today or (day == today and (previous_last, previous_due) != (button.last_maintenance, due)):
+                refresh_ids.append(pk)
+    missing = recipients - existing
+    if not missing and not refresh_ids:
         return
     name = (button.name if isinstance(button, Motor) else button.label).strip()
     if not name:
         buttons = button.plan.motors if isinstance(button, Motor) else button.plan.markers
         name = f'Botón {buttons.filter(pk__lt=button.pk).count() + 1}'
     context = dict(
-        kind=kind, maintenance_key=button.maintenance_key,
-        last_maintenance=button.last_maintenance, due_date=due, plan_name=button.plan.name,
+        day=today, last_maintenance=button.last_maintenance, due_date=due, plan_name=button.plan.name,
         button_name=name, category_name=button.category.name if button.category_id else '',
         responsible=responsible, responsible_name=account_name(responsible) if responsible else button.button_creator,
     )
-    for recipient, day in days.items():
-        while day < through:
-            count = min(250, (through - day).days)
-            MaintenanceNotification.objects.bulk_create([
-                MaintenanceNotification(recipient_id=recipient, day=day + timedelta(days=offset), **context)
-                for offset in range(1, count + 1)
-            ], ignore_conflicts=True)
-            day += timedelta(days=count)
+    if refresh_ids:
+        notifications.filter(pk__in=refresh_ids, day__lte=today).update(**context)
+    if missing:
+        MaintenanceNotification.objects.bulk_create([
+            MaintenanceNotification(kind=kind, maintenance_key=button.maintenance_key, recipient_id=recipient, **context)
+            for recipient in missing
+        ], ignore_conflicts=True)
 
 
-def finish_cycle(button, changes):
-    """Catch up elapsed days before a published schedule is replaced."""
-    today = timezone.localdate()
-    if not button.next_maintenance or button.next_maintenance >= today:
-        return
-    if 'last_maintenance' not in changes and 'next_maintenance' not in changes:
-        return
-    creator = get_user_model().objects.filter(username=button.button_creator).first()
-    record_notifications(button, today, administrators(), creator)
+def clear_resolved_alerts(maintenance_key, new_due):
+    if maintenance_key and (new_due is None or new_due >= timezone.localdate()):
+        alerts = MaintenanceNotification.objects.filter(
+            kind=MaintenanceNotification.Kind.ALERT, maintenance_key=maintenance_key,
+        )
+        # Serialize deletion with administrators who are replying to the alert.
+        ids = list(alerts.select_for_update().order_by('pk').values_list('pk', flat=True))
+        alerts.filter(pk__in=ids).delete()
 
 
 def current_buttons(model):

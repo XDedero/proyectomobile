@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db import OperationalError, connection
+from django.db import OperationalError, connection, transaction
 from django.db.models import F, Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -44,10 +44,11 @@ def notifications(request):
 
 @require_POST
 @never_cache
+@transaction.atomic
 def reply_to_notification(request, notification_id):
     if not is_administrator(request.user):
         return HttpResponseForbidden('Solo los administradores pueden responder a las alertas de mantención.')
-    alert = get_object_or_404(MaintenanceNotification.objects.select_related('responsible'),
+    alert = get_object_or_404(MaintenanceNotification.objects.select_related('responsible').select_for_update(of=('self',)),
                              pk=notification_id, kind=MaintenanceNotification.Kind.ALERT, recipient=request.user)
     message = request.POST.get('message', '').strip()
     if not alert.responsible or not alert.responsible.is_active:

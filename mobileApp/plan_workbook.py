@@ -568,9 +568,9 @@ def assign_marker(marker, user, data=None, upload=None):
         else:
             require_schedule(category, marker.next_maintenance)
             changes = {}
-        if changes and not marker.plan.draft_of_id:
-            from .maintenance_alerts import finish_cycle
-            finish_cycle(marker, changes)
+        if 'next_maintenance' in changes and not marker.plan.draft_of_id:
+            from .maintenance_alerts import clear_resolved_alerts
+            clear_resolved_alerts(marker.maintenance_key, changes['next_maintenance'])
         for field, value in changes.items():
             setattr(marker, field, value)
         marker.category = category

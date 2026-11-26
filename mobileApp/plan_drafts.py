@@ -39,7 +39,7 @@ def copy_document(document, memo):
 
 
 def copy_markers(source, destination, documents, previous=None):
-    from .maintenance_alerts import finish_cycle
+    from .maintenance_alerts import clear_resolved_alerts
 
     model, related = (Motor, 'motors') if isinstance(source, Plan) else (PdfMarker, 'markers')
     result, retained, created, updated, pairs = {}, [], [], [], []
@@ -56,11 +56,8 @@ def copy_markers(source, destination, documents, previous=None):
         original_id = (previous or {}).get(str(marker.pk))
         target = existing.get(original_id)
         if target:
-            if publishing:
-                changed = {field for field in ('last_maintenance', 'next_maintenance')
-                           if getattr(target, field) != values[field]}
-                if changed:
-                    finish_cycle(target, changed)
+            if publishing and target.next_maintenance != marker.next_maintenance:
+                clear_resolved_alerts(target.maintenance_key, marker.next_maintenance)
             for key, value in values.items():
                 setattr(target, key, value)
             updated.append(target)
