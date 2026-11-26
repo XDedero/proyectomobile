@@ -221,7 +221,9 @@ class CompanyWorkspaceMiddleware:
         account = current_account(request)
         if account is None:
             return self.get_response(request)
-        company, _ = resolve_workspace(account, include_brand=request.path in ('/', '/administracion/', '/api/auth/session/'))
+        company, _ = resolve_workspace(account, include_brand=request.path in (
+            '/', '/administracion/', '/api/auth/session/', '/notificaciones/',
+        ))
         if company is None:
             return self.get_response(request)
         token = workspace.set(company)

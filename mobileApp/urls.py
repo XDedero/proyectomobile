@@ -7,6 +7,7 @@ from . import motor_views
 from . import piece_views
 from . import button_views
 from . import management_views
+from . import maintenance_views
 from . import sector_views
 from . import accounts_views
 from . import company_brand
@@ -30,6 +31,8 @@ urlpatterns = [
     path('api/piece-library/import/', piece_views.import_piece_document, name='import_piece_document'),
     path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
+    path('notificaciones/', maintenance_views.notifications, name='notifications'),
+    path('notificaciones/<int:notification_id>/responder/', maintenance_views.reply_to_notification, name='reply_to_notification'),
     path('empresa/', company_access.company_home, name='company_home'),
     path('empresa/salir/', company_access.company_logout, name='company_logout'),
     path('administracion/empresa/', management_views.edit_company_profile, name='company_profile'),

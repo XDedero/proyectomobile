@@ -298,7 +298,7 @@
 
     async function openSelectedButton() {
         const motor = selectedMotor();
-        if (motor?.show_description) await showButtonDetails();
+        if (motor?.show_description || motor?.maintenance) await showButtonDetails();
         else if (motor?.excel) await showPreview();
         else if (motor && !busy && permissions().can_assign) chooseExcel();
     }

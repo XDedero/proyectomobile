@@ -126,6 +126,8 @@ def auth_logout(request):
 
 
 def motor_data(motor):
+    from .maintenance import schedule_data
+
     excel = None
     if motor.source_workbook_id:
         from .plan_workbook import source_workbook_data
@@ -153,6 +155,7 @@ def motor_data(motor):
         'id': motor.pk, 'name': motor.name or f'Botón {motor.plan.motors.filter(pk__lt=motor.pk).count() + 1}',
         'entity_key': motor.entity_key, 'sheet_name': motor.sheet_name,
         'button_color': motor.button_color, 'show_description': motor.show_description,
+        'maintenance': schedule_data(motor),
         'has_area': motor.has_area, 'area_shape': motor.area_shape,
         'button_scale': motor.button_scale,
         'area_radius_x': motor.area_radius_x, 'area_radius_y': motor.area_radius_y,
@@ -441,6 +444,7 @@ def create_cad_marker(request, plan_id):
     from .pdf_views import error_response
     from .dxf_service import MAX_MOTORS
     from .plan_workbook import initialize_button, new_button_options, WorkbookConflict
+    from .maintenance import new_schedule
     plan = get_object_or_404(Plan, pk=plan_id)
     try:
         data, category, origin, upload = new_button_options(request, plan)
@@ -459,6 +463,7 @@ def create_cad_marker(request, plan_id):
                 show_description=data.get('show_description', False),
                 button_color=data['button_color'], descriptions=data.get('descriptions'),
                 x=x, y=y, z=0, svg_x=sx, svg_y=sy, svg_bounds=[sx, sy, 0, 0],
+                **new_schedule(data, request.user),
             )
             initialize_button(motor, request.user, origin, upload)
     except (ValidationError, ValueError, KeyError, ZeroDivisionError, OSError, ElementTree.ParseError) as exc:

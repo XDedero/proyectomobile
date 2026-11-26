@@ -11,3 +11,9 @@ timeout = int(os.environ.get('GUNICORN_TIMEOUT', '120'))
 keepalive = 5
 accesslog = '-'
 errorlog = '-'
+
+
+def post_worker_init(worker):
+    from mobileApp.maintenance_alerts import start_maintenance_worker
+
+    start_maintenance_worker()

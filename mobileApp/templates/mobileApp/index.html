@@ -176,6 +176,9 @@
                     </div>
 
                     <p id="appAuthError" class="small text-danger" role="alert"></p>
+                    <a class="btn btn-outline-primary w-100 mb-3 rounded-3" href="{% url 'notifications' %}">
+                        <i class="bi bi-bell me-1" aria-hidden="true"></i> Buzón de notificaciones
+                    </a>
                     <a id="btnAdminister" class="btn btn-outline-primary w-100 mb-3 rounded-3" href="/administracion/" hidden>
                         <i class="bi bi-gear me-1"></i> Administrar
                     </a>
@@ -562,6 +565,7 @@
     <script src="{% static 'mobileApp/pdf-workflow.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-display.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/project-workflow.js' %}?v={{ asset_version }}"></script>
+    <script src="{% static 'mobileApp/button-maintenance.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/button-details.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/plan-excel.js' %}?v={{ asset_version }}"></script>
     <script src="{% static 'mobileApp/sector-geometry.js' %}?v={{ asset_version }}"></script>

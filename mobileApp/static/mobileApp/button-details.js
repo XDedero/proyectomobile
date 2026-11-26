@@ -1,4 +1,4 @@
-/* The button opens a short description first, with the workbook one step away. */
+/* Show the button's maintenance and description before opening its workbook. */
 (() => {
     const dialog = document.createElement('div');
     dialog.id = 'buttonDetailsModal';
@@ -30,6 +30,15 @@
                 <input type="color" class="form-control form-control-color" id="buttonDetailsColor" aria-label="Color del botón" value="${defaultPlanButtonColor}">
               </div></div>
             </div>
+            <div id="buttonDetailsMaintenanceEditor" hidden>
+              ${window.buttonMaintenanceForm.fields('buttonDetails')}
+              <button type="button" class="btn btn-outline-secondary btn-sm mb-3" id="buttonDetailsClearMaintenance">Quitar programación</button>
+            </div>
+            <dl id="buttonDetailsMaintenanceSummary" class="button-details-list border rounded p-3 mb-3" hidden>
+              <div><dt>Última mantención</dt><dd id="buttonDetailsLastMaintenance"></dd></div>
+              <div><dt>Frecuencia</dt><dd id="buttonDetailsMaintenanceFrequency"></dd></div>
+              <div><dt>Próxima mantención</dt><dd id="buttonDetailsNextMaintenance" class="fw-semibold"></dd></div>
+            </dl>
             <div id="buttonDetailsRows"></div>
             <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="buttonDetailsAdd" hidden>Añadir descripción</button>
             <p id="buttonDetailsStatus" class="small mb-0" role="status"></p>
@@ -37,6 +46,7 @@
           <div class="modal-footer justify-content-between">
             <div class="d-flex flex-wrap gap-2">
               <button type="button" class="btn btn-outline-secondary btn-sm" id="buttonDetailsEdit" hidden>Editar</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="buttonDetailsEditMaintenance" hidden>Editar mantención</button>
               <button type="button" class="btn btn-success btn-sm" id="buttonDetailsSave" hidden>Guardar descripción</button>
               <button type="button" class="btn btn-outline-secondary btn-sm" id="buttonDetailsCancel" hidden>Cancelar</button>
               <button type="button" class="btn btn-outline-secondary btn-sm" id="buttonDetailsAssign" hidden>Asignar hoja</button>
@@ -48,7 +58,8 @@
     document.body.append(dialog);
     const modal = bootstrap.Modal.getOrCreateInstance(dialog);
     const byId = id => document.getElementById('buttonDetails' + id);
-    const controls = ['Edit', 'Save', 'Cancel', 'Add', 'Assign', 'Excel'];
+    const maintenanceForm = window.buttonMaintenanceForm.connect('buttonDetails');
+    const controls = ['Edit', 'EditMaintenance', 'ClearMaintenance', 'Save', 'Cancel', 'Add', 'Assign', 'Excel'];
     let current = null;
 
     function status(message, error = false) {
@@ -116,15 +127,26 @@
     function render(context) {
         const { data, editing, saving, options } = context;
         const mode = context.mode || 'description';
-        const titles = { name: 'Cambiar nombre', appearance: 'Apariencia del botón', description: 'Descripción del botón' };
+        const titles = { name: 'Cambiar nombre', appearance: 'Apariencia del botón', description: 'Descripción del botón', maintenance: 'Mantención del botón' };
         byId('Title').textContent = editing ? titles[mode] : data ? data.name || options.defaultName || 'Botón' : options.name || 'Descripción del botón';
         byId('Category').textContent = context.button.category_name || '';
-        byId('Appearance').hidden = !editing;
+        byId('Appearance').hidden = !editing || mode === 'maintenance';
         byId('NameSection').hidden = mode !== 'name';
         byId('ColorSection').hidden = mode !== 'appearance';
         byId('DescriptionSection').hidden = mode !== 'description';
-        byId('Rows').hidden = editing && mode !== 'description';
-        byId('Edit').hidden = !options.assign || !data?.can_edit || editing;
+        byId('MaintenanceEditor').hidden = !editing || mode !== 'maintenance';
+        byId('ClearMaintenance').hidden = !data?.maintenance;
+        byId('MaintenanceSummary').hidden = editing || !data?.maintenance;
+        if (data?.maintenance) {
+            const { last_date, next_date } = data.maintenance;
+            const { formatDate, frequency } = window.buttonMaintenanceForm;
+            byId('LastMaintenance').textContent = formatDate(last_date);
+            byId('MaintenanceFrequency').textContent = frequency(data.maintenance);
+            byId('NextMaintenance').textContent = formatDate(next_date);
+        }
+        byId('Rows').hidden = editing ? mode !== 'description' : !data?.show_description;
+        byId('Edit').hidden = !options.assign || !data?.can_edit || !data?.show_description || editing;
+        byId('EditMaintenance').hidden = !options.assign || !data?.can_edit || editing;
         byId('Add').hidden = byId('Save').hidden = byId('Cancel').hidden = !editing;
         byId('Add').hidden = !editing || mode !== 'description';
         byId('Save').textContent = mode === 'description' ? 'Guardar descripción' : 'Guardar cambios';
@@ -135,6 +157,7 @@
         byId('Add').disabled = saving || (context.draft?.length || 0) >= 64;
         byId('Excel').disabled = saving || editing || !options.openExcel || !data;
         for (const control of byId('Appearance').querySelectorAll('input')) control.disabled = saving;
+        byId('Maintenance').disabled = saving;
         for (const control of byId('Rows').querySelectorAll('input,textarea,button')) control.disabled = saving;
         byId('Color').disabled = saving || !byId('CustomColor').checked;
     }
@@ -142,7 +165,7 @@
     async function open(button, options) {
         if (!button.details_url || !(await window.workbookEditor.requestClose())) return;
         const context = current = { button, options, user: appState.user?.id, data: null, editing: false, saving: false };
-        status('Cargando descripción…');
+        status('Cargando datos del botón…');
         render(context);
         modal.show();
         try {
@@ -151,7 +174,7 @@
             context.data = data;
             render(context);
             status(options.openExcel ? '' : 'Este botón todavía no tiene una hoja vinculada.');
-            if (options.edit && data.can_edit) startEdit();
+            if (options.edit && data.can_edit) startEdit(typeof options.edit === 'string' ? options.edit : 'description');
         } catch (error) { if (isCurrent(context)) status(error.message, true); }
     }
 
@@ -163,21 +186,25 @@
 
     byId('Excel').onclick = () => afterClose(current?.options.openExcel);
     byId('Assign').onclick = () => afterClose(current?.options.assign);
-    function startEdit() {
+    function startEdit(mode) {
         if (!current?.options.assign || !current.data?.can_edit) return;
         current.editing = true;
-        current.mode = typeof current.options.edit === 'string' ? current.options.edit : 'description';
+        current.mode = mode;
         current.draft = current.data.descriptions.map(row => ({ ...row }));
         byId('Name').value = current.data.name;
         byId('Name').maxLength = current.options.kind === 'dxf' ? 255 : 120;
         byId('CustomColor').checked = Boolean(current.data.color);
         byId('Enabled').checked = current.data.show_description;
         byId('Color').value = current.data.color || defaultPlanButtonColor;
+        if (mode === 'maintenance') maintenanceForm.set(current.data.maintenance);
         render(current);
         status('');
-        byId(current.mode === 'name' ? 'Name' : current.mode === 'appearance' ? 'CustomColor' : 'Enabled').focus();
+        const focus = { name: 'Name', appearance: 'CustomColor', description: 'Enabled', maintenance: 'MaintenanceDate' };
+        byId(focus[mode]).focus();
     }
-    byId('Edit').onclick = startEdit;
+    byId('Edit').onclick = () => startEdit('description');
+    byId('EditMaintenance').onclick = () => startEdit('maintenance');
+    byId('ClearMaintenance').onclick = () => maintenanceForm.set(null);
     byId('CustomColor').onchange = () => { byId('Color').disabled = !byId('CustomColor').checked; };
     byId('Add').onclick = () => {
         if (!current?.editing || current.draft.length >= 64) return;
@@ -200,6 +227,10 @@
             data.show_description = byId('Enabled').checked;
             if (JSON.stringify(context.draft) !== JSON.stringify(context.data.descriptions)) data.descriptions = context.draft;
         }
+        if (context.mode === 'maintenance') {
+            try { data.maintenance = maintenanceForm.read(); }
+            catch (error) { status(error.message, true); return; }
+        }
         context.saving = true;
         render(context);
         status('Guardando…');
@@ -215,7 +246,7 @@
             context.saving = false;
             if (isCurrent(context)) {
                 render(context);
-                if (!context.editing && context.mode !== 'description') modal.hide();
+                if (!context.editing && ['name', 'appearance'].includes(context.mode)) modal.hide();
             }
         }
     };

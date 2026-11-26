@@ -249,7 +249,20 @@ class PlanRoleGroup(models.Model):
         ordering = ['name']
 
 
+class MaintenanceUnit(models.TextChoices):
+    DAYS = 'days', 'Días'
+    WEEKS = 'weeks', 'Semanas'
+    MONTHS = 'months', 'Meses'
+    YEARS = 'years', 'Años'
+
+
 class ButtonSource(models.Model):
+    button_creator = models.CharField(max_length=150, blank=True)
+    maintenance_key = models.UUIDField(null=True, blank=True, editable=False, db_index=True)
+    last_maintenance = models.DateField(null=True, blank=True)
+    maintenance_interval = models.PositiveSmallIntegerField(null=True, blank=True)
+    maintenance_unit = models.CharField(max_length=6, choices=MaintenanceUnit.choices, blank=True)
+    next_maintenance = models.DateField(null=True, blank=True, db_index=True)
     button_scale = models.FloatField(default=1)
     piece_source = models.BooleanField(default=False)
     area_shape = models.CharField(max_length=12, default='ellipse')
@@ -360,6 +373,37 @@ class PdfMarker(ButtonSource):
 
     class Meta:
         ordering = ['id']
+
+
+class MaintenanceNotification(models.Model):
+    class Kind(models.TextChoices):
+        ALERT = 'alert', 'Mantención vencida'
+        REPLY = 'reply', 'Mensaje de administración'
+
+    kind = models.CharField(max_length=5, choices=Kind.choices)
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    responsible = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    responsible_name = models.CharField(max_length=301)
+    maintenance_key = models.UUIDField()
+    last_maintenance = models.DateField()
+    due_date = models.DateField()
+    day = models.DateField()
+    plan_name = models.CharField(max_length=255)
+    button_name = models.CharField(max_length=255)
+    category_name = models.CharField(max_length=80, blank=True)
+    reply_to = models.ForeignKey('self', null=True, on_delete=models.SET_NULL, related_name='+')
+    sender_name = models.CharField(max_length=301, blank=True)
+    message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-day', '-id']
+        indexes = [models.Index(fields=['recipient', '-day', '-id'], name='maintenance_inbox_order')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['maintenance_key', 'last_maintenance', 'recipient', 'day'],
+                condition=models.Q(kind='alert'), name='unique_daily_maintenance_alert',
+            ),
+        ]
 
 
 class SavedProject(models.Model):

@@ -15,6 +15,7 @@
     <a class="back-link" href="/">← Volver a los planos</a>
     <h1 class="mt-3 mb-1">Administración{% if company_name %} · {{ company_name }}{% endif %}</h1>
     <p class="text-secondary mb-0">Solicitudes, usuarios y categorías en un solo lugar.</p>
+    <a href="{% url 'notifications' %}" class="btn btn-outline-primary btn-sm mt-3"><i class="bi bi-bell" aria-hidden="true"></i> Buzón de notificaciones</a>
     {% if can_edit_company %}<a href="{% url 'company_profile' %}" class="btn btn-outline-primary btn-sm mt-3">Configuración de la empresa</a>{% endif %}
   </header>
   <div class="management-summary mb-4" id="managementSummary"></div>

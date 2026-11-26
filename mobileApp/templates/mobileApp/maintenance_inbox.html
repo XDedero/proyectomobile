@@ -1,0 +1,64 @@
+{% load static %}
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buzón de notificaciones</title>
+  <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap-icons.css' %}">
+  <link rel="stylesheet" href="{% static 'mobileApp/management.css' %}?v={{ asset_version }}">
+  {% include 'mobileApp/company_theme.html' %}
+</head>
+<body>
+<main class="container management-shell py-4 py-lg-5">
+  <header class="mb-4">
+    <nav class="d-flex flex-wrap gap-3 mb-3" aria-label="Volver">
+      <a class="back-link" href="{% url 'index' %}">← Volver a los planos</a>
+      {% if can_reply %}<a class="back-link" href="{% url 'management_panel' %}">Administración</a>{% endif %}
+    </nav>
+    <h1>Buzón de notificaciones</h1>
+  </header>
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}" role="status">{{ message }}</div>
+  {% endfor %}
+  <div class="d-grid gap-3">
+    {% for item in page %}
+    <article class="management-card text-break">
+      <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+        <h2 class="h5 mb-0">{{ item.get_kind_display }}</h2>
+        <time class="small text-secondary" datetime="{{ item.day|date:'Y-m-d' }}">{{ item.day|date:'d-m-Y' }}</time>
+      </div>
+      {% if item.kind == 'alert' %}
+        <p class="mb-2">No se ha registrado la mantención de <strong>{{ item.button_name }}</strong>{% if item.category_name %} ({{ item.category_name }}){% endif %} en el plano <strong>{{ item.plan_name }}</strong>.</p>
+        <p class="small mb-2">Fecha de vencimiento <strong>{{ item.due_date|date:'d-m-Y' }}</strong> · Usuario responsable <strong>{{ item.responsible_name }}</strong></p>
+        {% if can_reply and item.responsible.is_active %}
+          <details class="mt-3">
+            <summary>Responder a {{ item.responsible_name }}</summary>
+            <form class="mt-2" method="post" action="{% url 'reply_to_notification' item.pk %}">
+              {% csrf_token %}
+              <label for="message-{{ item.pk }}" class="form-label">Mensaje</label>
+              <textarea id="message-{{ item.pk }}" class="form-control mb-2" name="message" rows="3" maxlength="2000" required></textarea>
+              <button type="submit" class="btn btn-primary btn-sm">Enviar mensaje</button>
+            </form>
+          </details>
+        {% endif %}
+      {% else %}
+        <p class="small mb-2">De <strong>{{ item.sender_name }}</strong> · <strong>{{ item.button_name }}</strong> · Plano <strong>{{ item.plan_name }}</strong> · Vencimiento <strong>{{ item.due_date|date:'d-m-Y' }}</strong></p>
+        <p class="mb-0" style="white-space: pre-wrap">{{ item.message }}</p>
+      {% endif %}
+    </article>
+    {% empty %}
+    <p class="management-card mb-0">Aún no tienes notificaciones.</p>
+    {% endfor %}
+  </div>
+  {% if page.has_other_pages %}
+    <nav class="d-flex flex-wrap align-items-center gap-3 mt-4" aria-label="Páginas del buzón">
+      {% if page.has_previous %}<a class="btn btn-outline-secondary btn-sm" href="?page={{ page.previous_page_number }}">Anterior</a>{% endif %}
+      <span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}<a class="btn btn-outline-secondary btn-sm" href="?page={{ page.next_page_number }}">Siguiente</a>{% endif %}
+    </nav>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -39,9 +39,15 @@ def copy_document(document, memo):
 
 
 def copy_markers(source, destination, documents, previous=None):
+    from .maintenance_alerts import finish_cycle
+
     model, related = (Motor, 'motors') if isinstance(source, Plan) else (PdfMarker, 'markers')
     result, retained, created, updated, pairs = {}, [], [], [], []
-    existing = {marker.pk: marker for marker in getattr(destination, related).all()}
+    publishing = source.draft_of_id == destination.pk
+    targets = getattr(destination, related).all()
+    if publishing:
+        targets = targets.select_for_update()
+    existing = {marker.pk: marker for marker in targets}
     for marker in getattr(source, related).select_related('workbook', 'source_workbook'):
         values = {f.attname: deepcopy(getattr(marker, f.attname)) for f in model._meta.concrete_fields
                   if not f.primary_key and f.name not in ('plan', 'workbook', 'source_workbook')}
@@ -50,6 +56,11 @@ def copy_markers(source, destination, documents, previous=None):
         original_id = (previous or {}).get(str(marker.pk))
         target = existing.get(original_id)
         if target:
+            if publishing:
+                changed = {field for field in ('last_maintenance', 'next_maintenance')
+                           if getattr(target, field) != values[field]}
+                if changed:
+                    finish_cycle(target, changed)
             for key, value in values.items():
                 setattr(target, key, value)
             updated.append(target)

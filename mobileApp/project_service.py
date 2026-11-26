@@ -69,6 +69,7 @@ def open_plan_source(kind, plan):
 def export_project(kind, plan, *, source=None):
     from .display_settings import clean_display
     from .button_descriptions import TemplateReader, snapshot_details
+    from .maintenance import export_schedule
     from .plan_workbook import ensure_workbook
     from .xlsx_package import sheet_names
     document = ensure_workbook(plan)
@@ -82,12 +83,12 @@ def export_project(kind, plan, *, source=None):
                     'area_radius_y': getattr(item, 'area_radius_y', None),
                     'area_color': getattr(item, 'area_color', 'rgba(59, 130, 246, 0.25)'),
                     'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
-                    **category_data(item), **snapshot_details(item, reader)}
+                    **category_data(item), **snapshot_details(item, reader), **export_schedule(item)}
                        for item in plan.markers.select_related('category')]
         else:
             markers = [{'entity_key': item.entity_key, 'name': item.name, 'x': item.x, 'y': item.y, 'z': item.z,
                     'workbook': 'w1' if item.sheet_name else None, 'sheet': item.sheet_name,
-                    **category_data(item), **snapshot_details(item, reader)}
+                    **category_data(item), **snapshot_details(item, reader), **export_schedule(item)}
                        for item in plan.motors.select_related('category')]
     manifest = {
         'format': 'motor-plan-project', 'version': 3, 'kind': kind, 'name': plan.name,
@@ -151,11 +152,12 @@ def finite(value):
 
 
 @transaction.atomic
-def import_shared_project(plan, kind, source, svg, markers, books, manifest, user):
+def import_shared_project(plan, kind, source, svg, markers, books, manifest, user, *, restore_maintenance=False):
     from .sectors import clean_sectors
     plan.sectors = clean_sectors(manifest.get('sectors', []), pages=len(plan.pages) if kind == 'pdf' else 1)
     from .button_descriptions import imported_details
     from .display_settings import clean_display
+    from .maintenance import import_schedule
     plan.display_settings = clean_display(manifest.get('display_settings', {}))
     key = manifest.get('workbook')
     if not isinstance(key, str) or key not in books or len(books) != 1:
@@ -197,7 +199,7 @@ def import_shared_project(plan, kind, source, svg, markers, books, manifest, use
         sheet = item.get('sheet')
         if not isinstance(sheet, str) or (sheet and (sheet not in motor_names or item.get('workbook') != key)) or (not sheet and item.get('workbook') is not None):
             raise ValidationError('Un botón apunta a una hoja de motor inexistente.')
-        details.append(imported_details(item))
+        details.append({**imported_details(item), **import_schedule(item, user, restore=restore_maintenance)})
     document = WorkbookDocument.objects.create(name=info['name'], content=info['content'], plan_mode=manifest['workbook_mode'], updated_by=user)
     PlanWorkbookSheet.objects.bulk_create([PlanWorkbookSheet(workbook=document, name=row['name'],
         is_listing=row['is_listing'], is_primary=row['is_primary'], listing_order=row['listing_order'],

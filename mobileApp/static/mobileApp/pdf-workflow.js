@@ -196,7 +196,7 @@
     }
 
     async function openSelectedButton(marker) {
-        if (marker.show_description) await showButtonDetails(marker);
+        if (marker.show_description || marker.maintenance) await showButtonDetails(marker);
         else if (marker.workbook) await openWorkbook(marker.workbook);
         else await configureMarker();
     }

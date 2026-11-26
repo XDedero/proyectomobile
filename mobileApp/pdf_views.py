@@ -91,6 +91,7 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
 
 
 def marker_data(marker):
+    from .maintenance import schedule_data
     from .plan_workbook import source_workbook_data
 
     assign_url = reverse('assign_marker_workbook', args=[marker.pk])
@@ -101,6 +102,7 @@ def marker_data(marker):
     return {
         'id': marker.pk, 'page': marker.page, 'x': marker.x, 'y': marker.y, 'label': marker.label,
         'button_color': marker.button_color, 'show_description': marker.show_description,
+        'maintenance': schedule_data(marker),
         'details_url': reverse('button_details', args=['pdf', marker.pk]),
         'sheet_name': marker.sheet_name,
         'category_id': marker.category_id,
@@ -255,6 +257,7 @@ def validated_marker(plan, data, *, partial=False):
 @require_POST
 @api_permissions()
 def create_marker(request, plan_id):
+    from .maintenance import new_schedule
     from .plan_workbook import initialize_button, new_button_options, WorkbookConflict
 
     plan = get_object_or_404(PdfPlan, pk=plan_id)
@@ -263,7 +266,8 @@ def create_marker(request, plan_id):
         data = validated_marker(plan, values)
         with transaction.atomic():
             marker = PdfMarker.objects.create(plan=plan, category=category, show_description=values.get('show_description', False),
-                button_color=values['button_color'], descriptions=values.get('descriptions'), **data)
+                button_color=values['button_color'], descriptions=values.get('descriptions'),
+                **data, **new_schedule(values, request.user))
             initialize_button(marker, request.user, origin, upload)
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)

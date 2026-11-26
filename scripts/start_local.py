@@ -107,8 +107,12 @@ def main():
         server = subprocess.Popen(
             [str(python), '-u', 'manage.py', 'runserver', f'{HOST}:{PORT}', '--noreload'], cwd=ROOT,
         )
+        maintenance_worker = None
         try:
             wait_until_ready(server)
+            maintenance_worker = subprocess.Popen(
+                [str(python), '-u', 'manage.py', 'generate_maintenance_alerts', '--watch'], cwd=ROOT,
+            )
             print(f'Aplicación lista en {URL}', flush=True)
             if not options.no_browser:
                 try:
@@ -117,6 +121,9 @@ def main():
                     pass  # The server remains available at the address printed above.
             return server.wait()
         finally:
+            if maintenance_worker is not None and maintenance_worker.poll() is None:
+                maintenance_worker.terminate()
+                maintenance_worker.wait()
             if server.poll() is None:
                 server.terminate()
                 server.wait()

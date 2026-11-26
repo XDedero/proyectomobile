@@ -31,6 +31,7 @@
         <div class="d-flex flex-wrap gap-2 mb-3">
           <button type="button" id="btnButtonNameOptions" class="btn btn-outline-secondary btn-sm">Cambiar nombre</button>
           <button type="button" id="btnButtonAppearanceOptions" class="btn btn-outline-secondary btn-sm">Apariencia</button>
+          <button type="button" id="btnButtonMaintenanceOptions" class="btn btn-outline-secondary btn-sm">Mantención</button>
           <button type="button" id="btnCopyPlanButton" class="btn btn-outline-primary btn-sm">Copiar botón</button>
         </div>
         <div class="border rounded p-2 mb-3">
@@ -103,6 +104,7 @@
         <input id="newButtonName" class="form-control mb-3" maxlength="120" placeholder="Se usará el número del botón">
         <label class="form-label" for="newButtonColor">Color del botón</label>
         <input type="color" id="newButtonColor" class="form-control form-control-color mb-3" value="${defaultPlanButtonColor}">
+        ${window.buttonMaintenanceForm.fields('newButton')}
         <div class="form-check form-switch mb-2">
           <input type="checkbox" class="form-check-input" id="newButtonDescriptionEnabled">
           <label class="form-check-label" for="newButtonDescriptionEnabled">Añadir descripción al botón</label>
@@ -133,6 +135,7 @@
         <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
         <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
     newButtonModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
+    const newButtonMaintenance = window.buttonMaintenanceForm.connect('newButton');
     listingsModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     let newButton = null;
 
@@ -199,6 +202,7 @@
         byId('newButtonName').value = '';
         byId('newButtonName').maxLength = context.kind === 'dxf' ? 255 : 120;
         byId('newButtonColor').value = defaultPlanButtonColor;
+        newButtonMaintenance.set(null);
         byId('newButtonDescriptionEnabled').checked = false;
         byId('newButtonDescriptionOptions').hidden = true;
         byId('newButtonDescriptions').replaceChildren();
@@ -237,12 +241,13 @@
         if (descriptions.some(row => !row.key) || new Set(descriptions.map(row => row.key.toLocaleLowerCase())).size !== descriptions.length) return message(newButtonModal, 'Cada descripción necesita una clave distinta.', true);
         busy(newButtonModal, true);
         try {
+            const maintenance = newButtonMaintenance.read();
             const upload = file ? await window.workbookFields.normalizeUpload(file) : undefined;
             if (newButton !== draft || !valid(draft.context)) return;
             draft.result = { origin, saved_piece_id:origin === 'piece' ? Number(byId('newButtonPiece').value) : undefined,
                 sheet: origin === 'sheet' ? byId('newButtonSheet').value : undefined,
                 category_id: byId('newButtonCategory').value, show_description: byId('newButtonDescriptionEnabled').checked,
-                button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined,
+                button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined, maintenance,
                 name: byId('newButtonName').value.trim() || undefined, label: byId('newButtonName').value.trim() || undefined, file: upload };
             await hide(newButtonModal);
         } catch (error) {
@@ -581,6 +586,7 @@
     byId('btnButtonNameOptions').onclick = () => editButtonOption('name');
     byId('btnButtonAppearanceOptions').onclick = () => editButtonOption('appearance');
     byId('btnButtonDetailsOptions').onclick = () => editButtonOption('description');
+    byId('btnButtonMaintenanceOptions').onclick = () => editButtonOption('maintenance');
     async function copyButton(context, marker, dialog = null) {
         if (!marker || !valid(context) || !context.plan.permissions?.can_copy_button || active().isBusy?.() || window.planSectors?.editing) return;
         if (window.planDisplay && !(await window.planDisplay.flush())) return;
