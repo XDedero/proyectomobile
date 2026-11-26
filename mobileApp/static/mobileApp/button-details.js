@@ -40,6 +40,11 @@
               <div><dt>Frecuencia</dt><dd id="buttonDetailsMaintenanceFrequency"></dd></div>
               <div id="buttonDetailsNextMaintenanceRow"><dt>Próxima mantención</dt><dd id="buttonDetailsNextMaintenance" class="fw-semibold"></dd></div>
             </dl>
+            <section id="buttonDetailsMaintenanceResult" class="border rounded p-3 mb-3" hidden>
+              <h3 class="h6 mb-2">Última mantención confirmada</h3>
+              <p class="small mb-1"><strong id="buttonDetailsMaintenanceResultTitle"></strong> · <time id="buttonDetailsMaintenanceResultDate"></time></p>
+              <p id="buttonDetailsMaintenanceResultDescription" class="small text-break mb-0" style="white-space: pre-wrap"></p>
+            </section>
             <div id="buttonDetailsRows"></div>
             <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="buttonDetailsAdd" hidden>Añadir descripción</button>
             <p id="buttonDetailsStatus" class="small mb-0" role="status"></p>
@@ -138,6 +143,14 @@
         byId('MaintenanceEditor').hidden = !editing || mode !== 'maintenance';
         byId('ClearMaintenance').hidden = !data?.maintenance || data.maintenance_required;
         byId('MaintenanceSummary').hidden = editing || !data?.maintenance;
+        const latest = data?.latest_maintenance;
+        byId('MaintenanceResult').hidden = editing || !latest;
+        if (latest) {
+            byId('MaintenanceResultTitle').textContent = latest.title;
+            byId('MaintenanceResultDescription').textContent = latest.description;
+            byId('MaintenanceResultDate').dateTime = latest.performed_on;
+            byId('MaintenanceResultDate').textContent = window.buttonMaintenanceForm.formatDate(latest.performed_on);
+        }
         const warning = byId('MaintenanceStatus');
         warning.textContent = data?.maintenance?.overdue ? 'Por favor realizar mantención'
             : data?.maintenance_required && !data.maintenance ? 'Registra la mantención obligatoria de este botón.' : '';

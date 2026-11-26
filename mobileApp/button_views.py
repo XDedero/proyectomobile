@@ -7,7 +7,7 @@ from django.views.decorators.http import require_http_methods
 from .access import api_permissions, can_edit_plan
 from .button_descriptions import TemplateReader, clean_color, clean_rows, effective_descriptions
 from .maintenance import schedule_data, update_schedule
-from .models import Motor, PdfMarker
+from .models import LatestMaintenance, Motor, PdfMarker
 from .pdf_views import error_response, json_body, marker_data
 from .views import motor_data
 
@@ -58,6 +58,9 @@ def button_details(request, kind, button_id):
               'show_description': button.show_description, 'maintenance': schedule_data(button),
               'maintenance_required': button.maintenance_required,
               'descriptions': [{key: row[key] for key in ('id', 'key', 'value')} for row in (rows or [])]}
+    if button.maintenance_key:
+        result['latest_maintenance'] = LatestMaintenance.objects.filter(
+            pk=button.maintenance_key).values('title', 'description', 'performed_on').first()
     if request.method == 'POST':
         result['button'] = marker_data(button) if kind == 'pdf' else motor_data(button)
     return JsonResponse(result)

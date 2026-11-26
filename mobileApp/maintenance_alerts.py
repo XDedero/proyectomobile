@@ -31,7 +31,10 @@ def administrators():
 
 def record_notifications(button, today, admins, responsible):
     recipients = set(admins)
-    if responsible and responsible.is_active:
+    if responsible and responsible.is_active and not MaintenanceNotification.objects.filter(
+        kind=MaintenanceNotification.Kind.RETRY, maintenance_key=button.maintenance_key, recipient=responsible,
+        last_maintenance=button.last_maintenance, due_date=button.next_maintenance,
+    ).exists():
         recipients.add(responsible.pk)
     if not recipients:
         return
@@ -110,12 +113,15 @@ def generate_alerts(*, today=None, recipient=None):
 
 
 def generate_all_workspaces():
+    from .maintenance_reports import cleanup_reports
+
     generate_alerts()
+    cleanup_reports()
     if not settings.PLANOS_CLOUD_MODE:
         return
     from .company_access import usable_companies
-    from .models import CompanyAccount, CompanyAdminSetup, RELONCAVI_COMPANY_ID, UserProfile
-    from .tenant_runtime import schema_name, using_schema, workspace_is_ready, workspace_user
+    from .models import CompanyAccount, CompanyAdminSetup, CompanyDriveConnection, RELONCAVI_COMPANY_ID, UserProfile
+    from .tenant_runtime import Workspace, load_drive, schema_name, using_schema, workspace, workspace_is_ready, workspace_user
 
     companies = usable_companies().exclude(pk=RELONCAVI_COMPANY_ID)
     for company_id in companies.values_list('pk', flat=True):
@@ -127,10 +133,17 @@ def generate_all_workspaces():
             *CompanyAccount.objects.filter(company_id=company_id, role=UserProfile.Role.ADMINISTRATOR),
         ]
         try:
+            drive = load_drive(company_id, CompanyDriveConnection.objects.filter(company_id=company_id).first())
             with using_schema(schema):
                 for account in accounts:
                     workspace_user(account)
                 generate_alerts()
+                if drive:
+                    token = workspace.set(Workspace(schema, str(company_id), {}, drive))
+                    try:
+                        cleanup_reports()
+                    finally:
+                        workspace.reset(token)
         except DatabaseError:
             logger.exception('No se pudieron generar las alertas de mantención del espacio %s.', schema)
 

@@ -4,7 +4,7 @@ from copy import deepcopy
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Motor, PdfMarker, Plan, PlanWorkbookSheet, SavedProject, WorkbookDocument
+from .models import LatestMaintenance, Motor, PdfMarker, Plan, PlanWorkbookSheet, SavedProject, WorkbookDocument
 
 
 def saved_version(plan):
@@ -39,6 +39,7 @@ def copy_document(document, memo):
 
 
 def copy_markers(source, destination, documents, previous=None):
+    from .maintenance import keep_approved_date
     from .maintenance_alerts import clear_resolved_alerts
 
     model, related = (Motor, 'motors') if isinstance(source, Plan) else (PdfMarker, 'markers')
@@ -48,6 +49,8 @@ def copy_markers(source, destination, documents, previous=None):
     if publishing:
         targets = targets.select_for_update()
     existing = {marker.pk: marker for marker in targets}
+    latest = LatestMaintenance.objects.in_bulk({marker.maintenance_key for marker in existing.values()
+                                               if marker.maintenance_key}) if publishing else {}
     for marker in getattr(source, related).select_related('workbook', 'source_workbook'):
         values = {f.attname: deepcopy(getattr(marker, f.attname)) for f in model._meta.concrete_fields
                   if not f.primary_key and f.name not in ('plan', 'workbook', 'source_workbook')}
@@ -56,8 +59,11 @@ def copy_markers(source, destination, documents, previous=None):
         original_id = (previous or {}).get(str(marker.pk))
         target = existing.get(original_id)
         if target:
-            if publishing and target.next_maintenance != marker.next_maintenance:
-                clear_resolved_alerts(target.maintenance_key, marker.next_maintenance)
+            approved = latest.get(marker.maintenance_key)
+            if approved:
+                keep_approved_date(values, approved.performed_on)
+            if publishing and target.next_maintenance != values['next_maintenance']:
+                clear_resolved_alerts(target.maintenance_key, values['next_maintenance'])
             for key, value in values.items():
                 setattr(target, key, value)
             updated.append(target)

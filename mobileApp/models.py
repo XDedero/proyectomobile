@@ -386,6 +386,7 @@ class MaintenanceNotification(models.Model):
         ALERT = 'alert', 'Mantención vencida'
         REMINDER = 'reminder', 'Mantención próxima'
         REPLY = 'reply', 'Mensaje de administración'
+        RETRY = 'retry', 'Mantención por completar'
 
     kind = models.CharField(max_length=8, choices=Kind.choices)
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
@@ -414,7 +415,47 @@ class MaintenanceNotification(models.Model):
                 fields=['maintenance_key', 'last_maintenance', 'due_date', 'recipient'],
                 condition=models.Q(kind='reminder'), name='unique_maintenance_reminder',
             ),
+            models.UniqueConstraint(
+                fields=['maintenance_key', 'recipient'],
+                condition=models.Q(kind='retry'), name='unique_maintenance_retry',
+            ),
         ]
+
+
+class MaintenanceSubmission(models.Model):
+    class Status(models.TextChoices):
+        UPLOADING = 'uploading', 'Subiendo evidencia'
+        PENDING = 'pending', 'Pendiente de revisión'
+        CLEANUP = 'cleanup', 'Eliminando evidencia'
+
+    maintenance_key = models.UUIDField()
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    status = models.CharField(max_length=9, choices=Status.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_maintenance = models.DateField()
+    due_date = models.DateField()
+    plan_name = models.CharField(max_length=255, blank=True)
+    button_name = models.CharField(max_length=255, blank=True)
+    responsible_name = models.CharField(max_length=301, blank=True)
+    title = models.CharField(max_length=120, blank=True)
+    description = models.TextField(blank=True)
+    drive_images = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['status', 'created_at'], name='maintenance_review_queue')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['maintenance_key'], condition=models.Q(status__in=['uploading', 'pending']),
+                name='unique_open_maintenance_report',
+            ),
+        ]
+
+
+class LatestMaintenance(models.Model):
+    maintenance_key = models.UUIDField(primary_key=True)
+    title = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    performed_on = models.DateField()
 
 
 class SavedProject(models.Model):

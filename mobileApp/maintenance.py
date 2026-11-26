@@ -84,6 +84,14 @@ def schedule_data(button):
     }
 
 
+def keep_approved_date(values, performed_on):
+    """Keep an approved cycle when restoring an older snapshot or draft."""
+    last = values['last_maintenance']
+    if last and performed_on and last < performed_on:
+        values['last_maintenance'] = performed_on
+        values['next_maintenance'] = next_date(performed_on, values['maintenance_interval'], values['maintenance_unit'])
+
+
 def export_schedule(button):
     result = {}
     if button.button_creator:

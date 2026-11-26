@@ -157,7 +157,7 @@ def import_shared_project(plan, source, markers, books, manifest, user, *, resto
     plan.sectors = clean_sectors(manifest.get('sectors', []), pages=len(plan.pages))
     from .button_descriptions import imported_details
     from .display_settings import clean_display
-    from .maintenance import import_schedule
+    from .maintenance import import_schedule, keep_approved_date
     plan.display_settings = clean_display(manifest.get('display_settings', {}))
     key = manifest.get('workbook')
     if not isinstance(key, str) or key not in books or len(books) != 1:
@@ -200,6 +200,14 @@ def import_shared_project(plan, source, markers, books, manifest, user, *, resto
         if not isinstance(sheet, str) or (sheet and (sheet not in motor_names or item.get('workbook') != key)) or (not sheet and item.get('workbook') is not None):
             raise ValidationError('Un botón apunta a una hoja de motor inexistente.')
         details.append({**imported_details(item), **import_schedule(item, user, restore=restore_maintenance)})
+    if restore_maintenance:
+        from .models import LatestMaintenance
+
+        latest = LatestMaintenance.objects.in_bulk({item['maintenance_key'] for item in details} - {None})
+        for item in details:
+            approved = latest.get(item['maintenance_key'])
+            if approved:
+                keep_approved_date(item, approved.performed_on)
     document = WorkbookDocument.objects.create(name=info['name'], content=info['content'], plan_mode=manifest['workbook_mode'], updated_by=user)
     PlanWorkbookSheet.objects.bulk_create([PlanWorkbookSheet(workbook=document, name=row['name'],
         is_listing=row['is_listing'], is_primary=row['is_primary'], listing_order=row['listing_order'],

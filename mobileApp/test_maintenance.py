@@ -13,11 +13,17 @@ from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from PIL import Image
 
 from .cloud_projects import open_cloud_project
 from .maintenance import next_date
 from .maintenance_alerts import generate_alerts
-from .models import ButtonCategory, MaintenanceNotification, PdfMarker, SavedPiece, UserProfile, WorkbookDocument
+from .maintenance_reports import cleanup_reports
+from .maintenance_storage import EvidenceUnavailable
+from .models import (
+    ButtonCategory, LatestMaintenance, MaintenanceNotification, MaintenanceSubmission,
+    PdfMarker, SavedPiece, UserProfile, WorkbookDocument,
+)
 from .motor_service import template_bytes
 from .project_service import import_project
 from .test_pdf import pdf_upload
@@ -319,6 +325,111 @@ class MaintenanceTests(TestCase):
         self.assertEqual(independent.next_maintenance, original.next_maintenance)
         self.assertNotEqual(independent.maintenance_key, original.maintenance_key)
         self.assertEqual(independent.button_creator, self.creator.username)
+
+    def report_fixture(self):
+        plan = self.plan('pdf')
+        marker = self.add_button('pdf', plan, maintenance=self.schedule)
+        button = PdfMarker.objects.get(pk=marker['id'])
+        button.button_creator = self.creator.username
+        button.save(update_fields=['button_creator'])
+        self.today.return_value = date(2026, 11, 27)
+        generate_alerts()
+        inbox = reverse('notifications')
+        notice = MaintenanceNotification.objects.get(recipient=self.creator)
+        worker = Client()
+        worker.force_login(self.creator)
+        admin = Client()
+        admin.force_login(self.admin)
+        return plan, marker, button, inbox, notice, worker, admin
+
+    @staticmethod
+    def evidence():
+        buffer = BytesIO()
+        Image.new('RGB', (24, 24), 'blue').save(buffer, format='PNG')
+        return SimpleUploadedFile('evidencia.png', buffer.getvalue(), content_type='image/png')
+
+    def test_report_review_rejection_resubmission_and_latest_approval(self):
+        plan, marker, button, inbox, notice, worker, admin = self.report_fixture()
+        old_draft = self.post(plan['draft_url']).json()['plan']
+        LatestMaintenance.objects.create(maintenance_key=button.maintenance_key, title='Previo',
+                                         description='Trabajo anterior', performed_on=button.last_maintenance)
+        submit = reverse('submit_maintenance', args=[notice.pk])
+        photos = ['evidencia_1', 'evidencia_2', 'evidencia_3']
+        self.assertContains(worker.get(inbox), 'Informar mantención realizada', count=1)
+        self.assertEqual(self.client.post(submit, {'title': 'Ajeno'}).status_code, 404)
+        with patch('mobileApp.maintenance_reports.EvidenceDrive') as storage:
+            drive = storage.return_value
+            drive.reserve.return_value = photos
+            self.assertRedirects(worker.post(submit, {'title': 'Inspección', 'description': 'Primer informe',
+                                                      'images': [self.evidence() for _ in photos]}), inbox)
+            pending = MaintenanceSubmission.objects.get()
+            drive.reserve.assert_called_once_with(3)
+            self.assertEqual([call.args[0] for call in drive.upload.call_args_list], photos)
+            self.assertTrue(all(call.args[1].startswith(b'\xff\xd8') for call in drive.upload.call_args_list))
+            self.assertContains(worker.get(inbox), 'Reporte en espera de revisión.')
+            self.assertNotContains(worker.get(inbox), 'Informar mantención realizada')
+            self.assertContains(admin.get(inbox), 'Inspección')
+            self.assertContains(admin.get(inbox), 'Primer informe')
+            self.assertContains(admin.get(inbox), 'alt="Ver imagen', count=3)
+            self.assertRedirects(worker.post(submit, {'title': 'Duplicado'}), inbox)
+            self.assertEqual(MaintenanceSubmission.objects.count(), 1)
+            image = reverse('maintenance_image', args=[pending.pk, 1])
+            decision = reverse('decide_maintenance', args=[pending.pk])
+            self.assertEqual(worker.get(image).status_code, 403)
+            self.assertEqual(worker.post(decision, {'decision': 'accept'}).status_code, 403)
+            with patch('mobileApp.maintenance_views.EvidenceDrive', return_value=drive):
+                drive.download.return_value = b'image'
+                response = admin.get(image)
+                self.assertEqual(response.content, b'image')
+                self.assertIn('no-store', response.headers['Cache-Control'])
+            self.assertRedirects(admin.post(decision, {'decision': 'reject'}), inbox)
+            self.assertEqual([call.args[0] for call in drive.delete.call_args_list], photos)
+            self.assertEqual(admin.get(image).status_code, 404)
+        self.assertFalse(MaintenanceSubmission.objects.exists())
+        self.assertEqual(LatestMaintenance.objects.get().title, 'Previo')
+        retry = MaintenanceNotification.objects.get(recipient=self.creator, kind='retry')
+        self.assertContains(worker.get(inbox), 'Volver a enviar mantención', count=1)
+        self.assertRedirects(worker.post(reverse('submit_maintenance', args=[retry.pk]),
+                                         {'title': 'Inspección terminada'}), inbox)
+        pending = MaintenanceSubmission.objects.get()
+        self.assertRedirects(admin.post(reverse('decide_maintenance', args=[pending.pk]), {'decision': 'accept'}), inbox)
+        latest = LatestMaintenance.objects.get()
+        self.assertEqual((latest.title, latest.description, latest.performed_on),
+                         ('Inspección terminada', '', date(2026, 11, 27)))
+        self.assertFalse(MaintenanceNotification.objects.filter(recipient=self.creator).exists())
+        self.assertEqual(self.post(old_draft['save_project_url']).status_code, 200)
+        button.refresh_from_db()
+        self.assertEqual(button.next_maintenance, date(2027, 1, 27))
+        self.assertEqual(worker.get(marker['details_url']).json()['latest_maintenance']['title'], latest.title)
+
+    def test_report_validates_evidence_and_retries_drive_cleanup_after_approval(self):
+        _, _, button, inbox, notice, worker, admin = self.report_fixture()
+        submit = reverse('submit_maintenance', args=[notice.pk])
+        invalid = [
+            {'title': ' '},
+            {'title': 'Exceso', 'images': [self.evidence() for _ in range(4)]},
+            {'title': 'Engaño', 'images': [SimpleUploadedFile('fake.png', b'not an image')]},
+        ]
+        with patch('mobileApp.maintenance_reports.EvidenceDrive') as storage:
+            for payload in invalid:
+                self.assertRedirects(worker.post(submit, payload), inbox)
+            self.assertFalse(MaintenanceSubmission.objects.exists())
+            storage.assert_not_called()
+            drive = storage.return_value
+            drive.reserve.return_value = ['evidencia_1']
+            drive.delete.side_effect = EvidenceUnavailable('Fallo transitorio')
+            self.assertRedirects(worker.post(submit, {'title': 'Trabajo', 'description': 'Listo',
+                                                      'images': [self.evidence()]}), inbox)
+            report = MaintenanceSubmission.objects.get()
+            decision = reverse('decide_maintenance', args=[report.pk])
+            self.assertRedirects(admin.post(decision, {'decision': 'accept'}), inbox)
+            self.assertEqual(admin.post(decision, {'decision': 'accept'}).status_code, 404)
+            self.assertEqual(LatestMaintenance.objects.get(pk=button.maintenance_key).description, 'Listo')
+            report.refresh_from_db()
+            self.assertEqual((report.status, report.title, report.drive_images), ('cleanup', '', ['evidencia_1']))
+            drive.delete.side_effect = None
+            cleanup_reports()
+            self.assertFalse(MaintenanceSubmission.objects.exists())
 
 
 class OverdueNotificationMigrationTests(TransactionTestCase):
