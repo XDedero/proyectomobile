@@ -76,12 +76,12 @@ class MaintenanceTests(TestCase):
         self.assertFalse(MaintenanceNotification.objects.exists())
         self.assertEqual(self.post(draft['save_project_url'], client=creator_client).status_code, 200)
         call_command('generate_maintenance_alerts')
-        self.assertFalse(MaintenanceNotification.objects.exists())
+        self.assertFalse(MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT).exists())
         self.today.return_value = date(2026, 11, 28)
         self.assertTrue(creator_client.get(marker['details_url']).json()['maintenance']['overdue'])
         call_command('generate_maintenance_alerts')
         call_command('generate_maintenance_alerts')
-        alerts = MaintenanceNotification.objects.order_by('day', 'id')
+        alerts = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT).order_by('day', 'id')
         self.assertEqual(alerts.count(), 6)
         for user in (self.creator, self.admin, self.other_admin):
             self.assertEqual(list(alerts.filter(recipient=user).values_list('day', flat=True)),
@@ -110,6 +110,44 @@ class MaintenanceTests(TestCase):
         self.assertNotContains(self.client.get(inbox), message)
         self.assertContains(creator_client.get(inbox), 'Ana Rojas')
 
+    def test_monthly_reminder_appears_two_days_before_due_for_creator_and_administrators(self):
+        self.today.return_value = date(2026, 11, 25)
+        plan = self.plan('pdf')
+        draft = self.post(plan['draft_url']).json()['plan']
+        self.add_button('pdf', draft, maintenance={'last_date': '2026-10-28', 'interval': 1, 'unit': 'months'})
+        reminder_day = date(2026, 11, 26)
+        generate_alerts(today=reminder_day)
+        self.assertFalse(MaintenanceNotification.objects.exists())
+        self.assertEqual(self.post(draft['save_project_url']).status_code, 200)
+        inbox = reverse('notifications')
+        self.assertContains(self.client.get(inbox), 'Aún no tienes notificaciones.')
+
+        self.today.return_value = reminder_day
+        page = self.client.get(inbox)
+        self.assertContains(page, 'Mantención próxima')
+        self.assertContains(page, 'Bomba de agua')
+        self.assertContains(page, plan['name'])
+        self.assertContains(page, '28-11-2026')
+        self.assertNotContains(page, 'Mantención vencida')
+        reminders = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.REMINDER)
+        self.assertEqual(set(reminders.values_list('recipient_id', flat=True)),
+                         {self.owner.pk, self.admin.pk, self.other_admin.pk})
+        admin = Client()
+        admin.force_login(self.admin)
+        self.assertContains(admin.get(inbox), 'Mantención próxima')
+        other_user = Client()
+        other_user.force_login(self.creator)
+        self.assertContains(other_user.get(inbox), 'Aún no tienes notificaciones.')
+
+        for day in (26, 27, 28, 29, 30):
+            generate_alerts(today=date(2026, 11, day))
+        self.assertEqual(reminders.count(), 3)
+        self.assertFalse(reminders.exclude(day=reminder_day, due_date=date(2026, 11, 28)).exists())
+        for recipient in (self.owner, self.admin, self.other_admin):
+            alerts = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT, recipient=recipient)
+            self.assertEqual(list(alerts.order_by('day').values_list('day', flat=True)),
+                             [date(2026, 11, 29), date(2026, 11, 30)])
+
     def test_dxf_edit_after_overdue_preserves_elapsed_notifications_and_restarts_the_cycle(self):
         plan = self.plan('dxf')
         draft = self.post(plan['draft_url']).json()['plan']
@@ -125,7 +163,7 @@ class MaintenanceTests(TestCase):
         self.assertEqual(set(MaintenanceNotification.objects.values_list('day', flat=True)),
                          {date(2026, 11, 27), date(2026, 11, 28)})
         generate_alerts(today=date(2027, 1, 28))
-        self.assertEqual(MaintenanceNotification.objects.count(), 6)
+        self.assertEqual(MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT).count(), 6)
         generate_alerts(today=date(2027, 1, 29))
         self.assertEqual(MaintenanceNotification.objects.filter(day=date(2027, 1, 29)).count(), 3)
 

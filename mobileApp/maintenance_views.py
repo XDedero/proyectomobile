@@ -30,8 +30,10 @@ def notifications(request):
             raise
     items = MaintenanceNotification.objects.filter(recipient=request.user).select_related('responsible')
     if not admin:
-        items = items.filter(Q(kind=MaintenanceNotification.Kind.REPLY) |
-                             Q(kind=MaintenanceNotification.Kind.ALERT, responsible_id=F('recipient_id')))
+        items = items.filter(Q(kind=MaintenanceNotification.Kind.REPLY) | Q(
+            kind__in=(MaintenanceNotification.Kind.ALERT, MaintenanceNotification.Kind.REMINDER),
+            responsible_id=F('recipient_id'),
+        ))
     company = workspace.get()
     return render(request, 'mobileApp/maintenance_inbox.html', {
         'page': Paginator(items, 25).get_page(request.GET.get('page')),

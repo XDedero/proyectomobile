@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from mobileApp.maintenance_alerts import generate_all_workspaces, watch_for_overdue_maintenance
+from mobileApp.maintenance_alerts import generate_all_workspaces, watch_for_maintenance_notifications
 
 
 class Command(BaseCommand):
@@ -11,6 +11,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if options['watch']:
-            watch_for_overdue_maintenance()
+            watch_for_maintenance_notifications()
         else:
             generate_all_workspaces()

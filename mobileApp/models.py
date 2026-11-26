@@ -383,9 +383,10 @@ class PdfMarker(ButtonSource):
 class MaintenanceNotification(models.Model):
     class Kind(models.TextChoices):
         ALERT = 'alert', 'Mantención vencida'
+        REMINDER = 'reminder', 'Mantención próxima'
         REPLY = 'reply', 'Mensaje de administración'
 
-    kind = models.CharField(max_length=5, choices=Kind.choices)
+    kind = models.CharField(max_length=8, choices=Kind.choices)
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
     responsible = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
     responsible_name = models.CharField(max_length=301)
@@ -407,6 +408,10 @@ class MaintenanceNotification(models.Model):
             models.UniqueConstraint(
                 fields=['maintenance_key', 'last_maintenance', 'recipient', 'day'],
                 condition=models.Q(kind='alert'), name='unique_daily_maintenance_alert',
+            ),
+            models.UniqueConstraint(
+                fields=['maintenance_key', 'last_maintenance', 'due_date', 'recipient'],
+                condition=models.Q(kind='reminder'), name='unique_maintenance_reminder',
             ),
         ]
 
