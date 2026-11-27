@@ -98,54 +98,98 @@
     }
 
     function assignmentFields(id) {
-        return `<div id="${id}Assignment" class="mb-3" hidden>
-          <fieldset class="border rounded p-3 mb-2">
-            <legend class="float-none w-auto px-1 fs-6">Responsables de mantención</legend>
-            <div class="overflow-auto" style="max-height: 10rem" data-role="responsibles"></div>
-          </fieldset>
-          <fieldset class="border rounded p-3">
-            <legend class="float-none w-auto px-1 fs-6">Supervisores (máximo 2)</legend>
-            <div class="overflow-auto" style="max-height: 10rem" data-role="supervisors"></div>
-          </fieldset>
-        </div>`;
+        return `<fieldset id="${id}Assignment" data-maintenance-assignment class="mb-3" aria-label="Asignación de mantención" hidden>
+          ${[
+              ['responsibles', 'Responsables de mantención', 'Añadir responsable'],
+              ['supervisors', 'Supervisores (máximo 2)', 'Añadir supervisor'],
+          ].map(([role, label, action]) => `
+            <div class="border rounded p-3 mb-2" data-role="${role}">
+              <label class="form-label" for="${id}-${role}">${label}</label>
+              <div class="input-group">
+                <select id="${id}-${role}" class="form-select"></select>
+                <button type="button" class="btn btn-outline-primary" data-add aria-label="${action}">Añadir</button>
+              </div>
+              <ul class="list-unstyled mb-0" aria-live="polite"></ul>
+            </div>`).join('')}
+        </fieldset>`;
     }
 
     function connectAssignment(id) {
         const container = document.getElementById(id + 'Assignment');
-        const responsible = container.querySelector('[data-role="responsibles"]');
-        const supervisors = container.querySelector('[data-role="supervisors"]');
-        const selection = group => Array.from(group.querySelectorAll('input:checked'), input => input.value);
-        const enforceLimit = () => {
-            const limit = selection(supervisors).length >= 2;
-            for (const input of supervisors.querySelectorAll('input')) input.disabled = limit && !input.checked;
-        };
-        supervisors.addEventListener('change', enforceLimit);
-        function options(group, choices, selected) {
-            group.replaceChildren();
-            for (const choice of choices) {
-                const label = document.createElement('label');
-                label.className = 'd-flex align-items-center gap-2 py-1';
-                const input = document.createElement('input');
-                input.type = 'checkbox';
-                input.className = 'form-check-input mt-0';
-                input.value = choice.value;
-                input.checked = selected.includes(choice.value);
-                label.append(input, document.createTextNode(choice.label));
-                group.append(label);
+        function connectGroup(role, maximum = Infinity) {
+            const group = container.querySelector(`[data-role="${role}"]`);
+            const select = group.querySelector('select');
+            const add = group.querySelector('[data-add]');
+            const list = group.querySelector('ul');
+            let choices = new Map(), selected = new Set();
+
+            function render(pending = '') {
+                const available = [...choices].filter(([value]) => !selected.has(value));
+                const atLimit = selected.size >= maximum;
+                const prompt = atLimit ? 'Ya hay dos supervisores'
+                    : available.length ? 'Elige una persona' : 'No hay más cuentas disponibles';
+                select.replaceChildren(new Option(prompt, ''));
+                select.disabled = atLimit || !available.length;
+                if (!select.disabled) {
+                    for (const [value, label] of available) select.add(new Option(label, value));
+                    if (available.some(([value]) => value === pending)) select.value = pending;
+                }
+                add.disabled = !select.value;
+                list.replaceChildren();
+                for (const value of selected) {
+                    const row = document.createElement('li');
+                    row.className = 'd-flex align-items-center justify-content-between gap-2 mt-2';
+                    const name = document.createElement('span');
+                    name.className = 'small text-break';
+                    name.textContent = choices.get(value);
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'btn btn-outline-secondary btn-sm';
+                    remove.textContent = 'Quitar';
+                    remove.setAttribute('aria-label', `Quitar a ${name.textContent}`);
+                    remove.onclick = () => {
+                        selected.delete(value);
+                        render(select.value);
+                        select.focus();
+                    };
+                    row.append(name, remove);
+                    list.append(row);
+                }
             }
-            if (!choices.length) group.textContent = 'No hay cuentas disponibles.';
+
+            select.onchange = () => { add.disabled = !select.value; };
+            add.onclick = () => {
+                if (!select.value || selected.size >= maximum) return;
+                selected.add(select.value);
+                render();
+                if (select.disabled) list.lastElementChild.querySelector('button').focus();
+                else select.focus();
+            };
+
+            return {
+                set(options, values) {
+                    choices = new Map(options.map(({ value, label }) => [value, label]));
+                    selected = new Set(values.filter(value => choices.has(value)));
+                    render();
+                },
+                read() {
+                    if (select.value) throw new Error('Pulsa «Añadir» para confirmar la persona elegida.');
+                    return [...selected];
+                },
+            };
         }
+        const responsible = connectGroup('responsibles');
+        const supervisors = connectGroup('supervisors', 2);
         return {
             set(values) {
                 container.hidden = !values;
                 if (!values) return;
-                options(responsible, values.responsible_options, values.responsibles);
-                options(supervisors, values.supervisor_options, values.supervisors);
-                enforceLimit();
+                responsible.set(values.responsible_options, values.responsibles);
+                supervisors.set(values.supervisor_options, values.supervisors);
             },
             read() {
                 if (container.hidden) return undefined;
-                return { responsibles: selection(responsible), supervisors: selection(supervisors) };
+                return { responsibles: responsible.read(), supervisors: supervisors.read() };
             },
         };
     }

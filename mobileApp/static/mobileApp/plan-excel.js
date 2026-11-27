@@ -153,7 +153,11 @@
         node.classList.toggle('text-danger', error);
     }
     function busy(dialog, value) {
-        dialog.element.querySelectorAll('button,select,input,textarea').forEach(node => { node.disabled = value; });
+        dialog.element.querySelectorAll('button,select,input,textarea').forEach(node => {
+            if (!node.closest('[data-maintenance-assignment]')) node.disabled = value;
+        });
+        const assignment = dialog.element.querySelector('[data-maintenance-assignment]');
+        if (assignment) assignment.disabled = value;
     }
     async function hide(dialog) {
         await dialog.ready;
@@ -256,12 +260,15 @@
     async function chooseNewButtonSource() {
         const draft = newButton;
         if (!draft || !valid(draft.context)) return;
-        let maintenance;
-        try { maintenance = newButtonMaintenance.read(); }
+        let maintenance, assignment;
+        try {
+            maintenance = newButtonMaintenance.read();
+            assignment = newButtonAssignment.read();
+        }
         catch (error) { message(newButtonModal, error.message, true); return; }
         if (draft.copySource) {
             draft.result = { origin: 'copy', copy_button_id: draft.copySource.id, maintenance,
-                maintenance_assignment: newButtonAssignment.read() };
+                maintenance_assignment: assignment };
             await hide(newButtonModal);
             return;
         }
@@ -281,7 +288,7 @@
                 sheet: origin === 'sheet' ? byId('newButtonSheet').value : undefined,
                 category_id: byId('newButtonCategory').value, show_description: byId('newButtonDescriptionEnabled').checked,
                 button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined, maintenance,
-                maintenance_assignment: newButtonAssignment.read(),
+                maintenance_assignment: assignment,
                 name: byId('newButtonName').value.trim() || undefined, label: byId('newButtonName').value.trim() || undefined, file: upload };
             await hide(newButtonModal);
         } catch (error) {

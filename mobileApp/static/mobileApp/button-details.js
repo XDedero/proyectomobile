@@ -179,6 +179,7 @@
         byId('Excel').disabled = saving || editing || !options.openExcel || !data;
         for (const control of byId('Appearance').querySelectorAll('input')) control.disabled = saving;
         byId('Maintenance').disabled = saving;
+        byId('Assignment').disabled = saving;
         for (const control of byId('Rows').querySelectorAll('input,textarea,button')) control.disabled = saving;
         byId('Color').disabled = saving || !byId('CustomColor').checked;
     }
