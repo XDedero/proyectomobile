@@ -172,10 +172,10 @@ def motor_data(motor):
 
 def plan_data(plan, detail=False):
     from .plan_workbook import ensure_workbook
-    ensure_workbook(plan)
+    document = plan.workbook if plan.workbook_id else ensure_workbook(plan)
     data = {
         'id': plan.pk, 'name': plan.name, 'size': plan.size,
-        'date': plan.imported_at.isoformat(), 'motor_count': plan.motors.count(),
+        'date': plan.imported_at.isoformat(),
         'motor_keyword': settings.DXF_MOTOR_KEYWORD,
         'detail_url': reverse('plan_detail', args=[plan.pk]),
         'svg_url': reverse('plan_svg', args=[plan.pk]),
@@ -186,14 +186,19 @@ def plan_data(plan, detail=False):
     if detail:
         data['motors'] = [motor_data(motor) for motor in plan.motors.select_related('workbook', 'category', 'source_workbook').defer('workbook__content', 'source_workbook__content')]
     from .project_views import project_plan_data
-    data.update(project_plan_data('dxf', plan))
+    data.update(project_plan_data('dxf', plan, document))
+    data['motor_count'] = sum(data['binding_counts'].values())
     return data
 
 
 @require_GET
 @api_permissions()
 def plans(request):
-    return JsonResponse({'plans': [plan_data(plan) for plan in visible_plans(request.user, Plan.objects.defer('svg'))]})
+    from .authorization import prefetch_plan_edit_keys
+    from .project_views import plan_listing
+    prefetch_plan_edit_keys(request.user)
+    plans = visible_plans(request.user, plan_listing(Plan.objects.defer('svg')))
+    return JsonResponse({'plans': [{**plan_data(plan), 'permissions': capabilities(request.user, plan)} for plan in plans]})
 
 
 @require_GET

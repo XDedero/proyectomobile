@@ -29,7 +29,13 @@ def get_plan(kind, plan_id):
         raise Http404
 
 
-def project_plan_data(kind, plan):
+def plan_listing(queryset):
+    return queryset.select_related('workbook', 'saved_project').defer(
+        'saved_project__content', 'saved_project__cloud_receipt',
+    ).prefetch_related('workbook__plan_sheets')
+
+
+def project_plan_data(kind, plan, document):
     from .display_settings import clean_display
     from .plan_workbook import workspace_data
     original = plan.draft_of if plan.draft_of_id else plan
@@ -64,7 +70,7 @@ def project_plan_data(kind, plan):
         'export_project_url': reverse('download_project', args=[kind, plan.pk]),
         'assign_listing_url': reverse('assign_plan_listing', args=[kind, plan.pk]),
         'workbook_url': reverse('plan_workbook', args=[kind, plan.pk]),
-        **workspace_data(plan),
+        **workspace_data(plan, document=document),
     }
 
 
@@ -176,6 +182,8 @@ def saved_projects(request):
             selected |= Q(**{'pdf_plan_id' if kind == 'pdf' else 'cad_plan_id': state['id']})
         projects = projects.filter(selected)
     retry_cloud_registrations(projects.values('pk') if status_only else None)
+    from .authorization import prefetch_plan_edit_keys
+    prefetch_plan_edit_keys(request.user)
     # Check working plans as well as saved copies: a newly imported plan is
     # intentionally absent from the library until the user saves it.
     return JsonResponse({'plans': [saved_data(saved, request.user) for saved in projects

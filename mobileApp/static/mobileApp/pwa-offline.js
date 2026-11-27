@@ -303,11 +303,15 @@
                 throw error;
             }
         }
+        // Check the server while the local store opens, but finish loading the
+        // cached identity before applying the response or falling back offline.
+        const sessionRequest=url.pathname==='/api/auth/session/' ? send() : null;
+        sessionRequest?.catch(()=>{});
         await ready;
         const owner=account?.id;
         let response;
         try {
-            response=await send();
+            response=await (sessionRequest||send());
             if(proxyUnavailable(response)) throw new TypeError('La aplicación está temporalmente sin conexión.');
         }
         catch(error) {

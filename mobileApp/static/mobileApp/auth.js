@@ -10,6 +10,9 @@
     let refreshTimer = null;
     let redirectingToCompany = false;
     const sessionChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('planos-auth-session') : null;
+    const modulesReady = new Promise(resolve => {
+        document.addEventListener('DOMContentLoaded', resolve, { once: true });
+    });
 
     function announceSessionChange() {
         sessionChannel?.postMessage('changed');
@@ -118,12 +121,20 @@
         if (authBusy) return Promise.resolve();
         if (refreshFlight) return refreshFlight;
         const revision = ++authRevision;
-        refreshFlight = authRequest('/api/auth/session/').then(result => applySession(result, revision), error => {
+        refreshFlight = checkSession(revision).finally(() => { refreshFlight = null; });
+        return refreshFlight;
+    }
+
+    async function checkSession(revision) {
+        try {
+            const result = await authRequest('/api/auth/session/');
+            await modulesReady;
+            return applySession(result, revision);
+        } catch (error) {
+            await modulesReady;
             if (revision === authRevision) throw error;
             return false;
-        })
-            .finally(() => { refreshFlight = null; });
-        return refreshFlight;
+        }
     }
 
     function refreshWhenVisible() {

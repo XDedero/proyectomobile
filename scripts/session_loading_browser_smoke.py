@@ -1,4 +1,5 @@
 """Check the first paint and return links with a deliberately delayed session check."""
+from base64 import b64encode
 from pathlib import Path
 import sys
 
@@ -88,6 +89,14 @@ def check_browser(url, directory):
             expect(menu).to_be_visible()
             expect(loading).to_be_hidden()
             assert not page.evaluate('window.loginWasVisible')
+            assert page.evaluate('typeof window.JSZip') == 'undefined'
+            workbook = b64encode((ROOT / 'examples' / 'motor_01.xlsx').read_bytes()).decode('ascii')
+            assert page.evaluate('''async data => {
+                const bytes = Uint8Array.from(atob(data), char => char.charCodeAt(0));
+                const file = await workbookFields.normalizeUpload(new File([bytes], 'motor.xlsx'));
+                const zip = await window.JSZip.loadAsync(await file.arrayBuffer());
+                return Boolean(zip.file('xl/workbook.xml'));
+            }''', workbook), 'The on-demand XLSX library was not available from the offline shell.'
             print('PASS: loading spinner on return from both sections, hidden login, and offline session startup')
         finally:
             browser.close()

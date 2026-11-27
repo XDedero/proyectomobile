@@ -45,7 +45,7 @@ def main():
         call_command('collectstatic', interactive=False, verbosity=0)
         client = Client(HTTP_HOST='reloncavi-test.onrender.com')
         headers = {'HTTP_X_FORWARDED_PROTO': 'https', 'HTTP_ACCEPT_ENCODING': 'gzip'}
-        assert client.get('/healthz/').status_code == 200
+        assert client.get('/healthz/').status_code == 204
         assert client.get('/').status_code == 301
         page = client.get('/', **headers)
         assert page.status_code == 200 and page['Content-Encoding'] == 'gzip'

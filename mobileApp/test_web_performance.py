@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 
 from . import pwa
 from .access import capabilities
-from .models import Plan, WorkbookDocument
+from .models import PdfPlan, Plan, PlanEditGrant, SavedProject, UserProfile, WorkbookDocument
 from .plan_workbook import empty_workbook
 from .views import plan_data
 from .web_performance import CompressTextMiddleware
@@ -46,7 +46,9 @@ class TransferTests(SimpleTestCase):
 
     @override_settings(SECURE_SSL_REDIRECT=True, DEBUG=False)
     def test_render_health_check_is_public_and_needs_no_database_or_https_redirect(self):
-        self.assertEqual(self.client.get('/healthz/').json(), {'status': 'ok'})
+        response = self.client.get('/healthz/')
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b'')
         self.assertEqual(self.client.get('/').status_code, 301)
 
     def test_production_shell_and_worker_reuse_version_but_development_detects_edits(self):
@@ -94,3 +96,22 @@ class PlanReadTests(TestCase):
         self.assertEqual(response.json()['id'], self.book.pk)
         self.assertEqual(sum('"mobileApp_workbookdocument"."content"' in item['sql'] for item in queries), 1)
         self.assertFalse(any('"mobileApp_plan"."svg"' in item['sql'] for item in queries))
+
+    def test_saved_library_reads_worker_grants_in_one_query_and_rechecks_changes(self):
+        UserProfile.objects.create(user=self.user, rut='11111111-1', role=UserProfile.Role.WORKER)
+        other = get_user_model().objects.create_user('library-owner')
+        plans = [PdfPlan.objects.create(name=f'Plano {number}', size=100, imported_by=other, workbook=self.book)
+                 for number in range(5)]
+        for plan in plans:
+            SavedProject.objects.create(pdf_plan=plan, name=plan.name)
+        grant = PlanEditGrant.objects.create(user=self.user, cloud_key=plans[0].cloud_key)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/api/projects/')
+        rows = {row['plan_id']: row['permissions']['can_assign'] for row in response.json()['plans']}
+        self.assertEqual(rows, {plan.pk: plan == plans[0] for plan in plans})
+        self.assertEqual(sum('FROM "mobileApp_planeditgrant"' in item['sql'] for item in queries), 1)
+
+        grant.delete()
+        rows = self.client.get('/api/projects/').json()['plans']
+        self.assertFalse(any(row['permissions']['can_assign'] for row in rows))

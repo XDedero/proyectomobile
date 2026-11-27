@@ -418,13 +418,12 @@ def read_cells(content, sheet_name, row, col, rows, cols):
             raise ValidationError('La hoja solicitada no existe.')
         sheet = workbook[sheet_name]
         cells = []
-        for row_index, values in enumerate(sheet.iter_rows(
-            min_row=row, max_row=row + rows - 1,
-            min_col=col, max_col=col + cols - 1,
-        ), start=row):
-            for column_index, cell in enumerate(values, start=col):
-                value = cell.value
-                if value is not None or cell.has_style:
+        # iter_rows creates Cell objects even for every untouched position in a window.
+        for row_index in range(row, row + rows):
+            for column_index in range(col, col + cols):
+                cell = sheet._cells.get((row_index, column_index))
+                if cell is not None and (cell.value is not None or cell.has_style):
+                    value = cell.value
                     display_value = value
                     if cell.data_type == 'f':
                         if cached is None:

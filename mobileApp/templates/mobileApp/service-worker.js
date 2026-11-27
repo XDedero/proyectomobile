@@ -27,14 +27,26 @@ self.addEventListener('install', event => {
         if (!response.ok) throw new Error('No se pudo preparar la app sin conexión.');
         const html = await response.clone().text();
         // Do not activate with a half-downloaded interface.
-        const assets = [...html.matchAll(/(?:src|href)="(\/static\/mobileApp\/[^"<>]+)"/g)]
+        const assets = [...html.matchAll(/(?:src|href|data-zip-url)="(\/static\/mobileApp\/[^"<>]+)"/g)]
             .map(match => match[1].replaceAll('&amp;', '&'));
         assets.push('/static/mobileApp/vendor/pdfjs/pdf-entry.mjs?v={{ asset_version }}',
             '/static/mobileApp/vendor/pdfjs/pdf.worker-entry.mjs?v={{ asset_version }}',
-            '/static/mobileApp/vendor/pdfjs/compat.mjs?v=1',
-            '/static/mobileApp/vendor/pdfjs/pdf.mjs?v=6.4.299-legacy-1',
-            '/static/mobileApp/vendor/pdfjs/pdf.worker.mjs?v=6.4.299-legacy-1');
+            '/static/mobileApp/vendor/pdfjs/compat.mjs?v=1');
         await cache.addAll([...new Set(assets)]);
+        // A new shell can reuse the byte-for-byte PDF engine from an older shell.
+        // Keep both bundles required for the offline viewer before activation.
+        const previousShells = (await caches.keys()).filter(name => name.startsWith('reloncavi-shell-') && name !== CACHE).reverse();
+        await Promise.all([
+            '/static/mobileApp/vendor/pdfjs/pdf.mjs?v=6.4.299-legacy-1',
+            '/static/mobileApp/vendor/pdfjs/pdf.worker.mjs?v=6.4.299-legacy-1',
+        ].map(async url => {
+            if (await cache.match(url)) return;
+            for (const cacheName of previousShells) {
+                const saved = await caches.match(url, {cacheName});
+                if (saved) { await cache.put(url, saved); return; }
+            }
+            await cache.add(url);
+        }));
         const dependencies=[];
         for(const asset of assets.filter(path=>new URL(path,location.origin).pathname.endsWith('.css'))) {
             const css=await (await cache.match(asset)).text();

@@ -200,9 +200,10 @@ def can_delete_listing(record, user, plan=None):
     return capabilities(user, plan)[permission]
 
 
-def workspace_data(plan, user=None):
+def workspace_data(plan, user=None, *, document=None):
     from .pdf_views import workbook_data
-    document = ensure_workbook(plan, user)
+    if document is None:
+        document = ensure_workbook(plan, user)
     by_name = {row.name: row for row in document.plan_sheets.all()}
     rows = [by_name[name] for name in sheet_names(document.content) if name in by_name]
     listing_rows = sorted((row for row in rows if row.is_listing), key=lambda row: (not row.is_primary, row.listing_order, row.pk))

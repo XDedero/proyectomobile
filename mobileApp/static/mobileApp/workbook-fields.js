@@ -11,6 +11,8 @@
     const listingFields = row => [`C${row}:E${row}`, `F${row}:H${row}`];
     const maxUploadSize = 20 * 1024 * 1024;
     const maxXmlSize = 32 * 1024 * 1024;
+    const zipUrl = document.currentScript.dataset.zipUrl;
+    let zipLibrary;
     const afterMerges = new Set([
         'phoneticPr', 'conditionalFormatting', 'dataValidations', 'hyperlinks', 'printOptions', 'pageMargins',
         'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors',
@@ -128,10 +130,27 @@
         return changed;
     }
 
+    function loadZipLibrary() {
+        if (!zipLibrary) {
+            zipLibrary = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = zipUrl;
+                script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error('No se pudo cargar el lector de Excel.'));
+                script.onerror = reject;
+                document.head.append(script);
+            }).catch(error => {
+                zipLibrary = null;
+                throw error;
+            });
+        }
+        return zipLibrary;
+    }
+
     async function normalizeUpload(file) {
         if (!/\.xlsx$/i.test(file.name) || !file.size || file.size > maxUploadSize) return file;
         try {
-            const zip = await JSZip.loadAsync(await file.arrayBuffer());
+            const [Zip, contents] = await Promise.all([loadZipLibrary(), file.arrayBuffer()]);
+            const zip = await Zip.loadAsync(contents);
             if (!zip.file('xl/workbook.xml') || zip.file(/^_xmlsignatures\//).length) return file;
             const data = await normalizeWorkbook(zip);
             if (!data || data.byteLength > maxUploadSize) return file;

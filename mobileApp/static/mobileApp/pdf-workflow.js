@@ -371,6 +371,8 @@
         setBusy(true);
         activateProject();
         try {
+            // Start the self-contained viewer while the verified PDF is read or downloaded.
+            viewer.library().catch(() => {});
             const source = await window.relOffline?.planSource(nextPlan).catch(() => null);
             if (currentRevision !== revision) return;
             const loaded = await viewer.load(nextPlan.source_url, nextPlan.markers, 1, source);

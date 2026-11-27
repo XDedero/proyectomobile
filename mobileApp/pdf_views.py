@@ -128,7 +128,7 @@ def marker_data(marker):
 
 def pdf_data(plan, *, detail=True):
     from .plan_workbook import ensure_workbook
-    ensure_workbook(plan)
+    document = plan.workbook if plan.workbook_id else ensure_workbook(plan)
     result = {
         'id': plan.pk, 'name': plan.name, 'size': plan.size, 'date': plan.imported_at.isoformat(),
         'pages': plan.pages, 'page_count': len(plan.pages),
@@ -142,14 +142,19 @@ def pdf_data(plan, *, detail=True):
     if detail:
         result['markers'] = [marker_data(marker) for marker in plan.markers.select_related('workbook', 'category', 'source_workbook').defer('workbook__content', 'source_workbook__content')]
     from .project_views import project_plan_data
-    result.update(project_plan_data('pdf', plan))
+    result.update(project_plan_data('pdf', plan, document))
     return result
 
 
 @require_GET
 @api_permissions()
 def list_pdf_plans(request):
-    return JsonResponse({'plans': [pdf_data(plan, detail=False) for plan in visible_plans(request.user, PdfPlan.objects.order_by('-imported_at'))]})
+    from .authorization import prefetch_plan_edit_keys
+    from .project_views import plan_listing
+    prefetch_plan_edit_keys(request.user)
+    plans = visible_plans(request.user, plan_listing(PdfPlan.objects.order_by('-imported_at')))
+    return JsonResponse({'plans': [{**pdf_data(plan, detail=False), 'permissions': capabilities(request.user, plan)}
+                                  for plan in plans]})
 
 
 @require_POST
@@ -392,7 +397,7 @@ def workbook_cells(request, workbook_id):
     except ValidationError as exc:
         return error_response(exc)
     result['revision'] = document.revision
-    return JsonResponse(result)
+    return JsonResponse(result, json_dumps_params={'ensure_ascii': False})
 
 
 @require_POST

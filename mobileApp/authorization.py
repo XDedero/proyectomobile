@@ -44,6 +44,14 @@ def has_role_configuration(user):
     return user.plan_roles.exists() or user.plan_role_groups.exists()
 
 
+def prefetch_plan_edit_keys(user):
+    profile = application_profile(user)
+    if profile is not None and profile.role == 'worker':
+        # This instance belongs to the current read request. Grant changes are
+        # still checked on the next request and before every write.
+        user._listed_plan_edit_keys = set(user.plan_edit_grants.values_list('cloud_key', flat=True))
+
+
 def can_edit_plan(user, plan):
     if not user.is_authenticated or not user.is_active:
         return False
@@ -53,7 +61,12 @@ def can_edit_plan(user, plan):
         return True
     profile = application_profile(user)
     if profile is not None:
-        return profile.role == 'worker' and (owns_plan(user, plan) or user.plan_edit_grants.filter(cloud_key=plan.cloud_key).exists())
+        if profile.role != 'worker':
+            return False
+        if owns_plan(user, plan):
+            return True
+        keys = getattr(user, '_listed_plan_edit_keys', None)
+        return plan.cloud_key in keys if keys is not None else user.plan_edit_grants.filter(cloud_key=plan.cloud_key).exists()
     return owns_plan(user, plan)
 
 
@@ -247,14 +260,23 @@ def api_permissions(*permissions):
                 for changed_plan in ([plan] if plan is not None else plans):
                     if changed_plan.draft_of_id:
                         type(changed_plan).objects.filter(pk=changed_plan.pk).update(draft_dirty=True)
-            if response.get('Content-Type', '').startswith('application/json') and response.status_code < 300:
+            if (view.__name__ != 'workbook_cells' and response.get('Content-Type', '').startswith('application/json')
+                    and response.status_code < 300):
                 data = json.loads(response.content)
                 def attach(value, editable=False, target_plan=None):
                     if isinstance(value, dict):
                         if 'workbook_url' in value and 'kind' in value and 'id' in value:
                             from .models import Plan, PdfPlan
-                            queryset = PdfPlan.objects.all() if value['kind'] == 'pdf' else Plan.objects.defer('svg')
-                            obj = queryset.filter(pk=value['id']).first()
+                            kind = PdfPlan if value['kind'] == 'pdf' else Plan
+                            if (request.method in ('GET', 'HEAD') and isinstance(target_plan, kind)
+                                    and target_plan.pk == value['id']):
+                                obj = target_plan
+                            elif view.__name__ in ('plans', 'list_pdf_plans') and 'permissions' in value:
+                                # Plan lists already serialize their own permissions and carry no buttons.
+                                obj = None
+                            else:
+                                queryset = kind.objects.all() if kind is PdfPlan else kind.objects.defer('svg')
+                                obj = queryset.filter(pk=value['id']).first()
                             if obj:
                                 value['permissions'] = capabilities(request.user, obj)
                                 editable = value['permissions']['can_assign']

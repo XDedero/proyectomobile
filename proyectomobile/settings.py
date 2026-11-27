@@ -130,6 +130,10 @@ if PLANOS_CLOUD_MODE:
     try:
         DATABASES['default'] = postgres_database(database_url(os.environ, BASE_DIR))
         PLANOS_DATABASE_SCHEMA = private_schema(os.environ)
+        if os.environ.get('RENDER'):
+            # The WSGI workers reuse their TLS session to the Session pooler.
+            # Django health-checks reused connections, and tenant scopes restore search_path.
+            DATABASES['default']['CONN_MAX_AGE'] = 60
     except (ValueError, OSError) as exc:
         raise ImproperlyConfigured(
             'El modo nube requiere una conexion PostgreSQL privada valida. '
