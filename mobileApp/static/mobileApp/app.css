@@ -47,6 +47,17 @@ html, body {
     overscroll-behavior-y: contain;
     background: var(--app-body-bg);
 }
+.app-loading {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--primary-accent);
+    font-weight: 600;
+}
+.app-loading[hidden] { display: none; }
 
 /* Vistas de la aplicación */
 .app-view {

@@ -2,10 +2,13 @@
 (() => {
     const loginButton = document.getElementById('btnLogin');
     const alert = document.getElementById('loginAlert');
+    const appScreen = document.getElementById('appScreen');
+    const sessionLoading = document.getElementById('sessionLoading');
     let authRevision = 0;
     let authBusy = false;
     let refreshFlight = null;
     let refreshTimer = null;
+    let redirectingToCompany = false;
     const sessionChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('planos-auth-session') : null;
 
     function announceSessionChange() {
@@ -80,12 +83,15 @@
         showLoginError('Su sesión expiró. Inicie sesión nuevamente.');
     }
 
-    async function applySession(result, revision) {
-        if (revision !== authRevision) return;
+    function applySession(result, revision) {
+        if (revision !== authRevision) return false;
         if (result.company_url) {
+            redirectingToCompany = true;
+            appScreen.hidden = true;
+            sessionLoading.hidden = false;
             applyUser(null);
             window.location.replace(result.company_url);
-            return;
+            return true;
         }
         const changingUser = appState.user?.id !== result.user?.id;
         const appearance = result.user?.appearance || result.appearance;
@@ -105,19 +111,23 @@
         } finally {
             if (revision === authRevision) document.documentElement.classList.remove('app-identity-updating');
         }
+        return true;
     }
 
     function refresh() {
         if (authBusy) return Promise.resolve();
         if (refreshFlight) return refreshFlight;
         const revision = ++authRevision;
-        refreshFlight = authRequest('/api/auth/session/').then(result => applySession(result, revision))
+        refreshFlight = authRequest('/api/auth/session/').then(result => applySession(result, revision), error => {
+            if (revision === authRevision) throw error;
+            return false;
+        })
             .finally(() => { refreshFlight = null; });
         return refreshFlight;
     }
 
     function refreshWhenVisible() {
-        if (document.hidden || authBusy) return;
+        if (!appState.authReady || redirectingToCompany || document.hidden || authBusy) return;
         clearTimeout(refreshTimer);
         if (refreshFlight) {
             authRevision += 1;
@@ -127,6 +137,29 @@
         refreshTimer = setTimeout(() => refresh().catch(error => {
             if (!appState.user) showLoginError(error.message);
         }), 50);
+    }
+
+    function sessionChanged() {
+        if (!appState.authReady && refreshFlight) {
+            authRevision += 1;
+            return;
+        }
+        refreshWhenVisible();
+    }
+
+    async function openApp() {
+        try {
+            // If the account changed in another tab, wait for a fresh check before showing a screen.
+            while (!(await refresh())) { /* The previous response was superseded. */ }
+        } catch (_) {
+            applyUser(null);
+            showLoginError('No se pudo abrir el almacenamiento local de la aplicación. Cierre y vuelva a abrir la app.');
+        }
+        if (redirectingToCompany) return;
+        appState.authReady = true;
+        loginButton.disabled = false;
+        sessionLoading.hidden = true;
+        appScreen.hidden = false;
     }
 
     loginForm.addEventListener('submit', async (event) => {
@@ -143,7 +176,7 @@
             announceSessionChange();
             if (revision === authRevision) {
                 document.getElementById('passwordInput').value = '';
-                await applySession(result, revision);
+                applySession(result, revision);
             }
         } catch (error) { showLoginError(error.message); }
         finally { authBusy = false; loginButton.disabled = false; }
@@ -169,16 +202,14 @@
         finally { authBusy = false; }
     });
 
-    sessionChannel?.addEventListener('message', refreshWhenVisible);
-    window.addEventListener('storage', event => { if (event.key === 'planos.auth.change') refreshWhenVisible(); });
+    sessionChannel?.addEventListener('message', sessionChanged);
+    window.addEventListener('storage', event => { if (event.key === 'planos.auth.change') sessionChanged(); });
     window.addEventListener('focus', refreshWhenVisible);
     window.addEventListener('pageshow', event => { if (event.persisted) refreshWhenVisible(); });
     window.addEventListener('online', refreshWhenVisible);
-    window.addEventListener('app-session-changed', refreshWhenVisible);
+    window.addEventListener('app-session-changed', sessionChanged);
     document.addEventListener('visibilitychange', refreshWhenVisible);
 
     window.appAuth = { refresh, expire };
-    loginButton.disabled = true;
-    refresh().catch(() => showLoginError('No se pudo abrir el almacenamiento local de la aplicación. Cierre y vuelva a abrir la app.'))
-        .finally(() => { appState.authReady = true; loginButton.disabled = false; });
+    openApp();
 })();

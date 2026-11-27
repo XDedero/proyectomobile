@@ -36,13 +36,17 @@
 <body>
 
     <main class="app-shell">
-        
-        <div class="app-screen" id="appScreen">
+        <div class="app-loading" id="sessionLoading" role="status">
+            <span class="spinner-border" aria-hidden="true"></span>
+            <span>Cargando la aplicación…</span>
+        </div>
+
+        <div class="app-screen" id="appScreen" hidden>
 
             <!-- ==============================================
                  1. PANTALLA: INICIO DE SESIÓN
                  ============================================== -->
-            <div class="app-view active" id="viewLogin">
+            <div class="app-view" id="viewLogin">
                 <div class="login-hero">
                     <div class="brand-badge company-brand-badge">
                         <span class="company-logo-window company-logo-login"><img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'mobileApp/img/reloncavi-logo.png' %}{% endif %}" alt=""></span>
