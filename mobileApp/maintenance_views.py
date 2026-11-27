@@ -51,6 +51,8 @@ def notifications(request):
             raise
     revision = inbox_revision(request.user)
     items = MaintenanceNotification.objects.filter(MaintenanceNotification.inbox_visibility(), recipient=request.user)
+    # The pending review cards below render these notices together with their evidence and actions.
+    items = items.exclude(kind=MaintenanceNotification.Kind.REVIEW)
     open_reports = MaintenanceSubmission.objects.filter(status__in=OPEN_STATUSES)
     page = Paginator(items, 25).get_page(request.GET.get('page'))
     own_notices = [item for item in page if can_report(request.user) and
@@ -176,8 +178,10 @@ def decide_maintenance(request, report_id):
     decision = request.POST.get('decision')
     if decision not in ('accept', 'reject'):
         return HttpResponse('Indica si aceptas o rechazas la mantención.', status=400)
-    report = get_object_or_404(MaintenanceSubmission, pk=report_id, status=MaintenanceSubmission.Status.PENDING)
     try:
+        report = MaintenanceSubmission.objects.filter(pk=report_id, status=MaintenanceSubmission.Status.PENDING).first()
+        if report is None:
+            raise ValidationError('Esta mantención ya fue revisada o ya no está disponible.')
         report = review_report(report, request.user, accept=decision == 'accept')
     except ValidationError as exc:
         messages.error(request, ' '.join(exc.messages))

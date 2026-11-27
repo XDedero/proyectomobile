@@ -391,6 +391,7 @@ class MaintenanceNotification(models.Model):
         GENERAL = 'general', 'Notificación general'
         RETRY = 'retry', 'Mantención por completar'
         CONFIRMED = 'confirmed', 'Mantención confirmada'
+        REVIEW = 'review', 'Mantención realizada'
 
     class PushState(models.TextChoices):
         PENDING = 'pending'
@@ -411,6 +412,7 @@ class MaintenanceNotification(models.Model):
     button_name = models.CharField(max_length=255)
     category_name = models.CharField(max_length=80, blank=True)
     reply_to = models.ForeignKey('self', null=True, on_delete=models.SET_NULL, related_name='+')
+    review_report = models.ForeignKey('MaintenanceSubmission', null=True, on_delete=models.CASCADE, related_name='+')
     sender_name = models.CharField(max_length=301, blank=True)
     message = models.TextField(blank=True)
     title = models.CharField(max_length=120, blank=True)
@@ -420,7 +422,7 @@ class MaintenanceNotification(models.Model):
 
     @property
     def can_dismiss(self):
-        return self.button_deleted or self.kind not in self.ACTION_KINDS
+        return self.button_deleted or self.kind not in (*self.ACTION_KINDS, self.Kind.REVIEW)
 
     @classmethod
     def inbox_visibility(cls):
@@ -450,6 +452,10 @@ class MaintenanceNotification(models.Model):
             models.UniqueConstraint(
                 fields=['maintenance_key', 'recipient'],
                 condition=models.Q(kind='confirmed'), name='unique_maintenance_confirmation',
+            ),
+            models.UniqueConstraint(
+                fields=['review_report', 'recipient'],
+                condition=models.Q(kind='review'), name='unique_maintenance_review_notice',
             ),
         ]
 

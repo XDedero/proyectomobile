@@ -123,10 +123,11 @@ def generate_alerts(*, today=None, recipient=None):
 
 
 def generate_all_workspaces(*, check_maintenance=True):
-    from .maintenance_reports import cleanup_reports
+    from .maintenance_reports import cleanup_reports, restore_pending_review_notices
 
     if check_maintenance:
         generate_alerts()
+        restore_pending_review_notices()
         cleanup_reports()
     deliver_push_notifications()
     if not settings.PLANOS_CLOUD_MODE:
@@ -153,6 +154,7 @@ def generate_all_workspaces(*, check_maintenance=True):
                     workspace_user(account)
                 if check_maintenance:
                     generate_alerts()
+                    restore_pending_review_notices()
                 if drive:
                     token = workspace.set(Workspace(schema, str(company_id), {}, drive))
                     try:

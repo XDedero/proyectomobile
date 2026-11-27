@@ -17,9 +17,10 @@ from django.urls import reverse
 from PIL import Image
 
 from .cloud_projects import open_cloud_project
+from .device_push import deliver_push_notifications, public_key
 from .maintenance import next_date
 from .maintenance_alerts import generate_alerts
-from .maintenance_reports import cleanup_reports
+from .maintenance_reports import cleanup_reports, restore_pending_review_notices
 from .maintenance_storage import EvidenceUnavailable
 from .models import (
     ButtonCategory, LatestMaintenance, MaintenanceNotification, MaintenanceSubmission,
@@ -433,13 +434,82 @@ class MaintenanceTests(TestCase):
             report = MaintenanceSubmission.objects.get()
             decision = reverse('decide_maintenance', args=[report.pk])
             self.assertRedirects(admin.post(decision, {'decision': 'accept'}), inbox)
-            self.assertEqual(admin.post(decision, {'decision': 'accept'}).status_code, 404)
+            replay = admin.post(decision, {'decision': 'accept'}, follow=True)
+            self.assertRedirects(replay, inbox)
+            self.assertContains(replay, 'Esta mantención ya fue revisada o ya no está disponible.')
             self.assertEqual(LatestMaintenance.objects.get(pk=button.maintenance_key).description, 'Listo')
             report.refresh_from_db()
             self.assertEqual((report.status, report.title, report.drive_images), ('cleanup', '', ['evidencia_1']))
             drive.delete.side_effect = None
             cleanup_reports()
             self.assertFalse(MaintenanceSubmission.objects.exists())
+
+    def check_approval_notifications(self, *, with_photo):
+        _, _, button, inbox, notice, worker, admin = self.report_fixture()
+        for client, name in ((admin, 'supervisor'), (worker, 'worker')):
+            result = client.post(reverse('push_subscription'), {
+                'endpoint': f'https://fcm.googleapis.com/fcm/send/{name}',
+                'keys': {'p256dh': public_key(), 'auth': 'AAAAAAAAAAAAAAAAAAAAAA'},
+            }, content_type='application/json')
+            self.assertEqual(result.status_code, 204)
+
+        payload = {'title': 'Bomba revisada', 'description': 'Trabajo completado.'}
+        if with_photo:
+            payload['images'] = [self.evidence()]
+        with patch('mobileApp.maintenance_reports.EvidenceDrive') as storage:
+            storage.return_value.reserve.return_value = ['evidencia_1']
+            self.assertRedirects(worker.post(reverse('submit_maintenance', args=[notice.pk]), payload), inbox)
+            self.assertEqual(storage.return_value.upload.call_count, int(with_photo))
+            report = MaintenanceSubmission.objects.get(status=MaintenanceSubmission.Status.PENDING)
+            review = MaintenanceNotification.objects.get(review_report=report)
+            self.assertEqual((review.kind, review.recipient_id), (MaintenanceNotification.Kind.REVIEW, self.admin.pk))
+            self.assertFalse(review.can_dismiss)
+            supervisor_inbox = admin.get(inbox)
+            self.assertContains(supervisor_inbox, 'Mantención realizada')
+            self.assertContains(supervisor_inbox, 'Bomba revisada')
+            self.assertContains(supervisor_inbox, 'alt="Ver imagen', count=int(with_photo))
+            unrelated = Client()
+            unrelated.force_login(self.other_admin)
+            self.assertNotContains(unrelated.get(inbox), 'Bomba revisada')
+            with patch('mobileApp.device_push._send') as send:
+                deliver_push_notifications()
+                review_deliveries = [call.args[0] for call in send.call_args_list
+                                     if call.args[0].notification.kind == MaintenanceNotification.Kind.REVIEW]
+                self.assertEqual([delivery.subscription.recipient_id for delivery in review_deliveries], [self.admin.pk])
+
+            if with_photo:
+                # Approval still reaches the original sender after a reassignment.
+                button.maintenance_responsibles = [self.owner.username]
+                button.save(update_fields=['maintenance_responsibles'])
+            decision = reverse('decide_maintenance', args=[report.pk])
+            self.assertRedirects(admin.post(decision, {'decision': 'accept'}), inbox)
+            self.assertEqual(storage.return_value.delete.call_count, int(with_photo))
+        self.assertFalse(MaintenanceNotification.objects.filter(pk=review.pk).exists())
+        self.assertContains(worker.get(inbox), 'Tu mantención fue aceptada con éxito.')
+        self.assertNotContains(admin.get(inbox), 'Aceptar mantención')
+        self.assertRedirects(admin.post(decision, {'decision': 'accept'}), inbox)
+        worker_confirmation = MaintenanceNotification.objects.get(recipient=self.creator, kind='confirmed')
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            worker_deliveries = [call.args[0].notification_id for call in send.call_args_list
+                                 if call.args[0].subscription.recipient_id == self.creator.pk]
+            self.assertEqual(worker_deliveries, [worker_confirmation.pk])
+
+    def test_review_and_confirmation_are_sent_without_photo(self):
+        self.check_approval_notifications(with_photo=False)
+
+    def test_review_and_confirmation_are_sent_with_photo_and_reassignment(self):
+        self.check_approval_notifications(with_photo=True)
+
+    def test_existing_pending_report_receives_a_review_notice_once(self):
+        _, _, _, inbox, notice, worker, _ = self.report_fixture()
+        self.assertRedirects(worker.post(reverse('submit_maintenance', args=[notice.pk]), {'title': 'Reporte previo'}), inbox)
+        report = MaintenanceSubmission.objects.get()
+        MaintenanceNotification.objects.filter(review_report=report).delete()
+        restore_pending_review_notices()
+        item = MaintenanceNotification.objects.get(review_report=report, recipient=self.admin)
+        restore_pending_review_notices()
+        self.assertEqual(list(MaintenanceNotification.objects.filter(review_report=report)), [item])
 
     def test_explicit_roles_self_approval_history_and_inbox_revision(self):
         primary = get_user_model().objects.create_superuser('principal')

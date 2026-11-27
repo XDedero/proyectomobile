@@ -4,9 +4,10 @@ import logging
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from .device_push import reset_push
+from .device_push import push_worker_wakeup, reset_push
 from .maintenance import next_date
 from .maintenance_alerts import ACTION_KINDS, account_name, current_buttons, record_notifications, touch_inboxes
 from .maintenance_assignments import eligible_users, roles_for_button
@@ -62,6 +63,7 @@ def reserve_report(user, notice, title, description):
 
 
 def mark_for_cleanup(report):
+    MaintenanceNotification.objects.filter(review_report=report).delete()
     MaintenanceSubmission.objects.filter(pk=report.pk).update(
         status=MaintenanceSubmission.Status.CLEANUP, submitted_by=None,
         title='', description='', plan_name='', button_name='', responsible_name='',
@@ -78,6 +80,40 @@ def cleanup_report(report, drive=None):
         logger.warning('Se reintentará retirar evidencia temporal de mantención en Drive.')
         return
     MaintenanceSubmission.objects.filter(pk=report.pk, status=MaintenanceSubmission.Status.CLEANUP).delete()
+
+
+def sync_review_notices(report, supervisors):
+    recipients = {user.pk for user in supervisors}
+    notices = MaintenanceNotification.objects.filter(review_report=report)
+    previous = set(notices.values_list('recipient_id', flat=True))
+    if previous - recipients:
+        notices.filter(recipient_id__in=previous - recipients).delete()
+    missing = recipients - previous
+    if missing:
+        MaintenanceNotification.objects.bulk_create([
+            MaintenanceNotification(
+                kind=MaintenanceNotification.Kind.REVIEW, maintenance_key=report.maintenance_key, recipient_id=recipient,
+                review_report=report,
+                responsible_id=report.submitted_by_id, responsible_name=report.responsible_name,
+                last_maintenance=report.last_maintenance, due_date=report.due_date,
+                plan_name=report.plan_name, button_name=report.button_name, day=timezone.localdate(report.created_at),
+                message=(f'{report.button_name} · Plano {report.plan_name}. '
+                         f'Revisa el reporte de {report.responsible_name} en tu buzón.'),
+            ) for recipient in sorted(missing)
+        ], ignore_conflicts=True)
+        transaction.on_commit(push_worker_wakeup.set)
+    return previous | recipients
+
+
+def restore_pending_review_notices():
+    notices = MaintenanceNotification.objects.filter(review_report_id=OuterRef('pk'))
+    pending = MaintenanceSubmission.objects.filter(status=MaintenanceSubmission.Status.PENDING)
+    for report_id, key in pending.filter(~Exists(notices)).values_list('pk', 'maintenance_key'):
+        with transaction.atomic():
+            button = published_button(key, lock=True)
+            report = pending.select_for_update().filter(pk=report_id).first()
+            if button and report:
+                touch_inboxes(sync_review_notices(report, button_users(button)[1]))
 
 
 def upload_evidence(report, images):
@@ -100,7 +136,7 @@ def upload_evidence(report, images):
             button = published_button(report.maintenance_key)
             if button:
                 responsible, supervisors = button_users(button)
-                touch_inboxes({user.pk for user in (*responsible, *supervisors)})
+                touch_inboxes(sync_review_notices(report, supervisors) | {user.pk for user in responsible})
     except EvidenceUnavailable:
         mark_for_cleanup(report)
         cleanup_report(report, drive)
@@ -117,7 +153,12 @@ def review_report(report, reviewer, *, accept):
         raise ValidationError('Este reporte ya fue revisado.')
     responsible, supervisors = button_users(button) if button else ([], [])
     if reviewer not in supervisors:
-        raise PermissionDenied
+        if button is not None:
+            raise PermissionDenied
+        raise ValidationError('Esta mantención ya no está disponible para revisión.')
+    affected = {user.pk for user in (*responsible, *supervisors)}
+    if report.submitted_by_id:
+        affected.add(report.submitted_by_id)
     same_cycle = matches_cycle(button, report)
     if accept:
         if not same_cycle:
@@ -133,12 +174,15 @@ def review_report(report, reviewer, *, accept):
         button.save(update_fields=['last_maintenance', 'next_maintenance'])
         active_notices(button).delete()
         confirmations = []
-        for user in sorted(set(responsible + supervisors), key=lambda user: user.pk):
+        for recipient in sorted(affected):
+            message = (f'Tu mantención fue aceptada con éxito. {report.button_name} · Plano {button.plan.name}.'
+                       if recipient == report.submitted_by_id else '')
             item, _ = MaintenanceNotification.objects.update_or_create(
-                kind=MaintenanceNotification.Kind.CONFIRMED, maintenance_key=button.maintenance_key, recipient=user,
+                kind=MaintenanceNotification.Kind.CONFIRMED, maintenance_key=button.maintenance_key, recipient_id=recipient,
                 defaults=dict(responsible_id=report.submitted_by_id, responsible_name=report.responsible_name,
                               last_maintenance=performed_on, due_date=next_due, plan_name=button.plan.name,
-                              button_name=report.button_name, day=timezone.localdate(), button_deleted=False),
+                              button_name=report.button_name, day=timezone.localdate(), button_deleted=False,
+                              message=message),
             )
             confirmations.append(item.pk)
         reset_push(MaintenanceNotification.objects.filter(pk__in=confirmations))
@@ -151,7 +195,8 @@ def review_report(report, reviewer, *, accept):
             button_name=report.button_name, day=timezone.localdate(),
         )
     mark_for_cleanup(report)
-    touch_inboxes({user.pk for user in (*responsible, *supervisors)})
+    touch_inboxes(affected)
+    transaction.on_commit(push_worker_wakeup.set)
     return report
 
 
@@ -178,6 +223,11 @@ def refresh_button_inboxes(button, previous=None, *, users=None):
     from .maintenance_alerts import REMINDER_LEAD_TIME
     if button.next_maintenance and button.next_maintenance <= today + REMINDER_LEAD_TIME:
         record_notifications(button, today, responsible)
+    pending_report = MaintenanceSubmission.objects.select_for_update().filter(
+        maintenance_key=button.maintenance_key, status=MaintenanceSubmission.Status.PENDING,
+    ).first()
+    if pending_report:
+        affected |= sync_review_notices(pending_report, supervisors)
     touch_inboxes(affected | {user.pk for user in (*responsible, *supervisors, *old_responsible, *old_supervisors)})
 
 
@@ -185,7 +235,9 @@ def archive_deleted_button(button):
     """Keep the notification and latest text after a published button is removed."""
     if not button.maintenance_key or button.plan.draft_of_id:
         return
-    notices = MaintenanceNotification.objects.filter(maintenance_key=button.maintenance_key)
+    notices = MaintenanceNotification.objects.filter(maintenance_key=button.maintenance_key).exclude(
+        kind=MaintenanceNotification.Kind.REVIEW,
+    )
     affected = set(notices.values_list('recipient_id', flat=True))
     report = MaintenanceSubmission.objects.select_for_update().filter(
         maintenance_key=button.maintenance_key, status__in=OPEN_STATUSES,

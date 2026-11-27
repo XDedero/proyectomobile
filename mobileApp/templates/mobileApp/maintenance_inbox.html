@@ -35,7 +35,8 @@
       <div class="d-grid gap-3">
         {% for report in review_page %}
           <article class="management-card text-break">
-            <h3 class="h5">{{ report.title }}</h3>
+            <h3 class="h5">Mantención realizada</h3>
+            <p class="fw-semibold mb-1">{{ report.title }}</p>
             <p class="small mb-2"><strong>{{ report.responsible_name }}</strong> · {{ report.button_name }} · Plano {{ report.plan_name }} · {{ report.created_at|date:'d-m-Y' }}</p>
             {% if report.description %}<p style="white-space: pre-wrap">{{ report.description }}</p>{% endif %}
             {% if report.drive_images %}
@@ -91,9 +92,12 @@
           {% if item.title %}<p class="fw-semibold mb-1">{{ item.title }}</p>{% endif %}
           {% if item.description %}<p class="mb-2" style="white-space: pre-wrap">{{ item.description }}</p>{% endif %}
           {% if item.message %}<p class="mb-0" style="white-space: pre-wrap">{{ item.message }}</p>{% endif %}
-        {% elif item.latest %}
-          <p class="fw-semibold mb-1">{{ item.latest.title }} · {{ item.latest.performed_on|date:'d-m-Y' }}</p>
-          {% if item.latest.description %}<p class="mb-0" style="white-space: pre-wrap">{{ item.latest.description }}</p>{% endif %}
+        {% else %}
+          {% if item.message %}<p class="mb-2">{{ item.message }}</p>{% endif %}
+          {% if item.latest %}
+            <p class="fw-semibold mb-1">{{ item.latest.title }} · {{ item.latest.performed_on|date:'d-m-Y' }}</p>
+            {% if item.latest.description %}<p class="mb-0" style="white-space: pre-wrap">{{ item.latest.description }}</p>{% endif %}
+          {% endif %}
         {% endif %}
       {% elif item.kind == 'reply' %}
         <p class="small mb-2">De <strong>{{ item.sender_name }}</strong> · <strong>{{ item.button_name }}</strong> · Plano <strong>{{ item.plan_name }}</strong> · Vencimiento <strong>{{ item.due_date|date:'d-m-Y' }}</strong></p>
@@ -141,7 +145,10 @@
 <script>
   const inbox = document.getElementById('maintenanceInbox');
   let checking = false, submitting = false;
-  inbox.addEventListener('submit', () => { submitting = true; });
+  inbox.addEventListener('submit', event => {
+    if (submitting) event.preventDefault();
+    else submitting = true;
+  });
   const writing = () => Array.from(
     inbox.querySelectorAll('[data-maintenance-submit] input:not([type="hidden"]), [data-maintenance-submit] textarea')
   ).some(field => field.value);
@@ -163,7 +170,9 @@
     }
   }
   document.addEventListener('visibilitychange', refreshInbox);
-  window.addEventListener('pageshow', event => { if (event.persisted) refreshInbox(); });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) { submitting = false; refreshInbox(); }
+  });
   window.addEventListener('online', refreshInbox);
   window.setInterval(refreshInbox, 15000);
 
