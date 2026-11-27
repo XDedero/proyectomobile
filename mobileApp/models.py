@@ -388,6 +388,7 @@ class MaintenanceNotification(models.Model):
         ALERT = 'alert', 'Mantención vencida'
         REMINDER = 'reminder', 'Mantención próxima'
         REPLY = 'reply', 'Mensaje de administración'
+        GENERAL = 'general', 'Notificación general'
         RETRY = 'retry', 'Mantención por completar'
         CONFIRMED = 'confirmed', 'Mantención confirmada'
 
@@ -395,9 +396,9 @@ class MaintenanceNotification(models.Model):
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
     responsible = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
     responsible_name = models.CharField(max_length=301)
-    maintenance_key = models.UUIDField()
-    last_maintenance = models.DateField()
-    due_date = models.DateField()
+    maintenance_key = models.UUIDField(null=True)
+    last_maintenance = models.DateField(null=True)
+    due_date = models.DateField(null=True)
     day = models.DateField()
     plan_name = models.CharField(max_length=255)
     button_name = models.CharField(max_length=255)
@@ -408,6 +409,10 @@ class MaintenanceNotification(models.Model):
     title = models.CharField(max_length=120, blank=True)
     description = models.TextField(blank=True)
     button_deleted = models.BooleanField(default=False)
+
+    @property
+    def can_dismiss(self):
+        return self.kind == self.Kind.GENERAL or (self.kind == self.Kind.CONFIRMED and not self.button_deleted)
 
     class Meta:
         ordering = ['-day', '-id']
@@ -430,6 +435,26 @@ class MaintenanceNotification(models.Model):
                 condition=models.Q(kind='confirmed'), name='unique_maintenance_confirmation',
             ),
         ]
+
+
+class DevicePushSubscription(models.Model):
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    session_key = models.CharField(max_length=40, unique=True)
+    endpoint = models.URLField(max_length=2048, unique=True)
+    public_key = models.CharField(max_length=100)
+    auth_secret = models.CharField(max_length=40)
+
+
+class DevicePushDelivery(models.Model):
+    notification = models.ForeignKey(MaintenanceNotification, on_delete=models.CASCADE, related_name='+')
+    subscription = models.ForeignKey(DevicePushSubscription, on_delete=models.CASCADE, related_name='+')
+    available_at = models.DateTimeField(db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['notification', 'subscription'], name='unique_notification_push_delivery',
+        )]
 
 
 class MaintenanceInboxState(models.Model):

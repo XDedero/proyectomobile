@@ -2,6 +2,24 @@
 const VERSION = '{{ asset_version }}';
 const CACHE = `reloncavi-shell-${VERSION}`;
 const HOME = '/';
+const INBOX = "{% url 'notifications' %}";
+self.addEventListener('push', event => {
+    let alert;
+    try { alert = event.data?.json(); } catch { alert = null; }
+    event.waitUntil(self.registration.showNotification(alert?.title || 'Reloncaví', {
+        body: alert?.body || 'Tienes un aviso nuevo en el buzón.',
+        icon: '/static/mobileApp/img/pwa/icon-192.png',
+        tag: alert?.tag,
+    }));
+});
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    event.waitUntil((async () => {
+        const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+        const inbox = windows.find(client => new URL(client.url).pathname === INBOX);
+        return inbox ? inbox.focus() : self.clients.openWindow(INBOX);
+    })());
+});
 self.addEventListener('install', event => {
     event.waitUntil((async () => {
         const cache = await caches.open(CACHE);

@@ -56,6 +56,9 @@ CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get(
 if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
     ALLOWED_HOSTS.append(os.environ['RENDER_EXTERNAL_HOSTNAME'])
     CSRF_TRUSTED_ORIGINS.append('https://' + os.environ['RENDER_EXTERNAL_HOSTNAME'])
+WEB_PUSH_CONTACT = os.environ.get('WEB_PUSH_CONTACT') or (
+    'https://' + os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'proyectomobile-1.onrender.com')
+)
 SECURE_SSL_REDIRECT = env_bool('DJANGO_SECURE_SSL_REDIRECT', not DEBUG)
 SECURE_REDIRECT_EXEMPT = [r'^healthz/$']
 SESSION_COOKIE_SECURE = not DEBUG

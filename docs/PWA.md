@@ -96,9 +96,23 @@ preexistente `scripts/browser_smoke.py` se detiene en el selector antiguo
 `#btnAssignExcelCorner`, ausente en la interfaz actual; no se considera una validación
 completada de ese flujo general.
 
-Las notificaciones push son opcionales y no se activan: requieren definir qué eventos
-notificar y una infraestructura de envío. La instalación PWA y el trabajo offline no
-dependen de ellas.
+## Notificaciones del dispositivo
+
+Desde el buzón, cada usuario puede activar las notificaciones en su dispositivo. En iPhone
+y iPad se requiere iOS o iPadOS 16.4 o posterior y abrir Reloncaví desde su icono en la
+pantalla de inicio. En Android y Windows se puede conceder el permiso desde un navegador
+compatible. Tras cerrar sesión o al caducar, el usuario puede volver a activarlas al entrar.
+
+En **Administración → Crear notificación**, el administrador puede elegir usuarios activos de
+su empresa o enviar a todos. Cada destinatario recibe el aviso en su buzón y en sus dispositivos
+suscritos. La X retira el aviso general o la confirmación del buzón de ese destinatario.
+Los recordatorios y las alertas de mantención pendientes se resuelven mediante el flujo de revisión.
+
+Gunicorn usa el proceso de mantención para enviar Web Push. El proceso revisa la cola cada
+30 segundos y conserva la revisión de vencimientos cada cinco minutos. Render instala la
+dependencia desde `requirements.txt`; la identidad VAPID se deriva de la clave secreta de Django.
+Si se cambia esa clave, los usuarios deben volver a activar las notificaciones. Para probar,
+envía un aviso a tu propia cuenta y cierra la ventana de Reloncaví antes de que llegue.
 
 Referencias de plataforma: [instalación en Safari 26](https://webkit.org/blog/17333/webkit-features-in-safari-26-0/),
 [persistencia y cuotas de WebKit](https://webkit.org/blog/14403/updates-to-storage-policy/)

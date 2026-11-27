@@ -222,7 +222,8 @@ class CompanyWorkspaceMiddleware:
         if account is None:
             return self.get_response(request)
         company, _ = resolve_workspace(account, include_brand=request.path in (
-            '/', '/administracion/', '/api/auth/session/', '/notificaciones/', '/mi-cuenta/contrasena/',
+            '/', '/administracion/', '/administracion/notificaciones/', '/api/auth/session/', '/notificaciones/',
+            '/mi-cuenta/contrasena/',
         ))
         if company is None:
             return self.get_response(request)

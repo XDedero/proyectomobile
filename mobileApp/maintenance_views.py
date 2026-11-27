@@ -11,6 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .authorization import is_administrator
 from .company_brand import brand_context
+from .device_push import queue_notifications
 from .maintenance_alerts import ACTION_KINDS, account_name, current_buttons, generate_alerts, touch_inboxes
 from .maintenance_assignments import assigned_buttons, can_report, eligible_users, roles_for_button
 from .maintenance_reports import (
@@ -52,7 +53,7 @@ def notifications(request):
             raise
     revision = inbox_revision(request.user)
     items = MaintenanceNotification.objects.filter(recipient=request.user).filter(
-        Q(button_deleted=True) | Q(kind__in=('reply', 'confirmed')) |
+        Q(button_deleted=True) | Q(kind__in=('reply', 'confirmed', 'general')) |
         Q(kind__in=ACTION_KINDS, responsible_id=F('recipient_id')),
     )
     open_reports = MaintenanceSubmission.objects.filter(status__in=OPEN_STATUSES)
@@ -114,13 +115,14 @@ def reply_to_notification(request, notification_id):
     elif not 1 <= len(message) <= 2000:
         messages.error(request, 'Escribe un mensaje de entre 1 y 2.000 caracteres.')
     else:
-        MaintenanceNotification.objects.create(
+        item = MaintenanceNotification.objects.create(
             kind=MaintenanceNotification.Kind.REPLY, reply_to=alert,
             recipient=alert.responsible, responsible=alert.responsible, responsible_name=alert.responsible_name,
             maintenance_key=alert.maintenance_key, last_maintenance=alert.last_maintenance, due_date=alert.due_date,
             plan_name=alert.plan_name, button_name=alert.button_name, category_name=alert.category_name,
             day=timezone.localdate(), sender_name=account_name(request.user), message=message,
         )
+        queue_notifications([item])
         messages.success(request, f'Mensaje enviado a {alert.responsible_name}.')
         touch_inboxes({alert.responsible_id})
     return redirect('notifications')

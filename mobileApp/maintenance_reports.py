@@ -6,6 +6,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from .device_push import queue_notifications
 from .maintenance import next_date
 from .maintenance_alerts import ACTION_KINDS, account_name, current_buttons, record_notifications, touch_inboxes
 from .maintenance_assignments import eligible_users, roles_for_button
@@ -131,21 +132,25 @@ def review_report(report, reviewer, *, accept):
         button.next_maintenance = next_due
         button.save(update_fields=['last_maintenance', 'next_maintenance'])
         active_notices(button).delete()
+        confirmations = []
         for user in sorted(set(responsible + supervisors), key=lambda user: user.pk):
-            MaintenanceNotification.objects.update_or_create(
+            item, _ = MaintenanceNotification.objects.update_or_create(
                 kind=MaintenanceNotification.Kind.CONFIRMED, maintenance_key=button.maintenance_key, recipient=user,
                 defaults=dict(responsible_id=report.submitted_by_id, responsible_name=report.responsible_name,
                               last_maintenance=performed_on, due_date=next_due, plan_name=button.plan.name,
                               button_name=report.button_name, day=timezone.localdate(), button_deleted=False),
             )
+            confirmations.append(item)
+        queue_notifications(confirmations)
     elif button.next_maintenance and report.submitted_by in responsible:
         active_notices(button).filter(recipient=report.submitted_by).delete()
-        MaintenanceNotification.objects.create(
+        item = MaintenanceNotification.objects.create(
             kind=MaintenanceNotification.Kind.RETRY, maintenance_key=button.maintenance_key,
             recipient=report.submitted_by, responsible=report.submitted_by, responsible_name=report.responsible_name,
             last_maintenance=button.last_maintenance, due_date=button.next_maintenance, plan_name=button.plan.name,
             button_name=report.button_name, day=timezone.localdate(),
         )
+        queue_notifications([item])
     mark_for_cleanup(report)
     touch_inboxes({user.pk for user in (*responsible, *supervisors)})
     return report

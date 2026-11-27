@@ -8,6 +8,7 @@ from . import piece_views
 from . import button_views
 from . import management_views
 from . import maintenance_views
+from . import notification_views
 from . import sector_views
 from . import accounts_views
 from . import company_brand
@@ -31,7 +32,10 @@ urlpatterns = [
     path('api/piece-library/import/', piece_views.import_piece_document, name='import_piece_document'),
     path('api/projects/<str:kind>/<int:plan_id>/display/', project_views.project_display, name='project_display'),
     path('administracion/', management_views.management_panel, name='management_panel'),
+    path('administracion/notificaciones/', notification_views.compose_announcement, name='compose_announcement'),
     path('notificaciones/', maintenance_views.notifications, name='notifications'),
+    path('notificaciones/<int:notification_id>/eliminar/', notification_views.dismiss_notification, name='dismiss_notification'),
+    path('api/notificaciones/dispositivo/', notification_views.push_subscription, name='push_subscription'),
     path('notificaciones/cambios/', maintenance_views.notification_changes, name='notification_changes'),
     path('notificaciones/<int:notification_id>/responder/', maintenance_views.reply_to_notification, name='reply_to_notification'),
     path('notificaciones/<int:notification_id>/mantencion/', maintenance_views.submit_maintenance, name='submit_maintenance'),

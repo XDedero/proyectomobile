@@ -1,0 +1,60 @@
+{% load static %}
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crear notificación · Administración</title>
+  <link rel="stylesheet" href="{% static 'mobileApp/vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'mobileApp/management.css' %}?v={{ asset_version }}">
+  {% include 'mobileApp/company_theme.html' %}
+</head>
+<body>
+<main class="container management-shell py-4 py-lg-5">
+  <header class="mb-4">
+    <a class="back-link" href="{% url 'management_panel' %}">← Volver a Administración</a>
+    <h1 class="mt-3 mb-0">Crear notificación</h1>
+  </header>
+  {% for message in messages %}<p class="alert alert-success" role="status">{{ message }}</p>{% endfor %}
+  <form id="announcementForm" class="management-card" method="post">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+      {{ form.title }}{{ form.title.errors }}
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="{{ form.message.id_for_label }}">{{ form.message.label }}</label>
+      {{ form.message }}{{ form.message.errors }}
+    </div>
+    <fieldset class="mb-4" aria-describedby="announcementDelivery">
+      <legend class="h5">Destinatarios</legend>
+      <p id="announcementDelivery" class="small text-secondary mb-3">El aviso aparecerá en el buzón de cada destinatario y en los dispositivos donde haya activado las notificaciones.</p>
+      <div class="form-check mb-2">
+        {{ form.all_users }}
+        <label class="form-check-label fw-semibold" for="{{ form.all_users.id_for_label }}">{{ form.all_users.label }}</label>
+      </div>
+      {{ form.recipients.errors }}
+      <div id="announcementRecipients" class="border rounded p-3 overflow-auto" style="max-height: 18rem">
+        {% for option in form.recipients %}
+          <div class="mb-2">{{ option }}</div>
+        {% empty %}
+          <p class="mb-0">No hay usuarios activos.</p>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <button class="btn btn-primary" type="submit">Enviar notificación</button>
+  </form>
+</main>
+<script>
+  const form = document.getElementById('announcementForm');
+  const all = form.elements.all_users;
+  const users = document.getElementById('announcementRecipients');
+  const syncRecipients = () => {
+    for (const option of users.querySelectorAll('input')) option.disabled = all.checked;
+  };
+  all.addEventListener('change', syncRecipients);
+  syncRecipients();
+  form.addEventListener('submit', () => { form.querySelector('button[type="submit"]').disabled = true; });
+</script>
+</body>
+</html>

@@ -2,14 +2,15 @@
 from datetime import timedelta
 import logging
 from threading import Thread
-from time import sleep
+from time import monotonic, sleep
 from uuid import uuid4
 
 from django.conf import settings
 from django.db import DatabaseError, close_old_connections, transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
+from .device_push import deliver_push_notifications, queue_notifications
 from .maintenance_assignments import assigned_buttons, can_report, eligible_users, roles_for_button
 from .models import LatestMaintenance, MaintenanceInboxState, MaintenanceNotification, Motor, PdfMarker
 
@@ -53,6 +54,7 @@ def record_notifications(button, today, responsible):
         kind=kind, maintenance_key=button.maintenance_key, recipient_id__in=recipients, button_deleted=False,
     ).order_by()
     refresh_ids = []
+    rescheduled_ids = []
     if kind == MaintenanceNotification.Kind.REMINDER:
         existing = set(notifications.filter(
             last_maintenance=button.last_maintenance, due_date=due,
@@ -63,8 +65,11 @@ def record_notifications(button, today, responsible):
             'pk', 'recipient_id', 'day', 'last_maintenance', 'due_date',
         ):
             existing.add(recipient)
-            if day < today or (day == today and (previous_last, previous_due) != (button.last_maintenance, due)):
+            rescheduled = (previous_last, previous_due) != (button.last_maintenance, due)
+            if day < today or (day == today and rescheduled):
                 refresh_ids.append(pk)
+                if rescheduled:
+                    rescheduled_ids.append(pk)
     missing = recipients - existing
     if not missing and not refresh_ids:
         return
@@ -86,6 +91,11 @@ def record_notifications(button, today, responsible):
                                     responsible_id=recipient, responsible_name=account_name(users[recipient]), **context)
             for recipient in missing
         ], ignore_conflicts=True)
+    if missing or rescheduled_ids:
+        queue_notifications(notifications.filter(
+            Q(recipient_id__in=missing) | Q(pk__in=rescheduled_ids),
+            last_maintenance=button.last_maintenance, due_date=due,
+        ))
     touch_inboxes(changed)
 
 
@@ -116,11 +126,13 @@ def generate_alerts(*, today=None, recipient=None):
                 record_notifications(button, today, responsible)
 
 
-def generate_all_workspaces():
+def generate_all_workspaces(*, check_maintenance=True):
     from .maintenance_reports import cleanup_reports
 
-    generate_alerts()
-    cleanup_reports()
+    if check_maintenance:
+        generate_alerts()
+        cleanup_reports()
+    deliver_push_notifications()
     if not settings.PLANOS_CLOUD_MODE:
         return
     from .company_access import usable_companies
@@ -132,36 +144,45 @@ def generate_all_workspaces():
         schema = schema_name(company_id)
         if not workspace_is_ready(schema):
             continue
-        accounts = [
-            *CompanyAdminSetup.objects.filter(company_id=company_id),
-            *CompanyAccount.objects.filter(company_id=company_id, role=UserProfile.Role.ADMINISTRATOR),
-        ]
         try:
-            drive = load_drive(company_id, CompanyDriveConnection.objects.filter(company_id=company_id).first())
+            accounts, drive = [], None
+            if check_maintenance:
+                accounts = [
+                    *CompanyAdminSetup.objects.filter(company_id=company_id),
+                    *CompanyAccount.objects.filter(company_id=company_id, role=UserProfile.Role.ADMINISTRATOR),
+                ]
+                drive = load_drive(company_id, CompanyDriveConnection.objects.filter(company_id=company_id).first())
             with using_schema(schema):
                 for account in accounts:
                     workspace_user(account)
-                generate_alerts()
+                if check_maintenance:
+                    generate_alerts()
                 if drive:
                     token = workspace.set(Workspace(schema, str(company_id), {}, drive))
                     try:
                         cleanup_reports()
                     finally:
                         workspace.reset(token)
+                deliver_push_notifications(schema=schema)
         except DatabaseError:
             logger.exception('No se pudieron generar las alertas de mantención del espacio %s.', schema)
 
 
 def watch_for_maintenance_notifications():
+    next_maintenance = 0
     while True:
         close_old_connections()
         try:
-            generate_all_workspaces()
+            now = monotonic()
+            check_maintenance = now >= next_maintenance
+            if check_maintenance:
+                next_maintenance = now + 300
+            generate_all_workspaces(check_maintenance=check_maintenance)
         except Exception:
             logger.exception('No se pudieron generar las alertas de mantención.')
         finally:
             close_old_connections()
-        sleep(300)
+        sleep(30)
 
 
 def start_maintenance_worker():

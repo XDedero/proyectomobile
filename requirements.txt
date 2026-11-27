@@ -8,4 +8,5 @@ psycopg[binary]>=3.2.12,<3.4
 gunicorn>=23.0.0
 whitenoise>=6.8.2
 cryptography>=46,<49
+pywebpush>=2.5,<3
 
