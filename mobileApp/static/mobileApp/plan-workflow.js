@@ -81,7 +81,8 @@
         motorCard.hidden = !motor;
         excelLinkedSection.style.display = motor?.excel ? 'block' : 'none';
         if (window.projectWorkspace?.active?.kind === 'dxf') window.projectWorkspace.selection(motor ? {
-            buttonId: motor.id, name: motor.name, assign: chooseExcel, remove: deleteSelectedMarker,
+            buttonId: motor.id, name: motor.name, assign: motor.can_edit ? chooseExcel : null,
+            remove: motor.can_edit ? deleteSelectedMarker : null,
             target: { category_id: motor.category_id, name: motor.name, assign_url: motor.assign_url, apply(result) {
                 const current = appState.currentPlan?.motors.find((item) => item.id === result.motor.id);
                 if (!current) return null;
@@ -271,7 +272,7 @@
         const motor = selectedMotor();
         if (motor?.show_description || motor?.maintenance || motor?.maintenance_required) await showButtonDetails();
         else if (motor?.excel) await showPreview();
-        else if (motor && !busy && permissions().can_assign) chooseExcel();
+        else if (motor?.can_edit && !busy && permissions().can_assign) chooseExcel();
     }
 
     async function showButtonDetails(edit = false) {
@@ -280,7 +281,7 @@
         await window.buttonDetails.open(motor, {
             kind: 'dxf', name: motor.name, edit, defaultName: `Botón ${plan.motors.indexOf(motor) + 1}`,
             openExcel: motor.excel ? showPreview : null,
-            assign: permissions().can_assign ? chooseExcel : null,
+            assign: motor.can_edit && permissions().can_assign ? chooseExcel : null,
             onSaved(updated) {
                 if (appState.currentPlan !== plan) return;
                 Object.assign(motor, updated);
@@ -378,7 +379,7 @@
     document.getElementById('btnMoveCadMarker').addEventListener('click', () => setMode(viewer.moving ? 'explore' : 'move'));
     viewer.onMove = async (id, position) => {
         const motor = appState.currentPlan?.motors.find((item) => item.id === id);
-        if (!motor || busy || !permissions().can_change_plan) return;
+        if (!motor?.can_edit || busy || !permissions().can_change_plan) return false;
         const currentRevision = revision;
         setBusy(true);
         try {
@@ -422,7 +423,7 @@
     async function deleteSelectedMarker() {
         const plan = appState.currentPlan;
         const motor = selectedMotor();
-        if (!plan || !motor || busy || !permissions().can_delete_cad_marker) return;
+        if (!plan || !motor?.can_edit || busy || !permissions().can_delete_cad_marker) return;
         if (!(await window.confirmAppAction('Eliminar botón', `¿Eliminar el botón «${motor.name}» del plano?`, 'Eliminar botón', { danger: true }))) return;
         if (appState.currentPlan !== plan || selectedMotor() !== motor || busy || !(await window.workbookEditor.requestClose())) return;
         if (appState.currentPlan !== plan || selectedMotor() !== motor) return;

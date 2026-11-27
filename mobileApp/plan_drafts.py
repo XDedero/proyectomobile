@@ -1,5 +1,5 @@
 """Private working copies; publishing remains an explicit Guardar plano action."""
-from copy import deepcopy
+from copy import copy, deepcopy
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -40,7 +40,8 @@ def copy_document(document, memo):
 
 def copy_markers(source, destination, documents, previous=None):
     from .maintenance import keep_approved_date
-    from .maintenance_alerts import clear_resolved_alerts
+    from .maintenance_assignments import eligible_users
+    from .maintenance_reports import archive_deleted_button, refresh_button_inboxes
 
     model, related = (Motor, 'motors') if isinstance(source, Plan) else (PdfMarker, 'markers')
     result, retained, created, updated, pairs = {}, [], [], [], []
@@ -49,6 +50,7 @@ def copy_markers(source, destination, documents, previous=None):
     if publishing:
         targets = targets.select_for_update()
     existing = {marker.pk: marker for marker in targets}
+    maintenance_changes = []
     latest = LatestMaintenance.objects.in_bulk({marker.maintenance_key for marker in existing.values()
                                                if marker.maintenance_key}) if publishing else {}
     for marker in getattr(source, related).select_related('workbook', 'source_workbook'):
@@ -62,8 +64,11 @@ def copy_markers(source, destination, documents, previous=None):
             approved = latest.get(marker.maintenance_key)
             if approved:
                 keep_approved_date(values, approved.performed_on)
-            if publishing and target.next_maintenance != values['next_maintenance']:
-                clear_resolved_alerts(target.maintenance_key, values['next_maintenance'])
+            if publishing and any(getattr(target, field) != values[field] for field in (
+                'maintenance_key', 'last_maintenance', 'next_maintenance',
+                'maintenance_responsibles', 'maintenance_supervisors',
+            )):
+                maintenance_changes.append((target, copy(target)))
             for key, value in values.items():
                 setattr(target, key, value)
             updated.append(target)
@@ -77,6 +82,14 @@ def copy_markers(source, destination, documents, previous=None):
     for source_id, target in pairs:
         result[str(source_id)] = target.pk
         retained.append(target.pk)
+    if publishing:
+        for pk in existing.keys() - set(retained):
+            archive_deleted_button(existing[pk])
+        maintenance_changes.extend((button, None) for button in created if button.maintenance_key)
+        if maintenance_changes:
+            users = eligible_users()
+            for button, before in maintenance_changes:
+                refresh_button_inboxes(button, before, users=users)
     getattr(destination, related).exclude(pk__in=retained).delete()
     return result
 

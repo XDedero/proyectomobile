@@ -136,11 +136,13 @@
         </div>
         </div>
         ${maintenanceFields.fields('newButton')}
+        ${maintenanceFields.assignmentFields('newButton')}
         <p class="small text-muted">Configura el botón aquí y después toca su posición en el plano.</p>
         <button type="button" id="btnConfirmNewButton" class="btn btn-success w-100">Colocar botón en el plano</button>`);
     newButtonModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     sheetModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     const newButtonMaintenance = maintenanceFields.connect('newButton');
+    const newButtonAssignment = maintenanceFields.connectAssignment('newButton');
     const sheetCategoryMaintenance = maintenanceFields.connect('sheetCategory');
     listingsModal.element.querySelector('.modal-dialog').classList.add('modal-dialog-scrollable');
     let newButton = null;
@@ -205,7 +207,7 @@
         const piece = byId('newButtonPiece').selectedOptions[0];
         const pieceCategory = byId('newButtonOrigin').value === 'piece' ? piece?.dataset.categoryId : null;
         const assigned = pieceCategory ? [...category.options].find(option => option.value === pieceCategory) : category.selectedOptions[0];
-        newButtonMaintenance.setRequired(Boolean(newButton?.copySource) || assigned?.dataset.maintenanceRequired === 'true');
+        newButtonMaintenance.setRequired(Boolean(newButton?.copySource?.maintenance_required) || assigned?.dataset.maintenanceRequired === 'true');
     }
 
     async function newButtonOptions(copySource = null) {
@@ -219,6 +221,7 @@
         byId('newButtonName').maxLength = context.kind === 'dxf' ? 255 : 120;
         byId('newButtonColor').value = defaultPlanButtonColor;
         newButtonMaintenance.set(null);
+        newButtonAssignment.set(null);
         byId('newButtonDescriptionEnabled').checked = false;
         byId('newButtonDescriptionOptions').hidden = true;
         byId('newButtonDescriptions').replaceChildren();
@@ -229,11 +232,15 @@
         updateNewButtonMaintenance();
         message(newButtonModal, '');
         newButtonModal.controller.show();
-        if (copySource) return selection;
         busy(newButtonModal, true);
         try {
-            const data = await load(context);
+            const [data, assignment] = await Promise.all([
+                copySource ? null : load(context),
+                appState.user?.permissions?.can_administer ? request('/api/buttons/maintenance-assignment/') : null,
+            ]);
             if (newButton?.context === context) {
+                newButtonAssignment.set(assignment);
+                if (!data) return selection;
                 for (const item of data.button_categories) byId('newButtonCategory').append(maintenanceFields.categoryOption(item));
                 byId('newButtonSheet').replaceChildren(new Option('Elija una hoja', ''), ...data.sheet_options.filter(row => !row.is_listing).map(row => new Option(row.name, row.name)));
                 if (!data.button_categories.length) message(newButtonModal, 'Cree una categoría para añadir botones.', true);
@@ -253,7 +260,8 @@
         try { maintenance = newButtonMaintenance.read(); }
         catch (error) { message(newButtonModal, error.message, true); return; }
         if (draft.copySource) {
-            draft.result = { origin: 'copy', copy_button_id: draft.copySource.id, maintenance };
+            draft.result = { origin: 'copy', copy_button_id: draft.copySource.id, maintenance,
+                maintenance_assignment: newButtonAssignment.read() };
             await hide(newButtonModal);
             return;
         }
@@ -273,6 +281,7 @@
                 sheet: origin === 'sheet' ? byId('newButtonSheet').value : undefined,
                 category_id: byId('newButtonCategory').value, show_description: byId('newButtonDescriptionEnabled').checked,
                 button_color: byId('newButtonColor').value, descriptions: descriptions.length ? descriptions : undefined, maintenance,
+                maintenance_assignment: newButtonAssignment.read(),
                 name: byId('newButtonName').value.trim() || undefined, label: byId('newButtonName').value.trim() || undefined, file: upload };
             await hide(newButtonModal);
         } catch (error) {
@@ -656,7 +665,9 @@
             `¿Copiar «${name}»${info ? ` (${info})` : ''}? Se copiarán su ficha, descripción y apariencia.`, 'Copiar botón'))) return;
         if (dialog) await hide(dialog);
         if (!valid(context)) return;
-        const options = marker.maintenance_required ? await newButtonOptions(marker) : { origin: 'copy', copy_button_id: marker.id };
+        const options = marker.maintenance_required || appState.user?.permissions?.can_administer
+            ? await newButtonOptions(marker)
+            : { origin: 'copy', copy_button_id: marker.id };
         if (options && valid(context)) await active().setMode('add', options);
     }
     byId('btnCopyPlanButton').onclick = () => copyButton(assignment, assignment?.marker, sheetModal);

@@ -11,7 +11,8 @@
   {% include 'mobileApp/company_theme.html' %}
 </head>
 <body>
-<main class="container management-shell py-4 py-lg-5">
+<main class="container management-shell py-4 py-lg-5" id="maintenanceInbox"
+      data-changes-url="{% url 'notification_changes' %}" data-revision="{{ inbox_revision }}">
   <header class="mb-4">
     <nav class="d-flex flex-wrap gap-3 mb-3" aria-label="Volver">
       <a class="back-link" href="{% url 'index' %}">← Volver a los planos</a>
@@ -64,16 +65,26 @@
     {% for item in page %}
     <article class="management-card text-break">
       <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
-        <h2 class="h5 mb-0">{{ item.get_kind_display }}</h2>
+        <h2 class="h5 mb-0">{% if item.button_deleted %}Botón borrado{% else %}{{ item.get_kind_display }}{% endif %}</h2>
         <time class="small text-secondary" datetime="{{ item.day|date:'Y-m-d' }}">{{ item.day|date:'d-m-Y' }}</time>
       </div>
-      {% if item.kind == 'reply' %}
+      {% if item.button_deleted or item.kind == 'confirmed' %}
+        <p class="small mb-2"><strong>{{ item.button_name }}</strong> · Plano {{ item.plan_name }}</p>
+        {% if item.button_deleted %}
+          {% if item.title %}<p class="fw-semibold mb-1">{{ item.title }}</p>{% endif %}
+          {% if item.description %}<p class="mb-2" style="white-space: pre-wrap">{{ item.description }}</p>{% endif %}
+          {% if item.message %}<p class="mb-0" style="white-space: pre-wrap">{{ item.message }}</p>{% endif %}
+        {% elif item.latest %}
+          <p class="fw-semibold mb-1">{{ item.latest.title }} · {{ item.latest.performed_on|date:'d-m-Y' }}</p>
+          {% if item.latest.description %}<p class="mb-0" style="white-space: pre-wrap">{{ item.latest.description }}</p>{% endif %}
+        {% endif %}
+      {% elif item.kind == 'reply' %}
         <p class="small mb-2">De <strong>{{ item.sender_name }}</strong> · <strong>{{ item.button_name }}</strong> · Plano <strong>{{ item.plan_name }}</strong> · Vencimiento <strong>{{ item.due_date|date:'d-m-Y' }}</strong></p>
         <p class="mb-0" style="white-space: pre-wrap">{{ item.message }}</p>
       {% else %}
         <p class="mb-2">{% if item.kind == 'retry' %}El administrador rechazó el reporte de{% elif item.kind == 'reminder' %}Se acerca la fecha de mantención de{% else %}No se ha registrado la mantención de{% endif %} <strong>{{ item.button_name }}</strong>{% if item.category_name %} ({{ item.category_name }}){% endif %} en el plano <strong>{{ item.plan_name }}</strong>.</p>
         <p class="small mb-2">Fecha de vencimiento <strong>{{ item.due_date|date:'d-m-Y' }}</strong> · Usuario responsable <strong>{{ item.responsible_name }}</strong></p>
-        {% if can_report and item.responsible_id == request.user.pk %}
+        {% if item.responsible_id == request.user.pk %}
           {% if item.awaiting_review %}
             <p class="small mb-0 text-secondary">Reporte en espera de revisión.</p>
           {% elif item.can_submit %}
@@ -92,18 +103,9 @@
                 <button type="submit" class="btn btn-primary btn-sm">Enviar a revisión</button>
               </form>
             </details>
+          {% elif item.needs_supervisor %}
+            <p class="small mb-0 text-secondary">Falta asignar un supervisor para enviar el reporte.</p>
           {% endif %}
-        {% endif %}
-        {% if item.kind == 'alert' and can_reply and item.responsible.is_active %}
-          <details class="mt-3">
-            <summary>Responder a {{ item.responsible_name }}</summary>
-            <form class="mt-2" method="post" action="{% url 'reply_to_notification' item.pk %}">
-              {% csrf_token %}
-              <label for="message-{{ item.pk }}" class="form-label">Mensaje</label>
-              <textarea id="message-{{ item.pk }}" class="form-control mb-2" name="message" rows="3" maxlength="2000" required></textarea>
-              <button type="submit" class="btn btn-primary btn-sm">Enviar mensaje</button>
-            </form>
-          </details>
         {% endif %}
       {% endif %}
     </article>
@@ -120,6 +122,34 @@
   {% endif %}
 </main>
 <script>
+  const inbox = document.getElementById('maintenanceInbox');
+  let checking = false, submitting = false;
+  inbox.addEventListener('submit', () => { submitting = true; });
+  const writing = () => Array.from(
+    inbox.querySelectorAll('[data-maintenance-submit] input:not([type="hidden"]), [data-maintenance-submit] textarea')
+  ).some(field => field.value);
+
+  async function refreshInbox() {
+    if (checking || submitting || document.hidden || writing()) return;
+    checking = true;
+    try {
+      const url = new URL(inbox.dataset.changesUrl, location.origin);
+      url.searchParams.set('revision', inbox.dataset.revision);
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) return;
+      const { changed } = await response.json();
+      if (changed && !submitting && !writing()) location.reload();
+    } catch {
+      // The next check picks up changes when the connection is restored.
+    } finally {
+      checking = false;
+    }
+  }
+  document.addEventListener('visibilitychange', refreshInbox);
+  window.addEventListener('pageshow', event => { if (event.persisted) refreshInbox(); });
+  window.addEventListener('online', refreshInbox);
+  window.setInterval(refreshInbox, 15000);
+
   for (const form of document.querySelectorAll('[data-maintenance-submit]')) {
     const images = form.elements.images;
     images.addEventListener('change', () => {

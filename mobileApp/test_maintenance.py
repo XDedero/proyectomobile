@@ -1,3 +1,4 @@
+from copy import copy
 from datetime import date, timedelta
 from io import BytesIO
 import json
@@ -70,7 +71,7 @@ class MaintenanceTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()['marker' if kind == 'pdf' else 'motor']
 
-    def test_daily_alerts_and_reply_for_the_actual_button_creator(self):
+    def test_daily_alerts_for_the_actual_button_creator_and_legacy_replies(self):
         plan = self.plan('pdf')
         self.assertEqual(self.post(plan['permissions_url'], {'user_ids': [self.creator.pk]}).status_code, 200)
         creator_client = Client()
@@ -90,30 +91,31 @@ class MaintenanceTests(TestCase):
         call_command('generate_maintenance_alerts')
         alerts = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT).order_by('day', 'id')
         ids = set(alerts.values_list('pk', flat=True))
-        self.assertEqual(alerts.count(), 3)
+        self.assertEqual(alerts.count(), 1)
         self.assertFalse(alerts.exclude(day=date(2026, 11, 27)).exists())
         self.today.return_value = date(2026, 11, 28)
         call_command('generate_maintenance_alerts')
         call_command('generate_maintenance_alerts')
         self.assertEqual(set(alerts.values_list('pk', flat=True)), ids)
-        for user in (self.creator, self.admin, self.other_admin):
-            self.assertEqual(alerts.get(recipient=user).day, date(2026, 11, 28))
+        self.assertEqual(alerts.get(recipient=self.creator).day, date(2026, 11, 28))
         self.assertFalse(alerts.filter(recipient=self.owner).exists())
 
         inbox = reverse('notifications')
         admin_client = Client(enforce_csrf_checks=True)
         admin_client.force_login(self.admin)
         page = admin_client.get(inbox)
-        self.assertContains(page, 'Bomba de agua')
-        self.assertContains(page, 'Bombas')
-        self.assertContains(page, plan['name'])
-        self.assertContains(page, 'María Soto')
-        alert = alerts.filter(recipient=self.admin).last()
+        self.assertNotContains(page, 'Bomba de agua')
+        worker_page = creator_client.get(inbox)
+        for value in ('Bomba de agua', 'Bombas', plan['name'], 'María Soto'):
+            self.assertContains(worker_page, value)
+        original_alert = alerts.get()
+        alert = self.legacy_notice(original_alert, self.admin)
         reply = reverse('reply_to_notification', args=[alert.pk])
         self.assertEqual(creator_client.post(reply, {'message': 'Intento'}).status_code, 403)
         self.assertEqual(admin_client.post(reply, {'message': 'Falta token'}).status_code, 403)
+        admin_client.get(reverse('index'))
         token = admin_client.cookies['csrftoken'].value
-        other_alert = alerts.filter(recipient=self.other_admin).first()
+        other_alert = self.legacy_notice(original_alert, self.other_admin)
         self.assertEqual(admin_client.post(reverse('reply_to_notification', args=[other_alert.pk]),
                                           {'message': 'Privado', 'csrfmiddlewaretoken': token}).status_code, 404)
         message = 'Confirma la revisión de la bomba, por favor.'
@@ -128,7 +130,15 @@ class MaintenanceTests(TestCase):
         self.assertContains(page, message)
         self.assertEqual(MaintenanceNotification.objects.get(kind=MaintenanceNotification.Kind.REPLY).reply_to_id, alert.pk)
 
-    def test_monthly_reminder_appears_two_days_before_due_for_creator_and_administrators(self):
+    @staticmethod
+    def legacy_notice(original, recipient):
+        original = copy(original)
+        original.pk = None
+        original.recipient = recipient
+        original.save(force_insert=True)
+        return original
+
+    def test_monthly_reminder_appears_two_days_before_due_for_responsible(self):
         self.today.return_value = date(2026, 11, 25)
         plan = self.plan('pdf')
         draft = self.post(plan['draft_url']).json()['plan']
@@ -149,19 +159,19 @@ class MaintenanceTests(TestCase):
         self.assertNotContains(page, 'Mantención vencida')
         reminders = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.REMINDER)
         self.assertEqual(set(reminders.values_list('recipient_id', flat=True)),
-                         {self.owner.pk, self.admin.pk, self.other_admin.pk})
+                         {self.owner.pk})
         admin = Client()
         admin.force_login(self.admin)
-        self.assertContains(admin.get(inbox), 'Mantención próxima')
+        self.assertNotContains(admin.get(inbox), 'Mantención próxima')
         other_user = Client()
         other_user.force_login(self.creator)
         self.assertContains(other_user.get(inbox), 'Aún no tienes notificaciones.')
 
         for day in (26, 27, 28, 29, 30):
             generate_alerts(today=date(2026, 11, day))
-        self.assertEqual(reminders.count(), 3)
+        self.assertEqual(reminders.count(), 1)
         self.assertFalse(reminders.exclude(day=reminder_day, due_date=date(2026, 11, 28)).exists())
-        for recipient in (self.owner, self.admin, self.other_admin):
+        for recipient in (self.owner,):
             alert = MaintenanceNotification.objects.get(kind=MaintenanceNotification.Kind.ALERT, recipient=recipient)
             self.assertEqual(alert.day, date(2026, 11, 30))
 
@@ -173,10 +183,10 @@ class MaintenanceTests(TestCase):
         self.today.return_value = date(2026, 11, 28)
         generate_alerts()
         alerts = MaintenanceNotification.objects.filter(kind=MaintenanceNotification.Kind.ALERT)
-        self.assertEqual(alerts.count(), 3)
+        self.assertEqual(alerts.count(), 1)
         admin = Client()
         admin.force_login(self.admin)
-        reply_url = reverse('reply_to_notification', args=[alerts.get(recipient=self.admin).pk])
+        reply_url = reverse('reply_to_notification', args=[self.legacy_notice(alerts.get(), self.admin).pk])
         message = 'Se requiere revisar el motor.'
         self.assertRedirects(admin.post(reply_url, {'message': message}), reverse('notifications'))
         change = self.post(marker['details_url'], {
@@ -184,7 +194,7 @@ class MaintenanceTests(TestCase):
         })
         self.assertEqual(change.status_code, 200, change.content)
         self.assertEqual(change.json()['maintenance']['next_date'], '2027-01-28')
-        self.assertEqual(alerts.count(), 3)
+        self.assertEqual(alerts.count(), 2)
         self.assertEqual(self.post(draft['save_project_url']).status_code, 200)
         self.assertFalse(alerts.exists())
         page = self.client.get(reverse('notifications'))
@@ -193,7 +203,7 @@ class MaintenanceTests(TestCase):
         generate_alerts(today=date(2027, 1, 28))
         self.assertFalse(alerts.exists())
         generate_alerts(today=date(2027, 1, 29))
-        self.assertEqual(alerts.count(), 3)
+        self.assertEqual(alerts.count(), 1)
         self.assertFalse(alerts.exclude(day=date(2027, 1, 29), due_date=date(2027, 1, 28)).exists())
 
     def test_validation_and_calendar_frequencies(self):
@@ -219,7 +229,7 @@ class MaintenanceTests(TestCase):
         })
         self.assertEqual(PdfMarker.objects.get(pk=marker['id']).next_maintenance, due)
         generate_alerts()
-        for recipient in (self.owner, self.admin, self.other_admin):
+        for recipient in (self.owner,):
             alert = MaintenanceNotification.objects.get(recipient=recipient)
             self.assertEqual((alert.day, alert.due_date), (today, due))
         self.today.return_value = today + timedelta(days=7)
@@ -227,7 +237,7 @@ class MaintenanceTests(TestCase):
         self.assertContains(page, 'Mantención vencida', count=1)
         self.assertContains(page, '26-08-2026')
         self.assertContains(page, 'datetime="2026-12-03"')
-        self.assertEqual(MaintenanceNotification.objects.count(), 3)
+        self.assertEqual(MaintenanceNotification.objects.count(), 1)
 
     def test_admin_controls_category_requirement_and_buttons_enforce_it(self):
         admin_client = Client()
@@ -318,7 +328,7 @@ class MaintenanceTests(TestCase):
         self.assertEqual(from_cloud.maintenance_key, original.maintenance_key)
         self.assertEqual(from_cloud.button_creator, self.owner.username)
         generate_alerts(today=date(2026, 11, 27))
-        self.assertEqual(MaintenanceNotification.objects.count(), 3)
+        self.assertEqual(MaintenanceNotification.objects.filter(kind='alert').count(), 1)
 
         _, copy = import_project(SimpleUploadedFile('copia.planproj', content), self.creator)
         independent = copy.markers.get()
@@ -396,7 +406,7 @@ class MaintenanceTests(TestCase):
         latest = LatestMaintenance.objects.get()
         self.assertEqual((latest.title, latest.description, latest.performed_on),
                          ('Inspección terminada', '', date(2026, 11, 27)))
-        self.assertFalse(MaintenanceNotification.objects.filter(recipient=self.creator).exists())
+        self.assertEqual(MaintenanceNotification.objects.get(recipient=self.creator).kind, 'confirmed')
         self.assertEqual(self.post(old_draft['save_project_url']).status_code, 200)
         button.refresh_from_db()
         self.assertEqual(button.next_maintenance, date(2027, 1, 27))
@@ -430,6 +440,72 @@ class MaintenanceTests(TestCase):
             drive.delete.side_effect = None
             cleanup_reports()
             self.assertFalse(MaintenanceSubmission.objects.exists())
+
+    def test_explicit_roles_self_approval_history_and_inbox_revision(self):
+        primary = get_user_model().objects.create_superuser('principal')
+        UserProfile.objects.create(user=primary, rut='12345678-5', role='administrator', is_primary_administrator=True)
+        plan = self.plan('pdf')
+        admin, supervisor, unrelated, worker = [Client() for _ in range(4)]
+        for client, user in zip((admin, supervisor, unrelated, worker), (self.admin, primary, self.other_admin, self.creator)):
+            client.force_login(user)
+        options = supervisor.get(reverse('maintenance_assignment_options')).json()
+        self.assertNotIn(primary.username, {item['value'] for item in options['responsible_options']})
+        self.assertIn(primary.username, {item['value'] for item in options['supervisor_options']})
+        draft = self.post(plan['draft_url'], client=admin).json()['plan']
+        payload = self.button_payload('pdf', {'last_date': '2026-11-26', 'interval': 1, 'unit': 'days'})
+        roles = {'responsibles': [self.admin.username, self.creator.username],
+                 'supervisors': [self.admin.username, primary.username]}
+        for invalid in ({**roles, 'responsibles': [primary.username]},
+                        {**roles, 'supervisors': [*roles['supervisors'], self.other_admin.username]},
+                        {**roles, 'supervisors': [self.creator.username]}):
+            self.assertEqual(self.post(draft['markers_url'], {**payload, 'maintenance_assignment': invalid},
+                                       client=admin).status_code, 400)
+        added = self.post(draft['markers_url'], {**payload, 'maintenance_assignment': roles}, client=admin)
+        self.assertEqual(added.status_code, 201, added.content)
+        self.assertEqual(self.post(draft['save_project_url'], client=admin).status_code, 200)
+        button = PdfMarker.objects.get(plan_id=plan['id'])
+        self.assertEqual(button.maintenance_responsibles, roles['responsibles'])
+        self.assertEqual(button.maintenance_supervisors, roles['supervisors'])
+        inbox, changes = reverse('notifications'), reverse('notification_changes')
+        before = supervisor.get(inbox)
+        revision = before.context['inbox_revision']
+        self.assertNotContains(before, 'Informar mantención realizada')
+        self.assertEqual(supervisor.get(changes, {'revision': revision}).json(), {'changed': False})
+        notice = MaintenanceNotification.objects.get(recipient=self.admin)
+        self.assertTrue(MaintenanceNotification.objects.filter(recipient=self.creator, kind='reminder').exists())
+        report_text = {'title': 'Bomba probada', 'description': 'Sin fugas después del ajuste.'}
+        self.assertRedirects(admin.post(reverse('submit_maintenance', args=[notice.pk]), report_text), inbox)
+        report = MaintenanceSubmission.objects.get()
+        self.assertEqual(supervisor.get(changes, {'revision': revision}).json(), {'changed': True})
+        self.assertContains(supervisor.get(inbox), report_text['title'])
+        self.assertNotContains(unrelated.get(inbox), report_text['title'])
+        self.assertNotContains(worker.get(inbox), report_text['title'])
+        decide = reverse('decide_maintenance', args=[report.pk])
+        self.assertEqual(unrelated.post(decide, {'decision': 'accept'}).status_code, 403)
+        self.assertRedirects(admin.post(decide, {'decision': 'accept'}), inbox)
+        self.assertFalse(MaintenanceSubmission.objects.exists())
+        self.assertFalse(MaintenanceNotification.objects.filter(kind__in=('alert', 'reminder', 'retry')).exists())
+        details = admin.get(reverse('button_details', args=['pdf', button.pk])).json()
+        self.assertEqual(details['latest_maintenance'], {**report_text, 'performed_on': '2026-11-26'})
+        self.assertContains(admin.get(inbox), report_text['title'])
+
+        self.assertEqual(self.post(plan['permissions_url'], {'user_ids': [self.creator.pk]}).status_code, 200)
+        worker_draft = self.post(plan['draft_url'], client=worker).json()['plan']
+        foreign = worker_draft['markers'][0]
+        self.assertFalse(foreign['can_edit'])
+        for url in (foreign['details_url'], foreign['update_url'], foreign['delete_url'], foreign['assign_url']):
+            self.assertEqual(self.post(url, {'label': 'Ajeno'}, client=worker).status_code, 403)
+        own = self.add_button('pdf', worker_draft, client=worker, maintenance=self.schedule)
+        self.assertTrue(own['can_edit'])
+        self.assertEqual(self.post(own['details_url'], {'name': 'Mi botón'}, client=worker).status_code, 200)
+
+        admin_draft = self.post(plan['draft_url'], client=admin).json()['plan']
+        self.assertEqual(self.post(admin_draft['markers'][0]['delete_url'], client=admin).status_code, 200)
+        self.assertNotContains(admin.get(inbox), 'Botón borrado')
+        self.assertEqual(self.post(admin_draft['save_project_url'], client=admin).status_code, 200)
+        archived = supervisor.get(inbox)
+        for value in ('Botón borrado', report_text['title'], report_text['description']):
+            self.assertContains(archived, value)
 
 
 class OverdueNotificationMigrationTests(TransactionTestCase):

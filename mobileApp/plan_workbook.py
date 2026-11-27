@@ -568,13 +568,13 @@ def assign_marker(marker, user, data=None, upload=None):
         else:
             require_schedule(category, marker.next_maintenance)
             changes = {}
-        if 'next_maintenance' in changes and not marker.plan.draft_of_id:
-            from .maintenance_alerts import clear_resolved_alerts
-            clear_resolved_alerts(marker.maintenance_key, changes['next_maintenance'])
         for field, value in changes.items():
             setattr(marker, field, value)
         marker.category = category
         marker.save(update_fields=['category', *changes])
+        if changes and not marker.plan.draft_of_id:
+            from .maintenance_reports import refresh_button_inboxes
+            refresh_button_inboxes(marker)
         return None
     if data.get('action') == 'stage' and upload is not None:
         marker.refresh_from_db(from_queryset=type(marker).objects.select_for_update())

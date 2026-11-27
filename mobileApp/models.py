@@ -261,6 +261,8 @@ class MaintenanceUnit(models.TextChoices):
 class ButtonSource(models.Model):
     button_creator = models.CharField(max_length=150, blank=True)
     maintenance_key = models.UUIDField(null=True, blank=True, editable=False, db_index=True)
+    maintenance_responsibles = models.JSONField(null=True, blank=True, editable=False)
+    maintenance_supervisors = models.JSONField(null=True, blank=True, editable=False)
     last_maintenance = models.DateField(null=True, blank=True)
     maintenance_interval = models.PositiveSmallIntegerField(null=True, blank=True)
     maintenance_unit = models.CharField(max_length=6, choices=MaintenanceUnit.choices, blank=True)
@@ -387,8 +389,9 @@ class MaintenanceNotification(models.Model):
         REMINDER = 'reminder', 'Mantención próxima'
         REPLY = 'reply', 'Mensaje de administración'
         RETRY = 'retry', 'Mantención por completar'
+        CONFIRMED = 'confirmed', 'Mantención confirmada'
 
-    kind = models.CharField(max_length=8, choices=Kind.choices)
+    kind = models.CharField(max_length=9, choices=Kind.choices)
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
     responsible = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
     responsible_name = models.CharField(max_length=301)
@@ -402,6 +405,9 @@ class MaintenanceNotification(models.Model):
     reply_to = models.ForeignKey('self', null=True, on_delete=models.SET_NULL, related_name='+')
     sender_name = models.CharField(max_length=301, blank=True)
     message = models.TextField(blank=True)
+    title = models.CharField(max_length=120, blank=True)
+    description = models.TextField(blank=True)
+    button_deleted = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['-day', '-id']
@@ -419,7 +425,16 @@ class MaintenanceNotification(models.Model):
                 fields=['maintenance_key', 'recipient'],
                 condition=models.Q(kind='retry'), name='unique_maintenance_retry',
             ),
+            models.UniqueConstraint(
+                fields=['maintenance_key', 'recipient'],
+                condition=models.Q(kind='confirmed'), name='unique_maintenance_confirmation',
+            ),
         ]
+
+
+class MaintenanceInboxState(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, primary_key=True, on_delete=models.CASCADE)
+    revision = models.UUIDField(default=uuid4)
 
 
 class MaintenanceSubmission(models.Model):

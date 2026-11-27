@@ -3,45 +3,54 @@ from datetime import timedelta
 import logging
 from threading import Thread
 from time import sleep
+from uuid import uuid4
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.db import DatabaseError, close_old_connections, transaction
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from .authorization import is_administrator
-from .models import MaintenanceNotification, Motor, PdfMarker
+from .maintenance_assignments import assigned_buttons, can_report, eligible_users, roles_for_button
+from .models import LatestMaintenance, MaintenanceInboxState, MaintenanceNotification, Motor, PdfMarker
 
 
 logger = logging.getLogger(__name__)
 REMINDER_LEAD_TIME = timedelta(days=2)
+ACTION_KINDS = (MaintenanceNotification.Kind.ALERT, MaintenanceNotification.Kind.REMINDER,
+                MaintenanceNotification.Kind.RETRY)
 
 
 def account_name(user):
     return user.get_full_name() or user.get_username()
 
 
-def administrators():
-    candidates = get_user_model().objects.filter(is_active=True).filter(
-        Q(is_staff=True) | Q(is_superuser=True)
-    ).select_related('app_profile')
-    return {user.pk: user for user in candidates if is_administrator(user)}
+def touch_inboxes(user_ids):
+    if user_ids:
+        revision = uuid4()
+        MaintenanceInboxState.objects.bulk_create(
+            [MaintenanceInboxState(user_id=pk, revision=revision) for pk in sorted(set(user_ids))],
+            update_conflicts=True, update_fields=['revision'], unique_fields=['user'],
+        )
 
 
-def record_notifications(button, today, admins, responsible):
-    recipients = set(admins)
-    if responsible and responsible.is_active and not MaintenanceNotification.objects.filter(
-        kind=MaintenanceNotification.Kind.RETRY, maintenance_key=button.maintenance_key, recipient=responsible,
+def record_notifications(button, today, responsible):
+    users = {user.pk: user for user in responsible}
+    if not users:
+        return
+    if LatestMaintenance.objects.filter(pk=button.maintenance_key, performed_on=today).exists():
+        return
+    waiting = MaintenanceNotification.objects.filter(
+        kind=MaintenanceNotification.Kind.RETRY, maintenance_key=button.maintenance_key, recipient_id__in=users,
         last_maintenance=button.last_maintenance, due_date=button.next_maintenance,
-    ).exists():
-        recipients.add(responsible.pk)
+        button_deleted=False,
+    ).values_list('recipient_id', flat=True)
+    recipients = set(users) - set(waiting)
     if not recipients:
         return
     due = button.next_maintenance
     kind = MaintenanceNotification.Kind.ALERT if due < today else MaintenanceNotification.Kind.REMINDER
     notifications = MaintenanceNotification.objects.filter(
-        kind=kind, maintenance_key=button.maintenance_key, recipient_id__in=recipients,
+        kind=kind, maintenance_key=button.maintenance_key, recipient_id__in=recipients, button_deleted=False,
     ).order_by()
     refresh_ids = []
     if kind == MaintenanceNotification.Kind.REMINDER:
@@ -66,25 +75,18 @@ def record_notifications(button, today, admins, responsible):
     context = dict(
         day=today, last_maintenance=button.last_maintenance, due_date=due, plan_name=button.plan.name,
         button_name=name, category_name=button.category.name if button.category_id else '',
-        responsible=responsible, responsible_name=account_name(responsible) if responsible else button.button_creator,
     )
-    if refresh_ids:
-        notifications.filter(pk__in=refresh_ids, day__lte=today).update(**context)
+    changed = set(missing)
+    for pk, recipient in notifications.filter(pk__in=refresh_ids, day__lte=today).values_list('pk', 'recipient_id'):
+        notifications.filter(pk=pk).update(**context, responsible_id=recipient, responsible_name=account_name(users[recipient]))
+        changed.add(recipient)
     if missing:
         MaintenanceNotification.objects.bulk_create([
-            MaintenanceNotification(kind=kind, maintenance_key=button.maintenance_key, recipient_id=recipient, **context)
+            MaintenanceNotification(kind=kind, maintenance_key=button.maintenance_key, recipient_id=recipient,
+                                    responsible_id=recipient, responsible_name=account_name(users[recipient]), **context)
             for recipient in missing
         ], ignore_conflicts=True)
-
-
-def clear_resolved_alerts(maintenance_key, new_due):
-    if maintenance_key and (new_due is None or new_due >= timezone.localdate()):
-        alerts = MaintenanceNotification.objects.filter(
-            kind=MaintenanceNotification.Kind.ALERT, maintenance_key=maintenance_key,
-        )
-        # Serialize deletion with administrators who are replying to the alert.
-        ids = list(alerts.select_for_update().order_by('pk').values_list('pk', flat=True))
-        alerts.filter(pk__in=ids).delete()
+    touch_inboxes(changed)
 
 
 def current_buttons(model):
@@ -97,19 +99,21 @@ def current_buttons(model):
 
 def generate_alerts(*, today=None, recipient=None):
     today = today or timezone.localdate()
-    admins = administrators()
+    if recipient is not None and not can_report(recipient):
+        return
+    users = eligible_users() if recipient is None else [recipient]
     for model in (Motor, PdfMarker):
         pending = current_buttons(model).filter(next_maintenance__lte=today + REMINDER_LEAD_TIME)
-        if recipient is not None and recipient.pk not in admins:
-            pending = pending.filter(button_creator=recipient.get_username())
+        if recipient is not None:
+            pending = assigned_buttons(pending, recipient, responsible=True)
         pending = pending.select_related('plan', 'category')
         for pk in pending.order_by('pk').values_list('pk', flat=True).iterator(chunk_size=200):
             with transaction.atomic():
                 button = pending.select_for_update(of=('self',)).filter(pk=pk).first()
                 if button is None:
                     continue
-                creator = get_user_model().objects.filter(username=button.button_creator).first()
-                record_notifications(button, today, admins, creator)
+                responsible, _ = roles_for_button(button, users)
+                record_notifications(button, today, responsible)
 
 
 def generate_all_workspaces():

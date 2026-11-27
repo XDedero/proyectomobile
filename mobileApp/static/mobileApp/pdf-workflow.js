@@ -145,12 +145,14 @@
     function updateSelection() {
         const marker = selectedMarker();
         if (areaMarkerId !== marker?.id) closeAreaControls();
-        const canAdjust = marker?.page === page && getPermissions().can_change_pdf_plan;
+        const canEdit = marker?.can_edit === true && getPermissions().can_assign;
+        const canAdjust = canEdit && marker.page === page;
         areaToggle.hidden = !canAdjust;
         areaToggle.disabled = busy;
         byId('pdfSelectedMarker').hidden = !marker;
         if (window.projectWorkspace?.active?.kind === 'pdf') window.projectWorkspace.selection(marker ? {
-            buttonId: marker.id, name: markerName(marker), adjustArea: canAdjust ? openAreaControls : null, assign: configureMarker, remove: deleteSelectedMarker,
+            buttonId: marker.id, name: markerName(marker), adjustArea: canAdjust ? openAreaControls : null,
+            assign: canEdit ? configureMarker : null, remove: canEdit ? deleteSelectedMarker : null,
             target: { category_id: marker.category_id, name: markerName(marker), assign_url: marker.assign_url, apply(result) {
                 const index = plan.markers.findIndex((item) => item.id === result.marker.id);
                 if (index < 0) return null;
@@ -208,7 +210,7 @@
             kind: 'pdf', name: markerName(marker), edit,
             defaultName: `Botón ${plan.markers.findIndex(item => item.id === marker.id) + 1}`,
             openExcel: marker.workbook ? () => openWorkbook(marker.workbook) : null,
-            assign: getPermissions().can_assign ? configureMarker : null,
+            assign: marker.can_edit && getPermissions().can_assign ? configureMarker : null,
             onSaved(updated) {
                 if (plan !== currentPlan) return;
                 Object.assign(marker, updated);
@@ -221,14 +223,14 @@
     async function openWorkbook(workbook) {
         closeAreaControls();
         hideDialog();
-        try { await editor.open({ ...workbook, removeMarker: getPermissions().can_delete_pdf_marker ? deleteSelectedMarker : null }); }
+        try { await editor.open({ ...workbook, removeMarker: selectedMarker()?.can_edit && getPermissions().can_delete_pdf_marker ? deleteSelectedMarker : null }); }
         catch (error) { showError(error); }
     }
 
     async function configureMarker() {
         closeAreaControls();
         const marker = selectedMarker();
-        if (!marker || !getPermissions().can_assign) return;
+        if (!marker?.can_edit || !getPermissions().can_assign) return;
         if (window.planExcel) { await window.planExcel.assign('pdf', plan, marker); return; }
         focusBeforeDialog = document.activeElement;
         dialogMarkerId = marker.id;
@@ -334,7 +336,7 @@
 
     async function moveMarker(id, position) {
         const marker = plan?.markers.find((item) => item.id === Number(id));
-        if (!marker || busy || !appState.user) return;
+        if (!marker?.can_edit || busy || !appState.user) return false;
         const currentRevision = revision;
         setBusy(true);
         try {
@@ -465,7 +467,7 @@
 
     function openAreaControls() {
         const marker = selectedMarker();
-        if (!marker || marker.page !== page || busy || !getPermissions().can_change_pdf_plan) return;
+        if (!marker?.can_edit || marker.page !== page || busy || !getPermissions().can_change_pdf_plan) return;
         if (!areaPanel.hidden) { closeAreaControls(); return; }
         areaMarkerId = marker.id;
         radiusX.value = Math.round((marker.area_radius_x || .05) * 1000) / 10;
@@ -527,7 +529,7 @@
     ));
     async function deleteSelectedMarker() {
         const marker = selectedMarker();
-        if (!marker || busy || !getPermissions().can_delete_pdf_marker) return;
+        if (!marker?.can_edit || busy || !getPermissions().can_delete_pdf_marker) return;
         const currentPlan = plan;
         if (!(await window.confirmAppAction('Eliminar botón', `¿Eliminar el botón «${markerName(marker)}» del plano?`, 'Eliminar botón', { danger: true }))) return;
         if (plan !== currentPlan || selectedMarker() !== marker || busy || !(await editor.requestClose())) return;

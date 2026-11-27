@@ -97,5 +97,58 @@
         return option;
     }
 
-    window.buttonMaintenanceForm = { fields, connect, formatDate, frequency, categoryOption };
+    function assignmentFields(id) {
+        return `<div id="${id}Assignment" class="mb-3" hidden>
+          <fieldset class="border rounded p-3 mb-2">
+            <legend class="float-none w-auto px-1 fs-6">Responsables de mantención</legend>
+            <div class="overflow-auto" style="max-height: 10rem" data-role="responsibles"></div>
+          </fieldset>
+          <fieldset class="border rounded p-3">
+            <legend class="float-none w-auto px-1 fs-6">Supervisores (máximo 2)</legend>
+            <div class="overflow-auto" style="max-height: 10rem" data-role="supervisors"></div>
+          </fieldset>
+        </div>`;
+    }
+
+    function connectAssignment(id) {
+        const container = document.getElementById(id + 'Assignment');
+        const responsible = container.querySelector('[data-role="responsibles"]');
+        const supervisors = container.querySelector('[data-role="supervisors"]');
+        const selection = group => Array.from(group.querySelectorAll('input:checked'), input => input.value);
+        const enforceLimit = () => {
+            const limit = selection(supervisors).length >= 2;
+            for (const input of supervisors.querySelectorAll('input')) input.disabled = limit && !input.checked;
+        };
+        supervisors.addEventListener('change', enforceLimit);
+        function options(group, choices, selected) {
+            group.replaceChildren();
+            for (const choice of choices) {
+                const label = document.createElement('label');
+                label.className = 'd-flex align-items-center gap-2 py-1';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.className = 'form-check-input mt-0';
+                input.value = choice.value;
+                input.checked = selected.includes(choice.value);
+                label.append(input, document.createTextNode(choice.label));
+                group.append(label);
+            }
+            if (!choices.length) group.textContent = 'No hay cuentas disponibles.';
+        }
+        return {
+            set(values) {
+                container.hidden = !values;
+                if (!values) return;
+                options(responsible, values.responsible_options, values.responsibles);
+                options(supervisors, values.supervisor_options, values.supervisors);
+                enforceLimit();
+            },
+            read() {
+                if (container.hidden) return undefined;
+                return { responsibles: selection(responsible), supervisors: selection(supervisors) };
+            },
+        };
+    }
+
+    window.buttonMaintenanceForm = { fields, connect, formatDate, frequency, categoryOption, assignmentFields, connectAssignment };
 })();

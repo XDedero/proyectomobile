@@ -32,6 +32,7 @@
             </div>
             <div id="buttonDetailsMaintenanceEditor" hidden>
               ${window.buttonMaintenanceForm.fields('buttonDetails')}
+              ${window.buttonMaintenanceForm.assignmentFields('buttonDetails')}
               <button type="button" class="btn btn-outline-secondary btn-sm mb-3" id="buttonDetailsClearMaintenance">Quitar programación</button>
             </div>
             <p id="buttonDetailsMaintenanceStatus" class="alert alert-warning mb-3 py-2" role="status" hidden></p>
@@ -65,6 +66,7 @@
     const modal = bootstrap.Modal.getOrCreateInstance(dialog);
     const byId = id => document.getElementById('buttonDetails' + id);
     const maintenanceForm = window.buttonMaintenanceForm.connect('buttonDetails');
+    const assignmentForm = window.buttonMaintenanceForm.connectAssignment('buttonDetails');
     const controls = ['Edit', 'EditMaintenance', 'ClearMaintenance', 'Save', 'Cancel', 'Add', 'Assign', 'Excel'];
     let current = null;
 
@@ -170,7 +172,7 @@
         byId('Add').hidden = !editing || mode !== 'description';
         byId('Save').textContent = mode === 'description' ? 'Guardar descripción' : 'Guardar cambios';
         byId('Excel').hidden = editing;
-        byId('Assign').hidden = !options.assign || Boolean(options.openExcel) || editing;
+        byId('Assign').hidden = !options.assign || !data?.can_edit || Boolean(options.openExcel) || editing;
         renderRows(context);
         for (const id of controls) byId(id).disabled = saving;
         byId('Add').disabled = saving || (context.draft?.length || 0) >= 64;
@@ -218,6 +220,7 @@
         if (mode === 'maintenance') {
             maintenanceForm.set(current.data.maintenance);
             maintenanceForm.setRequired(current.data.maintenance_required);
+            assignmentForm.set(current.data.maintenance_assignment);
         }
         render(current);
         status('');
@@ -250,7 +253,10 @@
             if (JSON.stringify(context.draft) !== JSON.stringify(context.data.descriptions)) data.descriptions = context.draft;
         }
         if (context.mode === 'maintenance') {
-            try { data.maintenance = maintenanceForm.read(); }
+            try {
+                data.maintenance = maintenanceForm.read();
+                data.maintenance_assignment = assignmentForm.read();
+            }
             catch (error) { status(error.message, true); return; }
         }
         context.saving = true;

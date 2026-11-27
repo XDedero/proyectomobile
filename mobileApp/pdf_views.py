@@ -39,6 +39,8 @@ def json_body(request):
 
 
 def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=None):
+    from .authorization import can_edit_button_sheets
+
     if document.plan_mode == 'source':
         context = 'button-source'
         sheet_name = None
@@ -52,7 +54,8 @@ def workbook_data(document, *, sheets=True, user=None, sheet_name=None, context=
         'save_url': reverse('workbook_save', args=[document.pk]),
         'download_url': reverse('workbook_download', args=[document.pk]),
         'csv_url': reverse('workbook_csv', args=[document.pk]),
-        'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document, plans=plans)),
+        'can_edit': bool(user is not None and not snapshot and can_edit_workbook(user, document, plans=plans)
+                         and can_edit_button_sheets(user, document, [sheet_name or ''])),
         'can_export': bool(user is not None and can_export_workbook(user, plans)),
         'is_motor': bool(document.is_motor or (document.plan_mode and sheet_name and context != 'listing')),
         'is_piece': bool(context != 'listing' and (document.is_motor or document.plan_mode == 'source' or sheet_name)),
@@ -105,6 +108,7 @@ def marker_data(marker):
         'maintenance': schedule_data(marker),
         'maintenance_required': marker.maintenance_required,
         'details_url': reverse('button_details', args=['pdf', marker.pk]),
+        '_button_creator': marker.button_creator,
         'sheet_name': marker.sheet_name,
         'category_id': marker.category_id,
         'category_name': marker.category.name if marker.category_id else '',
@@ -270,6 +274,9 @@ def create_marker(request, plan_id):
                 button_color=values['button_color'], descriptions=values.get('descriptions'),
                 **data, **new_schedule(values, request.user, category))
             initialize_button(marker, request.user, origin, upload)
+            if marker.maintenance_key and not plan.draft_of_id:
+                from .maintenance_reports import refresh_button_inboxes
+                refresh_button_inboxes(marker)
     except ValidationError as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
     return JsonResponse({'marker': marker_data(marker)}, status=201)
@@ -303,10 +310,13 @@ def update_marker(request, marker_id):
 
 @require_POST
 @api_permissions()
+@transaction.atomic
 def delete_marker(request, marker_id):
     if not capabilities(request.user)['can_delete_pdf_marker']:
         return error_response('No tiene permiso para eliminar botones de este plano.', status=403)
-    marker = get_object_or_404(PdfMarker, pk=marker_id)
+    from .maintenance_reports import archive_deleted_button
+    marker = get_object_or_404(PdfMarker.objects.select_for_update(), pk=marker_id)
+    archive_deleted_button(marker)
     marker.delete()
     return JsonResponse({'deleted': True})
 
@@ -388,6 +398,8 @@ def workbook_cells(request, workbook_id):
 @require_POST
 @api_permissions()
 def workbook_save(request, workbook_id):
+    from .authorization import can_edit_button_sheets
+
     if not capabilities(request.user)['can_change_excel']:
         return error_response('No tiene permiso para modificar el contenido del Excel.', status=403)
     try:
@@ -400,7 +412,13 @@ def workbook_save(request, workbook_id):
             return error_response('Los motores guardados son registros originales. Asigne una copia a un botón para editar sus datos.', status=403)
         if document.revision != revision:
             return error_response('Otro usuario modificó este Excel. Recargue el libro antes de guardar.', status=409)
-        content, sheets = edited_document(document.content, data.get('edits', []), data.get('operations', []))
+        edits, operations = data.get('edits', []), data.get('operations', [])
+        if isinstance(edits, list) and isinstance(operations, list):
+            affected = {item['sheet'] for item in (*edits, *operations)
+                        if isinstance(item, dict) and isinstance(item.get('sheet'), str)}
+            if not can_edit_button_sheets(request.user, document, affected):
+                return error_response('Esta hoja está vinculada a un botón creado por otro usuario.', status=403)
+        content, sheets = edited_document(document.content, edits, operations)
         from .plan_workbook import MAX_WORKBOOK_BYTES
         limit = MAX_WORKBOOK_BYTES if document.plan_mode else settings.PLAN_UPLOAD_MAX_BYTES
         if len(content) > limit:
@@ -464,6 +482,8 @@ def delete_pdf_plan(request, plan_id):
     plan = get_object_or_404(PdfPlan, pk=plan_id)
     storage, name = plan.source.storage, plan.source.name
     with transaction.atomic():
+        from .maintenance_reports import archive_plan_buttons
+        archive_plan_buttons(plan, plan.markers)
         plan.delete()
         transaction.on_commit(lambda: storage.delete(name))
     return JsonResponse({'deleted': True})

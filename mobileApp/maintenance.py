@@ -48,10 +48,13 @@ def require_schedule(category, due):
 
 
 def new_schedule(data, user, category):
+    from .maintenance_assignments import assignment_changes
+
     values = clean_schedule(data.get('maintenance'))
     require_schedule(category, values['next_maintenance'])
+    assignment = assignment_changes(data, user, creating=True)
     return {**values, 'button_creator': user.get_username(),
-            'maintenance_key': uuid4() if values['next_maintenance'] else None}
+            'maintenance_key': uuid4() if values['next_maintenance'] else None, **assignment}
 
 
 def update_schedule(button, value, user, *, category):
@@ -98,6 +101,9 @@ def export_schedule(button):
         result['button_creator'] = button.button_creator
     if button.maintenance_key:
         result['maintenance_key'] = str(button.maintenance_key)
+    for field in ('maintenance_responsibles', 'maintenance_supervisors'):
+        if getattr(button, field) is not None:
+            result[field] = getattr(button, field)
     schedule = schedule_data(button)
     if schedule:
         result['maintenance'] = {name: schedule[name] for name in ('last_date', 'interval', 'unit')}
@@ -120,4 +126,15 @@ def import_schedule(item, user, *, restore):
         key = None
     if key is None and values['next_maintenance']:
         key = uuid4()
-    return {**values, 'maintenance_key': key, 'button_creator': creator}
+    assignments = {}
+    if restore:
+        for field in ('maintenance_responsibles', 'maintenance_supervisors'):
+            names = item.get(field)
+            if names is None:
+                continue
+            if (not isinstance(names, list) or (field == 'maintenance_supervisors' and len(names) > 2)
+                    or any(not isinstance(name, str) or not 1 <= len(name) <= 150 for name in names)
+                    or len(set(names)) != len(names)):
+                raise ValidationError('La asignación de mantención del botón no es válida.')
+            assignments[field] = names
+    return {**values, **assignments, 'maintenance_key': key, 'button_creator': creator}

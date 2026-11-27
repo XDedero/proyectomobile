@@ -325,8 +325,11 @@ def delete_cloud_project(request, pdf_id):
         original = PdfPlan.objects.filter(cloud_key=project.get('projectKey')).first()
         if original and (original.cloud_key.startswith('project_') or project_title(original.name).casefold() == project_title(project['name']).casefold()):
             copies.append(original)
-        removed = [plan.pk for plan in copies]
-        for plan in copies:
+        from .maintenance_reports import archive_plan_buttons
+        unique_copies = {plan.pk: plan for plan in copies}
+        removed = list(unique_copies)
+        for plan in unique_copies.values():
+            archive_plan_buttons(plan, plan.markers)
             clear_plan_files('pdf', plan)
     return JsonResponse({'deleted': True, 'local_ids': removed})
 

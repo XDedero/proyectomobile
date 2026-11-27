@@ -57,6 +57,15 @@ def can_edit_plan(user, plan):
     return owns_plan(user, plan)
 
 
+def can_edit_button(user, button):
+    return can_edit_plan(user, button.plan) and can_edit_button_creator(user, button.button_creator, button.plan)
+
+
+def can_edit_button_creator(user, creator, plan):
+    return (is_administrator(user) or application_profile(user) is None or
+            (creator == user.get_username() if creator else owns_plan(user, plan)))
+
+
 def can_access_plan(user, plan, action='can_view'):
     if not user.is_authenticated or not user.is_active:
         return False
@@ -119,6 +128,23 @@ def can_edit_workbook(user, document, *, plans=None):
     return all(can_edit_plan(user, plan) for plan in plans) if plans else document.updated_by_id == user.pk
 
 
+def can_edit_button_sheets(user, document, sheets):
+    profile = application_profile(user)
+    if is_administrator(user) or profile is None or not sheets:
+        return True
+    from .models import Motor, PdfMarker
+    for model in (PdfMarker, Motor):
+        linked = Q(source_workbook=document) | Q(workbook=document, sheet_name__in=sheets)
+        if not document.plan_mode:
+            linked |= Q(workbook=document)
+        buttons = model.objects.filter(linked).exclude(button_creator=user.get_username())
+        if buttons.exclude(button_creator='').exists():
+            return False
+        if any(not owns_plan(user, button.plan) for button in buttons.select_related('plan', 'plan__draft_of')):
+            return False
+    return True
+
+
 def can_export_workbook(user, plans):
     if not user.is_authenticated or not user.is_active:
         return False
@@ -169,7 +195,7 @@ def _target(view_name, kwargs):
         queryset = model.objects.select_related('plan')
         if model is Motor:
             queryset = queryset.defer('plan__svg')
-        return get_object_or_404(queryset, pk=kwargs[key]).plan, None
+        return get_object_or_404(queryset, pk=kwargs[key]), None
     if 'workbook_id' in kwargs:
         return None, get_object_or_404(WorkbookDocument.objects.defer('content'), pk=kwargs['workbook_id'])
     return None, None
@@ -183,6 +209,9 @@ def api_permissions(*permissions):
             if not request.user.is_authenticated or not request.user.is_active:
                 return JsonResponse({'error': 'Inicie sesión con su usuario de Django.'}, status=401)
             plan, document = _target(view.__name__, kwargs)
+            button = plan if any(key in kwargs for key in ('motor_id', 'marker_id', 'button_id')) else None
+            if button is not None:
+                plan = button.plan
             plans = workbook_plans(document) if document is not None else []
             if plan is not None and not can_access_plan(request.user, plan):
                 return JsonResponse({'error': 'No tiene acceso a este plano.'}, status=403)
@@ -198,6 +227,8 @@ def api_permissions(*permissions):
                 return JsonResponse({'error': 'Solo puede eliminar sus propios planos. Un administrador puede eliminar cualquier plano.'}, status=403)
             if mutation and plan is not None and not local_action and not can_edit_plan(request.user, plan):
                 return JsonResponse({'error': 'Su rol no permite modificar o guardar este plano.'}, status=403)
+            if mutation and button is not None and not can_edit_button_creator(request.user, button.button_creator, plan):
+                return JsonResponse({'error': 'Solo puedes editar los botones que creaste.'}, status=403)
             if mutation and document is not None and not can_edit_workbook(request.user, document, plans=plans):
                 return JsonResponse({'error': 'Solo el creador del plano o un administrador puede modificar su Excel.'}, status=403)
             if view.__name__ in ('import_pdf', 'upload_project') and not capabilities(request.user)['can_import']:
@@ -218,7 +249,7 @@ def api_permissions(*permissions):
                         type(changed_plan).objects.filter(pk=changed_plan.pk).update(draft_dirty=True)
             if response.get('Content-Type', '').startswith('application/json') and response.status_code < 300:
                 data = json.loads(response.content)
-                def attach(value):
+                def attach(value, editable=False, target_plan=None):
                     if isinstance(value, dict):
                         if 'workbook_url' in value and 'kind' in value and 'id' in value:
                             from .models import Plan, PdfPlan
@@ -226,12 +257,17 @@ def api_permissions(*permissions):
                             obj = queryset.filter(pk=value['id']).first()
                             if obj:
                                 value['permissions'] = capabilities(request.user, obj)
+                                editable = value['permissions']['can_assign']
+                                target_plan = obj
+                        if '_button_creator' in value:
+                            creator = value.pop('_button_creator')
+                            value['can_edit'] = editable and can_edit_button_creator(request.user, creator, target_plan)
                         for item in list(value.values()):
-                            attach(item)
+                            attach(item, editable, target_plan)
                     elif isinstance(value, list):
                         for item in value:
-                            attach(item)
-                attach(data)
+                            attach(item, editable, target_plan)
+                attach(data, plan is not None and can_edit_plan(request.user, plan), plan)
                 response.content = json.dumps(data, ensure_ascii=False).encode('utf-8')
             return response
         return wrapped

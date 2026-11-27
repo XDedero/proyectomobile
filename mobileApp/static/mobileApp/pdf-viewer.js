@@ -580,6 +580,7 @@ class PdfPlanViewer {
         this.pointers.set(event.pointerId, {
             x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY,
             moved: false, markerId: marker ? Number(marker.id) : null,
+            canMove: marker?.can_edit === true,
             markerStart: marker ? { page: marker.page, x: marker.x, y: marker.y } : null,
             preview: null,
         });
@@ -610,7 +611,7 @@ class PdfPlanViewer {
         pointer.y = event.clientY;
         pointer.moved ||= Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY) > 6;
         const current = [...this.pointers.values()];
-        if (current.length === 1 && this.moving && pointer.markerId !== null && !this.gesture) {
+        if (current.length === 1 && this.moving && pointer.canMove && !this.gesture) {
             if (pointer.moved) {
                 pointer.preview = this.point(event.clientX, event.clientY, true);
                 this.positionButton(this.buttons.get(pointer.markerId), pointer.preview.x, pointer.preview.y);
@@ -693,7 +694,7 @@ class PdfPlanViewer {
 
     commitMove(id, point) {
         const marker = this.markers.find((item) => Number(item.id) === Number(id));
-        if (!marker) return;
+        if (!marker?.can_edit) return;
         const original = { page: marker.page, x: marker.x, y: marker.y };
         Object.assign(marker, point);
         this.positionButton(this.buttons.get(Number(id)), point.x, point.y);

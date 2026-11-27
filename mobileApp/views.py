@@ -157,6 +157,7 @@ def motor_data(motor):
         'button_scale': motor.button_scale,
         'area_radius_x': motor.area_radius_x, 'area_radius_y': motor.area_radius_y,
         'details_url': reverse('button_details', args=['dxf', motor.pk]),
+        '_button_creator': motor.button_creator,
         'source_sheet': motor.source_sheet,
         'category_id': motor.category_id,
         'category_name': motor.category.name if motor.category_id else '',
@@ -349,6 +350,8 @@ def delete_plan(request, plan_id):
     files = [(plan.source.storage, plan.source.name)]
     files.extend((motor.excel.storage, motor.excel.name) for motor in plan.motors.all() if motor.excel)
     with transaction.atomic():
+        from .maintenance_reports import archive_plan_buttons
+        archive_plan_buttons(plan, plan.motors)
         plan.delete()
         for storage, name in files:
             transaction.on_commit(lambda storage=storage, name=name: storage.delete(name))
@@ -361,9 +364,11 @@ def delete_plan(request, plan_id):
 def delete_cad_marker(request, motor_id):
     if not capabilities(request.user)['can_delete_cad_marker']:
         return JsonResponse({'error': 'No tiene permiso para eliminar botones de este plano.'}, status=403)
-    motor = get_object_or_404(Motor, pk=motor_id)
-    legacy_file = (motor.excel.storage, motor.excel.name) if motor.excel else None
+    from .maintenance_reports import archive_deleted_button
     with transaction.atomic():
+        motor = get_object_or_404(Motor.objects.select_for_update(), pk=motor_id)
+        legacy_file = (motor.excel.storage, motor.excel.name) if motor.excel else None
+        archive_deleted_button(motor)
         motor.delete()
         if legacy_file:
             storage, name = legacy_file
@@ -437,6 +442,9 @@ def create_cad_marker(request, plan_id):
                 **new_schedule(data, request.user, category),
             )
             initialize_button(motor, request.user, origin, upload)
+            if motor.maintenance_key and not plan.draft_of_id:
+                from .maintenance_reports import refresh_button_inboxes
+                refresh_button_inboxes(motor)
     except (ValidationError, ValueError, KeyError, ZeroDivisionError, OSError, ElementTree.ParseError) as exc:
         return error_response(exc, status=409 if isinstance(exc, WorkbookConflict) else 400)
     return JsonResponse({'motor': motor_data(motor)}, status=201)
