@@ -59,7 +59,7 @@
             publicKey = decodeKey(settings.public_key);
             installedSubscription = await registration.pushManager.getSubscription();
             active = settings.registered && usesCurrentKey(installedSubscription) && Notification.permission === 'granted';
-            show(active ? 'Notificaciones activadas.' : 'Recibe los avisos aunque la app esté cerrada.');
+            show(active ? 'Notificaciones activadas.' : 'Recibe los avisos nuevos y pendientes aunque la app esté cerrada.');
         } catch {
             show('No se pudieron preparar las notificaciones. Vuelve a abrir el buzón para reintentar.', true);
         }

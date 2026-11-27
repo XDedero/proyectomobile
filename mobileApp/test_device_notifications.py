@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from requests import Response
 
-from .device_push import deliver_push_notifications, public_key
+from .device_push import _queue_pending_notifications, deliver_push_notifications, public_key
 from .maintenance_alerts import generate_alerts
 from .models import DevicePushDelivery, DevicePushSubscription, MaintenanceNotification, PdfMarker, PdfPlan
 
@@ -50,6 +50,7 @@ class DeviceNotificationTests(TestCase):
         self.assertTrue(self.worker_client.get(self.subscription).json()['registered'])
 
         self.assertRedirects(self.announce(recipients=[self.worker.pk]), self.compose)
+        _queue_pending_notifications()
         only_worker = MaintenanceNotification.objects.get()
         self.assertEqual(only_worker.recipient, self.worker)
         self.assertEqual(DevicePushDelivery.objects.get().notification, only_worker)
@@ -57,6 +58,7 @@ class DeviceNotificationTests(TestCase):
         self.assertNotContains(self.client.get(self.inbox), 'Corte eléctrico')
 
         self.assertRedirects(self.announce(all_users='on'), self.compose)
+        _queue_pending_notifications()
         self.assertSetEqual(set(MaintenanceNotification.objects.exclude(pk=only_worker.pk).values_list(
             'recipient_id', flat=True)), {self.admin.pk, self.worker.pk, self.viewer.pk})
         self.assertEqual(DevicePushDelivery.objects.count(), 2)
@@ -83,10 +85,58 @@ class DeviceNotificationTests(TestCase):
         dismiss = reverse('dismiss_notification', args=[maintenance.pk])
         self.assertNotContains(self.worker_client.get(self.inbox), dismiss)
         self.assertEqual(self.worker_client.post(dismiss, {'csrfmiddlewaretoken': token}).status_code, 403)
+        for kind in [MaintenanceNotification.Kind.REMINDER, MaintenanceNotification.Kind.RETRY]:
+            maintenance.kind = kind
+            maintenance.save(update_fields=['kind'])
+            self.assertEqual(self.worker_client.post(dismiss, {'csrfmiddlewaretoken': token}).status_code, 403)
         maintenance.kind = MaintenanceNotification.Kind.CONFIRMED
         maintenance.save(update_fields=['kind'])
         self.assertContains(self.worker_client.get(self.inbox), dismiss)
         self.assertRedirects(self.worker_client.post(dismiss, {'csrfmiddlewaretoken': token}), self.inbox)
+
+        reply = MaintenanceNotification.objects.create(kind=MaintenanceNotification.Kind.REPLY, recipient=self.worker,
+                                                       day=timezone.localdate(), message='Mensaje de Ana')
+        dismiss = reverse('dismiss_notification', args=[reply.pk])
+        self.assertContains(self.worker_client.get(self.inbox), dismiss)
+        self.assertRedirects(self.worker_client.post(dismiss, {'csrfmiddlewaretoken': token}), self.inbox)
+
+    def test_activation_sends_inbox_backlog_once_and_reactivation_only_sends_missed_items(self):
+        self.announce(all_users='on')
+        old_notice = MaintenanceNotification.objects.get(recipient=self.worker)
+        old_notice.push_state = MaintenanceNotification.PushState.QUEUED
+        old_notice.save(update_fields=['push_state'])
+        self.announce(recipients=[self.worker.pk])
+        pending_notice = MaintenanceNotification.objects.filter(recipient=self.worker).first()
+        self.announce(recipients=[self.worker.pk])
+        removed_notice = MaintenanceNotification.objects.filter(recipient=self.worker).first()
+        token = self.worker_client.cookies['csrftoken'].value
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            send.assert_not_called()
+        self.assertContains(self.worker_client.get(self.inbox), 'Corte eléctrico', count=3)
+        self.worker_client.post(reverse('dismiss_notification', args=[removed_notice.pk]), {'csrfmiddlewaretoken': token})
+
+        with patch('mobileApp.notification_views.push_worker_wakeup.set') as wake, \
+                self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.enable(self.worker_client).status_code, 204)
+        wake.assert_called_once_with()
+
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            self.assertEqual([call.args[0].notification_id for call in send.call_args_list], [old_notice.pk, pending_notice.pk])
+        self.assertEqual(MaintenanceNotification.objects.filter(push_state=MaintenanceNotification.PushState.SENT).count(), 2)
+
+        self.assertEqual(self.worker_client.delete(self.subscription, HTTP_X_CSRFTOKEN=token).status_code, 204)
+        self.announce(recipients=[self.worker.pk])
+        latest = MaintenanceNotification.objects.filter(recipient=self.worker).first()
+        self.assertEqual(self.enable(self.worker_client, suffix='re-enabled-device').status_code, 204)
+        self.assertEqual(self.enable(self.worker_client, suffix='re-enabled-device').status_code, 204)
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            deliver_push_notifications()
+            self.assertEqual([call.args[0].notification_id for call in send.call_args_list], [latest.pk])
+        self.assertEqual(MaintenanceNotification.objects.get(recipient=self.viewer).push_state,
+                         MaintenanceNotification.PushState.PENDING)
 
     def test_web_push_encryption_transient_retry_and_logged_out_device(self):
         self.assertEqual(self.enable(self.worker_client, host='fcm.googleapis.com.example.org').status_code, 400)
@@ -130,12 +180,16 @@ class DeviceNotificationTests(TestCase):
             maintenance_responsibles=[self.worker.username], maintenance_supervisors=[self.admin.username],
         )
         generate_alerts(today=today)
-        self.assertEqual(DevicePushDelivery.objects.get().notification.kind, MaintenanceNotification.Kind.REMINDER)
-        DevicePushDelivery.objects.all().delete()
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            self.assertEqual(send.call_args.args[0].notification.kind, MaintenanceNotification.Kind.REMINDER)
 
         generate_alerts(today=today + timedelta(days=1))
-        self.assertEqual(DevicePushDelivery.objects.get().notification.kind, MaintenanceNotification.Kind.ALERT)
-        DevicePushDelivery.objects.all().delete()
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            self.assertEqual(send.call_args.args[0].notification.kind, MaintenanceNotification.Kind.ALERT)
 
         generate_alerts(today=today + timedelta(days=2))
-        self.assertFalse(DevicePushDelivery.objects.exists())
+        with patch('mobileApp.device_push._send') as send:
+            deliver_push_notifications()
+            send.assert_not_called()

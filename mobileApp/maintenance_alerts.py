@@ -2,23 +2,22 @@
 from datetime import timedelta
 import logging
 from threading import Thread
-from time import monotonic, sleep
+from time import monotonic
 from uuid import uuid4
 
 from django.conf import settings
 from django.db import DatabaseError, close_old_connections, transaction
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from .device_push import deliver_push_notifications, queue_notifications
+from .device_push import deliver_push_notifications, push_worker_wakeup, reset_push
 from .maintenance_assignments import assigned_buttons, can_report, eligible_users, roles_for_button
 from .models import LatestMaintenance, MaintenanceInboxState, MaintenanceNotification, Motor, PdfMarker
 
 
 logger = logging.getLogger(__name__)
 REMINDER_LEAD_TIME = timedelta(days=2)
-ACTION_KINDS = (MaintenanceNotification.Kind.ALERT, MaintenanceNotification.Kind.REMINDER,
-                MaintenanceNotification.Kind.RETRY)
+ACTION_KINDS = MaintenanceNotification.ACTION_KINDS
 
 
 def account_name(user):
@@ -91,11 +90,8 @@ def record_notifications(button, today, responsible):
                                     responsible_id=recipient, responsible_name=account_name(users[recipient]), **context)
             for recipient in missing
         ], ignore_conflicts=True)
-    if missing or rescheduled_ids:
-        queue_notifications(notifications.filter(
-            Q(recipient_id__in=missing) | Q(pk__in=rescheduled_ids),
-            last_maintenance=button.last_maintenance, due_date=due,
-        ))
+    if rescheduled_ids:
+        reset_push(notifications.filter(pk__in=rescheduled_ids))
     touch_inboxes(changed)
 
 
@@ -171,6 +167,7 @@ def generate_all_workspaces(*, check_maintenance=True):
 def watch_for_maintenance_notifications():
     next_maintenance = 0
     while True:
+        push_worker_wakeup.clear()
         close_old_connections()
         try:
             now = monotonic()
@@ -182,7 +179,7 @@ def watch_for_maintenance_notifications():
             logger.exception('No se pudieron generar las alertas de mantención.')
         finally:
             close_old_connections()
-        sleep(30)
+        push_worker_wakeup.wait(30)
 
 
 def start_maintenance_worker():

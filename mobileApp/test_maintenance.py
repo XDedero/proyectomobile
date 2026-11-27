@@ -506,6 +506,12 @@ class MaintenanceTests(TestCase):
         archived = supervisor.get(inbox)
         for value in ('Botón borrado', report_text['title'], report_text['description']):
             self.assertContains(archived, value)
+        archive_item = archived.context['page'].object_list[0]
+        dismiss = reverse('dismiss_notification', args=[archive_item.pk])
+        self.assertContains(archived, dismiss)
+        self.assertRedirects(supervisor.post(dismiss), inbox)
+        self.assertNotContains(supervisor.get(inbox), 'Botón borrado')
+        self.assertContains(admin.get(inbox), 'Botón borrado')
 
 
 class OverdueNotificationMigrationTests(TransactionTestCase):

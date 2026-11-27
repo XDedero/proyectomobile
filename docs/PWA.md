@@ -105,11 +105,13 @@ compatible. Tras cerrar sesión o al caducar, el usuario puede volver a activarl
 
 En **Administración → Crear notificación**, el administrador puede elegir usuarios activos de
 su empresa o enviar a todos. Cada destinatario recibe el aviso en su buzón y en sus dispositivos
-suscritos. La X retira el aviso general o la confirmación del buzón de ese destinatario.
-Los recordatorios y las alertas de mantención pendientes se resuelven mediante el flujo de revisión.
+suscritos. Al activar las notificaciones, recibe también los avisos que siguen en su buzón y
+aún no se han enviado a un dispositivo. La X retira los avisos del buzón de ese destinatario,
+incluidos «Botón borrado», mensajes y confirmaciones. Las mantenciones pendientes se resuelven
+mediante el flujo de revisión.
 
 Gunicorn usa el proceso de mantención para enviar Web Push. El proceso revisa la cola cada
-30 segundos y conserva la revisión de vencimientos cada cinco minutos. Render instala la
+30 segundos o al activarse un dispositivo, y conserva la revisión de vencimientos cada cinco minutos. Render instala la
 dependencia desde `requirements.txt`; la identidad VAPID se deriva de la clave secreta de Django.
 Si se cambia esa clave, los usuarios deben volver a activar las notificaciones. Para probar,
 envía un aviso a tu propia cuenta y cierra la ventana de Reloncaví antes de que llegue.

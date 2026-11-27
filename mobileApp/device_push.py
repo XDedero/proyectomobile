@@ -7,13 +7,15 @@ from contextlib import nullcontext
 from datetime import timedelta
 from functools import lru_cache
 from hashlib import sha256
+from threading import Event
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from django.conf import settings
 from django.contrib.sessions.models import Session
-from django.db.models import Q
+from django.db import connection, transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 from py_vapid import Vapid
@@ -26,6 +28,8 @@ from .models import DevicePushDelivery, DevicePushSubscription, MaintenanceNotif
 logger = logging.getLogger(__name__)
 DELIVERY_LIFETIME = timedelta(days=1)
 RETRY_DELAY = timedelta(minutes=5)
+PUSH_BATCH_SIZE = 40
+push_worker_wakeup = Event()
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 PUSH_HOSTS = ('fcm.googleapis.com', 'push.services.mozilla.com', 'push.apple.com',
               'notify.windows.com', 'wns.windows.com')
@@ -75,20 +79,34 @@ def validate_subscription(data):
     return {'endpoint': endpoint, 'public_key': p256dh, 'auth_secret': auth}
 
 
-def queue_notifications(items):
+def reset_push(notifications):
+    notifications.update(push_state=MaintenanceNotification.PushState.PENDING)
+    DevicePushDelivery.objects.filter(notification__in=notifications).delete()
+
+
+@transaction.atomic
+def _queue_pending_notifications():
+    notices = MaintenanceNotification.objects.filter(push_state=MaintenanceNotification.PushState.PENDING)
+    subscriptions = DevicePushSubscription.objects.filter(recipient_id=OuterRef('recipient_id'))
+    notices = notices.filter(Exists(subscriptions), MaintenanceNotification.inbox_visibility())
+    batch = notices.order_by('day', 'pk').select_for_update(skip_locked=connection.features.has_select_for_update_skip_locked)
     by_recipient = {}
-    for item in items:
-        by_recipient.setdefault(item.recipient_id, []).append(item.pk)
+    for notification_id, recipient_id in batch.values_list('pk', 'recipient_id')[:PUSH_BATCH_SIZE]:
+        by_recipient.setdefault(recipient_id, []).append(notification_id)
     if not by_recipient:
         return
     now = timezone.now()
-    subscriptions = DevicePushSubscription.objects.filter(recipient_id__in=by_recipient)
-    DevicePushDelivery.objects.bulk_create([
+    subscriptions = DevicePushSubscription.objects.filter(recipient_id__in=by_recipient).values_list('pk', 'recipient_id')
+    deliveries = [
         DevicePushDelivery(notification_id=item_id, subscription_id=subscription_id,
                            available_at=now, expires_at=now + DELIVERY_LIFETIME)
-        for subscription_id, recipient_id in subscriptions.values_list('pk', 'recipient_id')
+        for subscription_id, recipient_id in subscriptions
         for item_id in by_recipient[recipient_id]
-    ], ignore_conflicts=True, batch_size=500)
+    ]
+    DevicePushDelivery.objects.bulk_create(deliveries, ignore_conflicts=True, batch_size=500)
+    MaintenanceNotification.objects.filter(pk__in={delivery.notification_id for delivery in deliveries}).update(
+        push_state=MaintenanceNotification.PushState.QUEUED,
+    )
 
 
 class _PushSession(HttpSession):
@@ -100,9 +118,12 @@ def _send(delivery, ttl, schema):
     item, subscription = delivery.notification, delivery.subscription
     host = _endpoint_host(subscription.endpoint)
     topic = sha256(f'{schema}:{item.pk}'.encode()).hexdigest()[:32]
+    body = item.button_name
+    if not item.button_deleted:
+        body = item.message or (f'{item.button_name} · Vence el {item.due_date:%d-%m-%Y}' if item.due_date else body)
     payload = {
-        'title': item.title or item.get_kind_display(),
-        'body': (item.message or f'{item.button_name} · Vence el {item.due_date:%d-%m-%Y}')[:240],
+        'title': 'Botón borrado' if item.button_deleted else item.title or item.get_kind_display(),
+        'body': body[:240],
         'tag': topic,
     }
     headers = {'Topic': topic, 'Urgency': 'normal'}
@@ -128,10 +149,10 @@ def _active_session_keys(keys, schema):
 
 
 def deliver_push_notifications(*, schema=None):
-    now = timezone.now()
-    DevicePushDelivery.objects.filter(Q(expires_at__lte=now) | Q(notification__button_deleted=True)).delete()
-    pending = DevicePushDelivery.objects.filter(available_at__lte=now).order_by('available_at', 'pk')
-    batch = list(pending.select_related('notification', 'subscription')[:40])
+    DevicePushDelivery.objects.filter(expires_at__lte=timezone.now()).delete()
+    _queue_pending_notifications()
+    pending = DevicePushDelivery.objects.filter(available_at__lte=timezone.now()).order_by('available_at', 'pk')
+    batch = list(pending.select_related('notification', 'subscription')[:PUSH_BATCH_SIZE])
     if not batch:
         return
     active = _active_session_keys({row.subscription.session_key for row in batch}, schema)
@@ -161,4 +182,13 @@ def deliver_push_notifications(*, schema=None):
             continue
         except ValueError:
             logger.warning('Invalid Web Push data for delivery %s.', delivery.pk)
+        else:
+            with transaction.atomic():
+                notice = MaintenanceNotification.objects.select_for_update().filter(pk=delivery.notification_id).first()
+                if notice is not None and delivery.delete()[0]:
+                    notice.push_state = MaintenanceNotification.PushState.SENT
+                    notice.save(update_fields=['push_state'])
+            continue
         delivery.delete()
+    if len(batch) == PUSH_BATCH_SIZE:
+        push_worker_wakeup.set()

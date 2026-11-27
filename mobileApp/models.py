@@ -392,6 +392,13 @@ class MaintenanceNotification(models.Model):
         RETRY = 'retry', 'Mantención por completar'
         CONFIRMED = 'confirmed', 'Mantención confirmada'
 
+    class PushState(models.TextChoices):
+        PENDING = 'pending'
+        QUEUED = 'queued'
+        SENT = 'sent'
+
+    ACTION_KINDS = (Kind.ALERT, Kind.REMINDER, Kind.RETRY)
+
     kind = models.CharField(max_length=9, choices=Kind.choices)
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
     responsible = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
@@ -409,14 +416,24 @@ class MaintenanceNotification(models.Model):
     title = models.CharField(max_length=120, blank=True)
     description = models.TextField(blank=True)
     button_deleted = models.BooleanField(default=False)
+    push_state = models.CharField(max_length=7, choices=PushState.choices, default=PushState.PENDING)
 
     @property
     def can_dismiss(self):
-        return self.kind == self.Kind.GENERAL or (self.kind == self.Kind.CONFIRMED and not self.button_deleted)
+        return self.button_deleted or self.kind not in self.ACTION_KINDS
+
+    @classmethod
+    def inbox_visibility(cls):
+        return models.Q(button_deleted=True) | ~models.Q(kind__in=cls.ACTION_KINDS) | models.Q(
+            responsible_id=models.F('recipient_id'),
+        )
 
     class Meta:
         ordering = ['-day', '-id']
-        indexes = [models.Index(fields=['recipient', '-day', '-id'], name='maintenance_inbox_order')]
+        indexes = [
+            models.Index(fields=['recipient', '-day', '-id'], name='maintenance_inbox_order'),
+            models.Index(fields=['push_state', 'day', 'id'], name='notification_push_order'),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=['maintenance_key', 'recipient'],

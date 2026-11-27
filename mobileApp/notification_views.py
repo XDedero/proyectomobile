@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from .authorization import is_administrator
 from .cloud_projects import CloudUnavailable
 from .company_brand import brand_context
-from .device_push import public_key, queue_notifications, validate_subscription
+from .device_push import public_key, push_worker_wakeup, validate_subscription
 from .maintenance_alerts import account_name, touch_inboxes
 from .models import CompanyAccount, CompanyAdminSetup, DevicePushSubscription, MaintenanceNotification
 from .pwa import asset_version
@@ -89,7 +89,6 @@ def compose_announcement(request):
                                             title=form.cleaned_data['title'], message=form.cleaned_data['message'])
                     for recipient_id in recipient_ids
                 ], batch_size=500)
-                queue_notifications(items)
                 touch_inboxes(recipient_ids)
             count = len(items)
             messages.success(request, 'Notificación enviada a 1 usuario.' if count == 1
@@ -136,10 +135,14 @@ def push_subscription(request):
         return JsonResponse({'error': 'El navegador envió una suscripción no compatible.'}, status=400)
     try:
         with transaction.atomic():
-            existing = subscriptions.select_for_update().first()
+            existing = subscriptions.select_for_update(no_key=True).first()
             if existing is None or any(getattr(existing, key) != value for key, value in data.items()):
+                MaintenanceNotification.objects.filter(recipient=request.user).exclude(
+                    push_state=MaintenanceNotification.PushState.SENT,
+                ).update(push_state=MaintenanceNotification.PushState.PENDING)
                 subscriptions.delete()
                 DevicePushSubscription.objects.create(recipient=request.user, session_key=session_key, **data)
+                transaction.on_commit(push_worker_wakeup.set)
     except IntegrityError:
         return JsonResponse({'error': 'Vuelve a activar las notificaciones en este dispositivo.'}, status=409)
     return HttpResponse(status=204)
