@@ -6,12 +6,16 @@ from django.core.exceptions import ValidationError
 from django.db.models import BooleanField, ExpressionWrapper, Q
 
 from django.http import Http404, HttpResponse
+from django.templatetags.static import static
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_safe
 from PIL import Image
 
 from .models import CompanyBrand, RELONCAVI_COMPANY_ID
+
+
+PRODUCT_NAME = 'planimetry cl'
 
 
 @lru_cache(maxsize=64)
@@ -56,6 +60,17 @@ def palette(color):
     }
 
 
+def product_brand(asset_version):
+    return {
+        'company_name': PRODUCT_NAME,
+        'company_identity': '',
+        'company_brand_version': str(asset_version),
+        'company_logo': f"{static('mobileApp/img/pwa/icon-512.png')}?v={asset_version}",
+        'company_theme': palette('#0563b3'),
+        'is_product_brand': True,
+    }
+
+
 def brand_context(company=None):
     company_id = company.pk if company is not None else RELONCAVI_COMPANY_ID
     brand = (CompanyBrand.objects.filter(company_id=company_id)
@@ -63,7 +78,7 @@ def brand_context(company=None):
              .annotate(has_logo=ExpressionWrapper(~Q(logo_png=b''), output_field=BooleanField())).first())
     if not brand:
         return {'company_identity': str(company_id) if company_id != RELONCAVI_COMPANY_ID else '',
-                'company_brand_version': '0', **({'company_name': company.name} if company else {})}
+                'company_brand_version': '0', 'company_name': company.name if company else 'Reloncaví'}
     tones = palette(brand.base_color) if re.fullmatch(r'#[0-9a-fA-F]{6}', brand.base_color) else None
     return {
         'company_name': brand.company.name,

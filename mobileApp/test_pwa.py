@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from PIL import Image, ImageChops, ImageStat
 
@@ -19,6 +20,8 @@ class PwaResourcesTests(TestCase):
         self.assertEqual(response['Content-Type'], 'application/manifest+json')
         manifest = response.json()
         self.assertEqual(manifest['display'], 'standalone')
+        self.assertEqual((manifest['name'], manifest['short_name']), ('planimetry cl', 'planimetry cl'))
+        self.assertEqual(manifest['id'], '/')
         self.assertEqual(manifest['scope'], '/')
         self.assertEqual(manifest['start_url'], '/')
         root = Path(__file__).parent / 'static' / 'mobileApp' / 'img' / 'pwa'
@@ -50,15 +53,26 @@ class PwaResourcesTests(TestCase):
         self.assertContains(response, "url.pathname.startsWith('/static/mobileApp/')")
 
     def test_installation_icons_are_independent_of_the_company_logo(self):
-        default_icons = self.client.get('/manifest.webmanifest').json()['icons']
+        manifest = self.client.get('/manifest.webmanifest').json()
         logo = BytesIO()
         Image.new('RGBA', (40, 20), 'red').save(logo, format='PNG')
         CompanyBrand.objects.create(company_id=RELONCAVI_COMPANY_ID, base_color='#fedc00', logo_png=logo.getvalue())
-        self.assertEqual(self.client.get('/manifest.webmanifest').json()['icons'], default_icons)
-        shell = self.client.get('/')
-        self.assertContains(shell, 'href="/static/mobileApp/img/pwa/apple-touch-icon.png?')
-        self.assertContains(shell, 'src="/marca/logo.png?v=1"')
+        guest = self.client.get('/')
+        self.assertContains(guest, 'name="apple-mobile-web-app-title" content="planimetry cl"')
+        self.assertContains(guest, 'href="/static/mobileApp/img/pwa/apple-touch-icon.png?')
+        self.assertContains(guest, 'data-product-brand')
+        self.assertNotContains(guest, '/marca/logo.png')
+        self.assertTrue(self.client.get('/api/auth/session/').json()['appearance']['is_product_brand'])
+
+        self.client.force_login(get_user_model().objects.create_user(username='instalacion'))
+        signed_in = self.client.get('/')
+        self.assertContains(signed_in, 'name="apple-mobile-web-app-title" content="planimetry cl"')
+        self.assertContains(signed_in, 'src="/marca/logo.png?v=1"')
+        self.assertEqual(self.client.get('/manifest.webmanifest').json(), manifest)
         self.assertEqual(self.client.get('/marca/logo.png').content, logo.getvalue())
+        logged_out = self.client.post('/api/auth/logout/').json()
+        self.assertIsNone(logged_out['user'])
+        self.assertTrue(logged_out['appearance']['is_product_brand'])
 
     def test_shell_declares_installation_resources(self):
         response = self.client.get('/')

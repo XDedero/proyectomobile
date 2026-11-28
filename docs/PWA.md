@@ -1,4 +1,4 @@
-# Reloncaví como PWA en iPhone
+# planimetry cl como PWA en iPhone
 
 La app incorpora manifiesto, iconos PNG opacos, modo `standalone`, guía de instalación,
 service worker en la raíz, caché de la interfaz, aviso de conexión, actualización manual
@@ -69,12 +69,14 @@ móviles; no sustituyen una validación en Safari/iPhone físico.
 
 ## Icono
 
+La instalación se identifica como `planimetry cl` durante toda la sesión.
 El icono de la pantalla de inicio proviene de `logo_app.jpeg`. El original y sus
 versiones PNG para iOS (180 px) y el manifiesto (192 y 512 px) están en
 `mobileApp/static/mobileApp/img/pwa/`. La variante `icon-512-maskable.png` deja
-margen para las formas que aplica Android. El logo de empresa se muestra dentro de
-la interfaz. Un acceso directo existente puede requerir volver a instalar la app
-para actualizar su icono.
+margen para las formas que aplica Android. Antes de entrar se muestra la marca
+general. Al iniciar sesión se aplican el nombre, el logo y los colores de la
+empresa. Un acceso directo existente puede conservar el icono anterior hasta que
+el navegador actualice su instalación.
 
 ## Validación
 

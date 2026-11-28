@@ -69,6 +69,7 @@
             ? 'La sesión está iniciada, pero no se pudo cargar el visor de planos. Recargue la página para volver a cargarlo.'
             : '';
         if (!user) {
+            window.companyAppearance.reset();
             modalSavedPlans.hide();
             document.getElementById('savedPlansContainer').replaceChildren();
             loginForm.reset();
@@ -106,7 +107,7 @@
         document.documentElement.classList.add('app-identity-updating');
         try {
             if (changingUser) applyUser(null);
-            window.companyAppearance.apply(appearance);
+            if (result.user) window.companyAppearance.apply(appearance);
             if (revision === authRevision) applyUser(result.user);
         } catch (error) {
             if (revision === authRevision) applyUser(null);

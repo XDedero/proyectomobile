@@ -6,9 +6,9 @@ const INBOX = "{% url 'notifications' %}";
 self.addEventListener('push', event => {
     let alert;
     try { alert = event.data?.json(); } catch { alert = null; }
-    event.waitUntil(self.registration.showNotification(alert?.title || 'Reloncaví', {
+    event.waitUntil(self.registration.showNotification(alert?.title || 'planimetry cl', {
         body: alert?.body || 'Tienes un aviso nuevo en el buzón.',
-        icon: '/static/mobileApp/img/pwa/icon-192.png',
+        icon: '/static/mobileApp/img/pwa/icon-192.png?v={{ asset_version }}',
         tag: alert?.tag,
     }));
 });

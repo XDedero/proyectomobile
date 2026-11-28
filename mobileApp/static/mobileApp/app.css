@@ -54,10 +54,12 @@ html, body {
     align-items: center;
     justify-content: center;
     gap: 12px;
-    color: var(--primary-accent);
+    color: var(--product-loading-ink);
+    background-color: var(--product-loading-background);
     font-weight: 600;
 }
 .app-loading[hidden] { display: none; }
+.app-loading img { border-radius: 14px; }
 
 /* Vistas de la aplicación */
 .app-view {
@@ -98,6 +100,9 @@ html, body {
 .company-brand-badge { overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .company-logo-window { position: relative; display: block; flex: none; overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .company-logo-window > img { position: absolute; top: -9px; left: 50%; display: block; width: 100px; max-width: none; height: 100px; object-fit: contain; transform: translateX(-50%); }
+.company-logo-window > img[hidden] { display: none; }
+.company-logo-window > img.brand-logo-full,
+.company-logo-login > img { inset: 0; width: 100%; height: 100%; transform: none; }
 .company-logo-login { width: 60px; height: 60px; border: 0; border-radius: 0; box-shadow: none; }
 .company-logo-header { width: 42px; height: 42px; }
 .company-logo-header > img { top: -12px; }

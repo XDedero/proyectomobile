@@ -5,14 +5,14 @@
     let installPrompt=null,registration=null,acceptingUpdate=false;
     const launch=document.createElement('button');
     launch.id='pwaOpen';launch.type='button';launch.className='pwa-launch';launch.textContent='Instalar app';
-    launch.setAttribute('aria-label','Instalación y conexión de Reloncaví');
+    launch.setAttribute('aria-label','Instalación y conexión de planimetry cl');
     document.querySelector('.app-shell').prepend(launch);
     const panel=document.createElement('dialog');panel.className='pwa-panel';panel.id='pwaPanel';
     panel.setAttribute('aria-labelledby','pwaTitle');
-    panel.innerHTML=`<div class="pwa-panel-heading"><img alt="" width="48" height="48"><h2 id="pwaTitle">Reloncaví en tu dispositivo</h2><button type="button" class="pwa-close" aria-label="Cerrar">×</button></div>
+    panel.innerHTML=`<div class="pwa-panel-heading"><img alt="" width="48" height="48"><h2 id="pwaTitle">planimetry cl en tu dispositivo</h2><button type="button" class="pwa-close" aria-label="Cerrar">×</button></div>
       <p id="pwaConnection" role="status"></p>
       <div id="pwaInstallHelp"><p>Instala la app para abrir tus planos desde la pantalla de inicio.</p><ol><li>Abre esta dirección en Safari.</li><li>Toca Compartir y luego <strong>Agregar a pantalla de inicio</strong>.</li><li>Activa <strong>Abrir como app</strong> si aparece y toca Agregar.</li></ol></div>
-      <button type="button" id="pwaInstall" class="btn btn-primary" hidden>Instalar Reloncaví</button>
+      <button type="button" id="pwaInstall" class="btn btn-primary" hidden>Instalar planimetry cl</button>
       <hr><h3>Trabajo sin conexión</h3><p>Al abrir un plano guardado, la app conserva una copia en este dispositivo. Puedes quitarla en «Planos guardados». Abre las hojas de Excel que vayas a consultar antes de perder la conexión.</p>
       <p>Sin señal puedes consultar las copias y guardar cambios de sectores y celdas de Excel como pendientes. La sincronización se realiza al recuperar conexión con la app abierta. Importar, mover botones, cambiar la estructura del Excel y guardar en la nube requieren conexión.</p>
       <p id="pwaPending"></p><div class="pwa-actions"><button type="button" id="pwaSync" class="btn btn-primary">Sincronizar pendientes</button><button type="button" id="pwaExport" class="btn btn-outline-secondary">Exportar borradores</button><button type="button" id="pwaDiscard" class="btn btn-outline-danger">Descartar borradores</button></div>
@@ -59,7 +59,7 @@
     $('pwaExport').onclick=async()=>{
         const text=await window.relOffline.exportDrafts(),file=new File([text],'reloncavi-borradores.json',{type:'application/json'});
         if(navigator.canShare?.({files:[file]})) {
-            try {await navigator.share({files:[file],title:'Borradores Reloncaví'});} catch(error){if(error.name!=='AbortError') message(error.message);}
+            try {await navigator.share({files:[file],title:'Borradores de planimetry cl'});} catch(error){if(error.name!=='AbortError') message(error.message);}
         } else {
             const url=URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=file.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
         }

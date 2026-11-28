@@ -30,11 +30,14 @@ def index(request):
     # A fresh page must not load cached scripts from an older interface whose
     # controls differ from those expected by the current drawing workflows.
     from .pwa import asset_version
-    from .company_brand import brand_context
+    from .company_brand import brand_context, product_brand
     from .tenant_runtime import workspace
+    version = asset_version()
+    product = product_brand(version)
     company = workspace.get()
-    brand = company.brand if company else brand_context()
-    return render(request, 'mobileApp/index.html', {'asset_version': asset_version(), **brand})
+    user = getattr(request, 'user', None)
+    brand = (company.brand if company else brand_context()) if user and user.is_authenticated and user.is_active else product
+    return render(request, 'mobileApp/index.html', {'asset_version': version, 'product_appearance': product, **brand})
 
 
 def session_data(request):
@@ -42,10 +45,12 @@ def session_data(request):
     from .accounts import application_role
     from .company_access import current_account
     from .tenant_runtime import offline_user_id, workspace
-    from .company_brand import brand_context
+    from .company_brand import brand_context, product_brand
+    from .pwa import asset_version
     company = workspace.get()
-    appearance = company.brand if company else brand_context()
-    profile = getattr(user, 'app_profile', None) if user.is_authenticated else None
+    signed_in = user.is_authenticated and user.is_active
+    appearance = (company.brand if company else brand_context()) if signed_in else product_brand(asset_version())
+    profile = getattr(user, 'app_profile', None) if signed_in else None
     return {
         'user': {
             'id': offline_user_id(request), 'username': user.get_username(),
@@ -56,7 +61,7 @@ def session_data(request):
             'primary_administrator': bool(profile and profile.is_primary_administrator),
             'rut': profile.rut if profile else '',
             'permissions': capabilities(user),
-        } if user.is_authenticated and user.is_active else None,
+        } if signed_in else None,
         'csrf_token': get_token(request),
         'appearance': appearance,
         'company_url': reverse('company_home') if current_account(request) else None,

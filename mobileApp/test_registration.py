@@ -174,12 +174,19 @@ class AccountManagementTests(TestCase):
         from .tenant_runtime import Workspace, workspace
 
         default = self.client.get(reverse('index'))
-        self.assertNotContains(default, 'data-company-themed')
+        self.assertContains(default, 'data-product-brand')
+        self.assertContains(default, '<title>planimetry cl</title>')
         CompanyBrand.objects.update_or_create(company_id=RELONCAVI_COMPANY_ID, defaults={'base_color': '#2368a7'})
         company = Company.objects.create(name='Taller Sur', slug='taller-sur')
         CompanyBrand.objects.create(company=company, base_color='#f97316')
+        anonymous = self.client.get(reverse('index'))
+        self.assertContains(anonymous, 'data-product-brand')
+        self.assertNotContains(anonymous, 'data-plan-button-color="#2368a7"')
+
+        self.client.force_login(self.admin)
         legacy = self.client.get(reverse('index'))
         self.assertContains(legacy, 'data-company-themed')
+        self.assertNotContains(legacy, 'data-product-brand')
         self.assertContains(legacy, 'data-plan-button-color="#2368a7"')
         self.assertContains(legacy, 'data-company-id=""')
 
@@ -192,10 +199,9 @@ class AccountManagementTests(TestCase):
         primary = brand['company_theme']['primary']
         self.assertContains(response, 'company-theme.css')
         self.assertContains(response, f'data-plan-button-color="{primary}"')
-        self.assertContains(response, 'Taller Sur APP')
+        self.assertContains(response, '<title>Taller Sur</title>')
         self.assertContains(response, f'data-company-id="{company.pk}"')
 
-        self.client.force_login(self.admin)
         token = workspace.set(Workspace('', str(company.pk), brand, {}))
         try:
             data = self.client.get(reverse('auth_session')).json()

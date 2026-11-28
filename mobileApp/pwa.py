@@ -36,20 +36,16 @@ def asset_version():
 @require_GET
 @never_cache
 def manifest(request):
-    from .company_brand import brand_context
-    from .company_access import current_account
+    from .company_brand import PRODUCT_NAME, product_brand
 
-    account = current_account(request)
-    brand = brand_context(account.company if account else None)
-    name = brand.get('company_name', 'Reloncaví')
-    branding = brand.get('company_theme') or {}
     version = asset_version()
+    branding = product_brand(version)['company_theme']
     return JsonResponse({
-        'id': reverse('index'), 'name': f'{name} APP', 'short_name': name,
-        'description': f'Planos, sectores y fichas de mantenimiento de {name}.',
+        'id': reverse('index'), 'name': PRODUCT_NAME, 'short_name': PRODUCT_NAME,
+        'description': 'Planos, sectores y fichas de mantenimiento.',
         'lang': 'es-CL', 'start_url': reverse('index'), 'scope': reverse('index'),
-        'display': 'standalone', 'background_color': branding.get('background', '#ffffff'),
-        'theme_color': branding.get('header', '#eaf4ff'),
+        'display': 'standalone', 'background_color': branding['background'],
+        'theme_color': branding['header'],
         'icons': [
             {'src': f"{static(f'mobileApp/img/pwa/{filename}.png')}?v={version}", 'sizes': f'{size}x{size}',
              'type': 'image/png', 'purpose': purpose}
